@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 )
@@ -34,7 +35,15 @@ type yahooChartResp struct {
 	} `json:"chart"`
 }
 
-// FetchCrossAssetData 拉取黄金 (Binance PAXG)、QQQ、SPY 的近期价格和历史。
+// FetchCrossAssetData 拉取黄金、QQQ、SPY 的近期价格和历史。
+//
+// 数据源优先级:
+//   - 黄金: Binance PAXG/USDT (tokenized gold)
+//   - QQQ/SPY: Futu OpenD (本地网关) > Yahoo Finance (公网备份)
+//
+// 环境变量:
+//   FUTU_GATEWAY=127.0.0.1:11111  (默认)
+//   FUTU_ENABLED=0                禁用富途，直接用 Yahoo
 func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices, error) {
 	if targetDays <= 0 {
 		targetDays = 3000
@@ -47,36 +56,57 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 		out.Warnings = append(out.Warnings, fmt.Sprintf("Binance PAXG fetch failed: %v", err))
 	}
 
-	// QQQ & SPY: Yahoo Finance (并行)
-	type result struct {
-		symbol  string
-		price   float64
-		history []float64
-		asOf    string
-		err     error
-	}
-	ch := make(chan result, 2)
-	for _, sym := range []string{"QQQ", "SPY"} {
-		go func(symbol string) {
-			price, history, asOf, err := fetchYahooChart(ctx, hc, symbol, targetDays)
-			ch <- result{symbol, price, history, asOf, err}
-		}(sym)
-	}
-	for i := 0; i < 2; i++ {
-		r := <-ch
-		if r.err != nil {
-			out.Warnings = append(out.Warnings, fmt.Sprintf("Yahoo %s fetch failed: %v", r.symbol, r.err))
-			continue
+	// QQQ & SPY: 先试富途，再降级 Yahoo
+	futuOK := false
+	if os.Getenv("FUTU_ENABLED") != "0" {
+		if futuData, err := FetchCrossAssetFromFutu(targetDays); err == nil && futuData != nil {
+			out.QQQPrice = futuData.QQQPrice
+			out.QQQHistory = futuData.QQQHistory
+			out.QQQPriceAsOf = futuData.QQQPriceAsOf
+			out.SPYPrice = futuData.SPYPrice
+			out.SPYHistory = futuData.SPYHistory
+			out.SPYPriceAsOf = futuData.SPYPriceAsOf
+			out.Warnings = append(out.Warnings, futuData.Warnings...)
+			if out.QQQPrice > 0 && out.SPYPrice > 0 {
+				futuOK = true
+			}
+		} else if err != nil {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("Futu fetch failed (will try Yahoo): %v", err))
 		}
-		switch r.symbol {
-		case "QQQ":
-			out.QQQPrice = r.price
-			out.QQQHistory = r.history
-			out.QQQPriceAsOf = r.asOf
-		case "SPY":
-			out.SPYPrice = r.price
-			out.SPYHistory = r.history
-			out.SPYPriceAsOf = r.asOf
+	}
+
+	if !futuOK {
+		// Yahoo Finance fallback
+		type result struct {
+			symbol  string
+			price   float64
+			history []float64
+			asOf    string
+			err     error
+		}
+		ch := make(chan result, 2)
+		for _, sym := range []string{"QQQ", "SPY"} {
+			go func(symbol string) {
+				p, h, a, e := fetchYahooChart(ctx, hc, symbol, targetDays)
+				ch <- result{symbol, p, h, a, e}
+			}(sym)
+		}
+		for i := 0; i < 2; i++ {
+			r := <-ch
+			if r.err != nil {
+				out.Warnings = append(out.Warnings, fmt.Sprintf("Yahoo %s: %v", r.symbol, r.err))
+				continue
+			}
+			switch r.symbol {
+			case "QQQ":
+				out.QQQPrice = r.price
+				out.QQQHistory = r.history
+				out.QQQPriceAsOf = r.asOf
+			case "SPY":
+				out.SPYPrice = r.price
+				out.SPYHistory = r.history
+				out.SPYPriceAsOf = r.asOf
+			}
 		}
 	}
 
