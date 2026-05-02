@@ -28,4 +28,9 @@ clean:
 install:
 	go install ./cmd/guanfu
 
-all: vet test build
+# MCP server
+mcp:
+	go build -o bin/guanfu-mcp ./cmd/guanfu-mcp
+	cp internal/client/futu_bridge.py bin/
+
+all: vet test build mcp
