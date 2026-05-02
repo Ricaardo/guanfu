@@ -1,9 +1,9 @@
 // fetch_cross_asset.go — 拉取黄金、QQQ、SPY 价格数据用于跨资产对比。
 //
-// 数据源：Yahoo Finance (无需 API key)
-// - GC=F (黄金期货) 或直接 XAUUSD via metals-api
-// - QQQ (纳斯达克 100 ETF)
-// - SPY (标普 500 ETF)
+// 数据源:
+//   - 黄金: Binance PAXG/USDT (tokenized gold, 无 API key, 稳定)
+//   - QQQ:  Yahoo Finance (纳斯达克 100 ETF)
+//   - SPY:  Yahoo Finance (标普 500 ETF)
 //
 // 价格历史拉取量与 BTC 对齐 (3000d)，用于计算相关性和相对强弱。
 
@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -33,7 +34,7 @@ type yahooChartResp struct {
 	} `json:"chart"`
 }
 
-// FetchCrossAssetData 拉取黄金 (GC=F)、QQQ、SPY 的近期价格和历史。
+// FetchCrossAssetData 拉取黄金 (Binance PAXG)、QQQ、SPY 的近期价格和历史。
 func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices, error) {
 	if targetDays <= 0 {
 		targetDays = 3000
@@ -41,7 +42,12 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 	hc := &http.Client{Timeout: 12 * time.Second}
 	out := &CrossAssetPrices{}
 
-	// 三个标的并行拉取
+	// 黄金: Binance PAXG/USDT klines
+	if err := fetchBinancePAXG(ctx, hc, targetDays, out); err != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("Binance PAXG fetch failed: %v", err))
+	}
+
+	// QQQ & SPY: Yahoo Finance (并行)
 	type result struct {
 		symbol  string
 		price   float64
@@ -49,26 +55,20 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 		asOf    string
 		err     error
 	}
-	ch := make(chan result, 3)
-
-	for _, sym := range []string{"GC=F", "QQQ", "SPY"} {
+	ch := make(chan result, 2)
+	for _, sym := range []string{"QQQ", "SPY"} {
 		go func(symbol string) {
 			price, history, asOf, err := fetchYahooChart(ctx, hc, symbol, targetDays)
 			ch <- result{symbol, price, history, asOf, err}
 		}(sym)
 	}
-
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		r := <-ch
 		if r.err != nil {
-			out.Warnings = append(out.Warnings, fmt.Sprintf("%s fetch failed: %v", r.symbol, r.err))
+			out.Warnings = append(out.Warnings, fmt.Sprintf("Yahoo %s fetch failed: %v", r.symbol, r.err))
 			continue
 		}
 		switch r.symbol {
-		case "GC=F":
-			out.GoldPrice = r.price
-			out.GoldHistory = r.history
-			out.GoldPriceAsOf = r.asOf
 		case "QQQ":
 			out.QQQPrice = r.price
 			out.QQQHistory = r.history
@@ -80,10 +80,79 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 		}
 	}
 
-	if out.GoldPrice == 0 && out.QQQPrice == 0 && out.SPYPrice == 0 {
-		return out, fmt.Errorf("all cross-asset fetches failed")
-	}
 	return out, nil
+}
+
+// fetchBinancePAXG 从 Binance 拉取 PAXG/USDT 价格历史和最新价。
+// 使用与 BTC/ETH 相同的 klines API，免费、无频率限制。
+func fetchBinancePAXG(ctx context.Context, hc *http.Client, targetDays int, out *CrossAssetPrices) error {
+	urlFmt := "https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=1d&limit=%d"
+	var all [][]interface{}
+
+	// 拉取历史 (分页)
+	endTime := time.Now().UnixMilli()
+	for len(all) < targetDays {
+		limit := 1000
+		if remaining := targetDays - len(all); remaining < limit {
+			limit = remaining
+		}
+		reqURL := fmt.Sprintf(urlFmt, limit) + "&endTime=" + strconv.FormatInt(endTime, 10)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := hc.Do(req)
+		if err != nil {
+			return err
+		}
+		var batch [][]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&batch); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		resp.Body.Close()
+		if len(batch) == 0 {
+			break
+		}
+		all = append(batch, all...)
+		// 取第一批的 openTime 作为下页 endTime
+		if ot, ok := batch[0][0].(float64); ok {
+			endTime = int64(ot) - 1
+		} else {
+			break
+		}
+		if len(batch) < limit {
+			break
+		}
+	}
+
+	if len(all) == 0 {
+		return fmt.Errorf("empty PAXG klines")
+	}
+	if len(all) > targetDays {
+		all = all[len(all)-targetDays:]
+	}
+
+	n := len(all)
+	history := make([]float64, n)
+	// Reverse: index 0 = newest
+	for i, k := range all {
+		idx := n - 1 - i
+		if closeStr, ok := k[4].(string); ok {
+			if v, err := strconv.ParseFloat(closeStr, 64); err == nil {
+				history[idx] = v
+			}
+		}
+		if idx == 0 {
+			if ot, ok := k[0].(float64); ok {
+				out.GoldPriceAsOf = time.UnixMilli(int64(ot)).UTC().Format("2006-01-02")
+			}
+		}
+	}
+
+	out.GoldPrice = history[0]
+	out.GoldHistory = history
+	return nil
 }
 
 func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, targetDays int) (price float64, history []float64, asOf string, err error) {
@@ -133,7 +202,6 @@ func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, target
 		}
 	}
 
-	// 找最新有效价格 (从后往前扫描)
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i] > 0 {
 			price = history[i]
@@ -149,14 +217,14 @@ func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, target
 
 // CrossAssetPrices 跨资产价格数据聚合
 type CrossAssetPrices struct {
-	GoldPrice    float64
-	GoldHistory  []float64
+	GoldPrice     float64
+	GoldHistory   []float64
 	GoldPriceAsOf string
-	QQQPrice     float64
-	QQQHistory   []float64
+	QQQPrice      float64
+	QQQHistory    []float64
 	QQQPriceAsOf  string
-	SPYPrice     float64
-	SPYHistory   []float64
+	SPYPrice      float64
+	SPYHistory    []float64
 	SPYPriceAsOf  string
-	Warnings     []string
+	Warnings      []string
 }

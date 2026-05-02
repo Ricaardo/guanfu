@@ -3,24 +3,27 @@
 > 致虚极，守静笃。**万物并作，吾以观复。**
 > ——《道德经》第十六章
 
-guanfu 是一个 BTC 投资盘面 CLI 工具，输出 6 个域 30+ 指标的纯数据盘面。每个指标包含原始值、历史分位、解读标签和数据源。**不输出评分 / action / state** — 决策由人和 Claude 综合完成。
+guanfu 是一个 BTC 投资盘面 CLI 工具，输出 **8 个域 40+ 指标**的纯数据盘面。每个指标包含原始值、历史分位、解读标签和数据源。**不输出评分 / action / state** — 决策由人和 AI 综合完成。
+
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## 设计哲学
 
 ```
-┌─────────────────────────────────────┐
-│  决策层 (Human + Claude)             │
-│  综合盘面 + 知识库 + 持仓/风险上下文  │
-├─────────────────────────────────────┤
-│  解读层 (SKILL.md)                   │
-│  指标语义、历史阈值、组合 pattern    │
-├─────────────────────────────────────┤
-│  盘面层 (guanfu 二进制)              │
-│  数据采集 → 指标计算 → 历史分位      │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│  决策层 (Human + Claude / ChatGPT)       │
+│  综合盘面 + SKILL.md 知识库 + 持仓上下文  │
+├─────────────────────────────────────────┤
+│  解读层 (SKILL.md)                       │
+│  指标语义、历史阈值、组合 pattern        │
+├─────────────────────────────────────────┤
+│  盘面层 (guanfu 二进制)                   │
+│  数据采集 → 指标计算 → 历史分位 → JSON    │
+└─────────────────────────────────────────┘
 ```
 
-- **万物并作** → 6 域指标同时呈现
+- **万物并作** → 8 域指标同时呈现
 - **观复** → 在历史分位中观察往复回归
 - **致虚守静** → 工具不替代人的判断
 
@@ -41,29 +44,36 @@ make build
 ## 快速开始
 
 ```bash
-# 完整盘面
+# 完整盘面（人类可读）
 guanfu
 
 # JSON 输出（喂 Claude / 程序）
 guanfu --json | jq
 
-# 仅看估值域
-guanfu --domain valuation
+# 仅看单个域
+guanfu --domain technical          # 技术指标
+guanfu --domain cross_asset        # 跨资产对比
+guanfu --domain valuation          # 估值
 
-# AHR999 半衰期调整
-guanfu --halflife 730
+# AHR999 拟合半衰期
+guanfu --halflife 730              # 2年，对快熊快牛更敏感
+
+# 自定义超时
+guanfu --timeout 180s
 ```
 
-## 6 域指标
+## 8 域指标体系
 
 | 域 | 指标数 | 核心指标 |
 |----|--------|----------|
 | 🌊 Cycle 周期 | 7 | halving 天数、200wSMA 偏离、Mayer Multiple、Pi Cycle Top |
 | 💰 Valuation 估值 | 4 | AHR999（改进版）、MVRV、MVRV Z-Score、NUPL |
 | ⛏️ Network 网络 | 4 | 哈希率、Hash Ribbons、难度调整、Mempool 拥堵 |
-| 📊 Positioning 杠杆 | 5 | 资金费率、OI/MC、恐慌贪婪、山寨季指数 |
+| 📊 Positioning 杠杆 | 5 | 资金费率、OI/MC、恐慌贪婪、**山寨季指数（自算）** |
 | 🌍 Macro 宏观 | 4 | DXY 60d 趋势、10Y TIPS、M2 同比、SPX 相关性 |
 | 💸 Flow 资金流 | 6 | ETF 7d/30d 净流入、稳定币市值及增速、ETH/BTC |
+| 📈 Technical 技术 | 7 | RSI(14)、MACD 柱、EMA 交叉、MA50/200、Bollinger、波动率 |
+| 🔗 CrossAsset 跨资产 | 8 | BTC/Gold·QQQ·SPY 比率、30d 相关性、90d 相对强弱 |
 
 ## 环境变量
 
@@ -71,12 +81,12 @@ guanfu --halflife 730
 |------|------|
 | `FRED_API_KEY` | FRED 宏观数据（无 key 则 Macro 域为 placeholder） |
 | `COINMETRICS_API_KEY` | CoinMetrics 付费端点 |
-| `GUANFU_NO_HISTORY=1` | 禁用 history.db |
+| `GUANFU_NO_HISTORY=1` | 禁用 history.db 写入/查询 |
 | `CACHE_DIR` | 缓存目录（默认 `./cache`） |
 
 ## 历史分位系统
 
-ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLite (`~/.guanfu/history.db`) 每天采集一行，攒够 30 天后开始回填 `q`（历史分位）字段。
+ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLite (`~/.guanfu/history.db`) 每天采集一行，攒够 30 天后回填 `q`（历史分位）字段。
 
 - 第 1 天：15 个指标入库，无 q 显示
 - 第 30 天：开始显示 q
@@ -93,7 +103,21 @@ ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLi
 | SoSoValue | BTC ETF 净流入 | ✅ |
 | alternative.me | 恐慌贪婪指数 | ✅ |
 | CoinMetrics | MVRV/NUPL/MVRV Z | ✅ 社区端点 |
+| Yahoo Finance | GC=F (黄金)、QQQ、SPY | ✅ |
 | FRED | DXY/10Y TIPS/M2/SPX | 需注册(免费) |
+
+## AI 集成
+
+guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
+
+| 平台 | 方式 | 状态 |
+|------|------|------|
+| **Claude Code** | `btc-guanfu` skill → 调用 CLI JSON | ✅ 已可用 |
+| **Claude Desktop** | MCP Server 封装 guanfu | 📋 计划 |
+| **ChatGPT** | GPT Action → REST API | 📋 计划 |
+| **任意 AI** | CLI JSON + System Prompt | ✅ 已可用 |
+
+详细方案见 [docs/guanfu-ai-integration.md](docs/guanfu-ai-integration.md)。
 
 ## 关键算法
 
@@ -101,20 +125,23 @@ ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLi
 
 ```
 ahr999 = (price / DCA_200d) × (price / fair_value)
-
-DCA_200d = 200 / Σ(1/price_i)         ← 调和均值（定投成本）
+DCA_200d = 200 / Σ(1/price_i)         ← 调和均值（非算术）
 fair_value = exp(α + β × log(age))    ← Huber IRLS 动态拟合
 ```
 
-评分使用同一窗口内 AHR 分布的动态分位数（q10/q35/q55/q75/q90），不固定 0.45/1.2。
+评分使用动态分位数（q10/q35/q55/q75/q90），不固定 0.45/1.2 阈值。
 
-### 山寨季指数
+### 山寨季指数（自算）
 
-基于 Binance Top 50 kline **自算**：90 日跑赢 BTC 的币占比 × 100。不依赖外部 API。
+基于 Binance Top 50 kline：90 日跑赢 BTC 的占比 × 100。**零外部 API 依赖**。
 
 ### MVRV Z-Score
 
 使用 rolling 1-year std(market_cap - realized_cap)，非全历史标准差。
+
+### Hash Ribbons
+
+30d MA vs 60d MA（180 天窗口），下行 = 矿工投降 = 历史抄底前兆。
 
 ## 项目结构
 
@@ -122,13 +149,13 @@ fair_value = exp(α + β × log(age))    ← Huber IRLS 动态拟合
 guanfu/
 ├── cmd/guanfu/          # CLI 入口
 ├── internal/
-│   ├── client/          # 12+ 数据源并发拉取
-│   ├── engine/          # 指标计算 + 盘面构建
+│   ├── client/          # 13 个数据源并发拉取
+│   ├── engine/          # 指标计算 + 8 域盘面构建
 │   ├── history/         # SQLite 历史分位
 │   ├── model/           # 数据类型
-│   ├── mathutil/        # 技术指标 (MA/EMA/MACD/RSI)
+│   ├── mathutil/        # 技术指标 (MA/EMA/MACD/RSI/BB)
 │   └── cache/           # 磁盘缓存
-├── docs/                # 文档
+├── docs/                # 文档 + SKILL.md 知识库
 ├── Makefile
 └── bin/                 # 编译输出
 ```
