@@ -54,16 +54,15 @@ cd guanfu && make all
 ```bash
 pip install futu-api
 
-# 源码安装：
-cp internal/client/futu_bridge.py "$(dirname "$(which guanfu)")/"
-
-# go install 用户：从 release archive 解出 futu_bridge.py，或直接：
+# 推荐：放到 ~/.guanfu/ 下，guanfu 会自动找到（cron / launchd / 任意 PATH 都生效）
+mkdir -p ~/.guanfu
 curl -sL https://raw.githubusercontent.com/Ricaardo/guanfu/main/internal/client/futu_bridge.py \
-  -o "$(dirname "$(which guanfu)")/futu_bridge.py"
+  -o ~/.guanfu/futu_bridge.py
 
-# 或自定义位置：
-export FUTU_BRIDGE=/path/to/futu_bridge.py
+# 或放到二进制同目录 / ~/.config/guanfu/ / 通过 FUTU_BRIDGE 环境变量自定义
 ```
+
+guanfu 按以下顺序查找 bridge：`$FUTU_BRIDGE` → 二进制同目录 → `~/.guanfu/` → `~/.config/guanfu/`。
 
 ## 使用
 
@@ -86,6 +85,7 @@ guanfu --domain cross_asset  # 跨资产对比
 guanfu --halflife 730        # AHR 半衰期（默认 1460=4年）
 guanfu --timeout 180s        # 超时
 guanfu --plain               # 纯文本输出（无 emoji / box drawing）
+guanfu --version             # 打印版本（提 issue 时附上）
 GUANFU_NO_HISTORY=1 guanfu   # 跳过 history.db
 ```
 

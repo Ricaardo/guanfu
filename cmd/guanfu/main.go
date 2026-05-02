@@ -31,6 +31,7 @@ import (
 	"github.com/Ricaardo/guanfu/internal/engine"
 	"github.com/Ricaardo/guanfu/internal/history"
 	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/version"
 )
 
 // domain 中英文显示名
@@ -58,7 +59,13 @@ func main() {
 	historyDB := flag.String("history-db", "", "history.db 路径（默认 ~/.guanfu/history.db；GUANFU_NO_HISTORY=1 禁用）")
 	plain := flag.Bool("plain", false, "纯文本输出（无 emoji / box drawing）")
 	noEmoji := flag.Bool("no-emoji", false, "等同 --plain")
+	showVersion := flag.Bool("version", false, "打印版本并退出")
 	flag.Parse()
+
+	if *showVersion {
+		version.Print(os.Stdout, "guanfu")
+		return
+	}
 
 	cfg := &model.Config{
 		Weights: model.Weights{Trend: 0.30, Reversal: 0.25, Valuation: 0.25, Structure: 0.20},

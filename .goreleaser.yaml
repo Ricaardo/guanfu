@@ -15,6 +15,11 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/Ricaardo/guanfu/internal/version.Version={{.Version}}
+      - -X github.com/Ricaardo/guanfu/internal/version.Commit={{.Commit}}
+      - -X github.com/Ricaardo/guanfu/internal/version.Date={{.Date}}
 
   - id: guanfu-mcp
     main: ./cmd/guanfu-mcp
@@ -28,6 +33,11 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/Ricaardo/guanfu/internal/version.Version={{.Version}}
+      - -X github.com/Ricaardo/guanfu/internal/version.Commit={{.Commit}}
+      - -X github.com/Ricaardo/guanfu/internal/version.Date={{.Date}}
 
   - id: guanfu-similar
     main: ./cmd/guanfu-similar
@@ -41,6 +51,11 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/Ricaardo/guanfu/internal/version.Version={{.Version}}
+      - -X github.com/Ricaardo/guanfu/internal/version.Commit={{.Commit}}
+      - -X github.com/Ricaardo/guanfu/internal/version.Date={{.Date}}
 
 archives:
   - id: guanfu

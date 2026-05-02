@@ -5,8 +5,14 @@ BIN := bin/guanfu
 MCP_BIN := bin/guanfu-mcp
 SIMILAR_BIN := bin/guanfu-similar
 
-# Build flags
-LDFLAGS := -s -w
+# Build flags — embed git version info so `guanfu --version` works on local builds.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -s -w \
+	-X github.com/Ricaardo/guanfu/internal/version.Version=$(VERSION) \
+	-X github.com/Ricaardo/guanfu/internal/version.Commit=$(COMMIT) \
+	-X github.com/Ricaardo/guanfu/internal/version.Date=$(DATE)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/guanfu
@@ -32,11 +38,11 @@ install:
 
 # MCP server
 mcp:
-	go build -o $(MCP_BIN) ./cmd/guanfu-mcp
+	go build -ldflags "$(LDFLAGS)" -o $(MCP_BIN) ./cmd/guanfu-mcp
 	cp internal/client/futu_bridge.py bin/
 
 similar:
-	go build -o $(SIMILAR_BIN) ./cmd/guanfu-similar
+	go build -ldflags "$(LDFLAGS)" -o $(SIMILAR_BIN) ./cmd/guanfu-similar
 
 all: vet test build mcp similar
 

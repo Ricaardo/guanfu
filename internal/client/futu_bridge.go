@@ -84,15 +84,35 @@ func futuBridgeSymbols(symbols []string, days int) (*CrossAssetFutuPrices, error
 	return out2, nil
 }
 
+// futuBridgePath returns the first existing futu_bridge.py from a list of
+// conventional locations. Order: $FUTU_BRIDGE env, sibling of executable,
+// ~/.guanfu/, ~/.config/guanfu/. If none exist, returns the first candidate
+// so the resulting "not found" error message points at a sensible default.
 func futuBridgePath() string {
 	if p := os.Getenv("FUTU_BRIDGE"); p != "" {
 		return filepath.Clean(p)
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		exe = os.Args[0]
+
+	var candidates []string
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "futu_bridge.py"))
 	}
-	return filepath.Join(filepath.Dir(exe), "futu_bridge.py")
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".guanfu", "futu_bridge.py"),
+			filepath.Join(home, ".config", "guanfu", "futu_bridge.py"),
+		)
+	}
+
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return "futu_bridge.py"
 }
 
 func min(a, b int) int {

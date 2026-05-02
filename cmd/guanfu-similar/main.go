@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/version"
 )
 
 const defaultHistoryDir = "~/.guanfu/panels"
@@ -36,7 +37,13 @@ func main() {
 	currentPath := flag.String("current", "-", "current guanfu JSON panel path, or '-' for stdin")
 	historyDir := flag.String("history-dir", defaultHistoryDir, "directory containing historical guanfu JSON panels")
 	top := flag.Int("top", 5, "number of nearest panels to print")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		version.Print(os.Stdout, "guanfu-similar")
+		return
+	}
 
 	current, err := readPanel(*currentPath)
 	if err != nil {

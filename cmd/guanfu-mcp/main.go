@@ -33,6 +33,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -43,6 +44,7 @@ import (
 	"github.com/Ricaardo/guanfu/internal/engine"
 	"github.com/Ricaardo/guanfu/internal/history"
 	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/version"
 )
 
 // ─── JSON-RPC types ───────────────────────────────────
@@ -124,6 +126,13 @@ var (
 const defaultPanelTimeout = 90 * time.Second
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		version.Print(os.Stdout, "guanfu-mcp")
+		return
+	}
+
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 	writer := os.Stdout

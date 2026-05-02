@@ -18,6 +18,9 @@ func TestFutuBridgePathUsesExplicitEnv(t *testing.T) {
 
 func TestFutuBridgePathDoesNotSearchWorkingDirectory(t *testing.T) {
 	t.Setenv("FUTU_BRIDGE", "")
+	// Point HOME at an empty dir so the ~/.guanfu and ~/.config/guanfu
+	// fallbacks have nothing to find — forces the executable-sibling default.
+	t.Setenv("HOME", t.TempDir())
 
 	got := futuBridgePath()
 	if got == "futu_bridge.py" || got == filepath.Join("internal", "client", "futu_bridge.py") {
@@ -34,5 +37,45 @@ func TestFutuBridgePathDoesNotSearchWorkingDirectory(t *testing.T) {
 	want := filepath.Join(filepath.Dir(exe), "futu_bridge.py")
 	if got != want {
 		t.Fatalf("expected executable-relative path %q, got %q", want, got)
+	}
+}
+
+func TestFutuBridgePathFallsBackToHomeGuanfu(t *testing.T) {
+	t.Setenv("FUTU_BRIDGE", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	bridgeDir := filepath.Join(home, ".guanfu")
+	if err := os.MkdirAll(bridgeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	bridgePath := filepath.Join(bridgeDir, "futu_bridge.py")
+	if err := os.WriteFile(bridgePath, []byte("# stub"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got := futuBridgePath()
+	if got != bridgePath {
+		t.Fatalf("expected ~/.guanfu fallback %q, got %q", bridgePath, got)
+	}
+}
+
+func TestFutuBridgePathFallsBackToConfigGuanfu(t *testing.T) {
+	t.Setenv("FUTU_BRIDGE", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	bridgeDir := filepath.Join(home, ".config", "guanfu")
+	if err := os.MkdirAll(bridgeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	bridgePath := filepath.Join(bridgeDir, "futu_bridge.py")
+	if err := os.WriteFile(bridgePath, []byte("# stub"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got := futuBridgePath()
+	if got != bridgePath {
+		t.Fatalf("expected ~/.config/guanfu fallback %q, got %q", bridgePath, got)
 	}
 }
