@@ -1,7 +1,7 @@
 # 观复 (btc-guanfu) 测试报告
 
 **测试时间**：2026-05-02 17:52 UTC
-**二进制**：`bin/btc-guanfu`（Go 编译，x86_64）
+**二进制**：`bin/guanfu`（Go 编译，x86_64）
 **测试环境**：macOS, Go
 
 ---
@@ -11,7 +11,7 @@
 | 项目 | 结果 |
 |------|------|
 | `go build ./...` | ✅ 通过 |
-| `go vet ./pkg/coinman/... ./cmd/btc_guanfu/` | ✅ 通过 |
+| `go vet ./...` | ✅ 通过 |
 | 全量测试 (7 packages) | ✅ 全部通过 |
 | 编译警告 | 无 |
 
@@ -19,19 +19,19 @@
 
 | Package | 耗时 | 结果 |
 |----------|------|------|
-| `pkg/coinman/cache` | 1.4s | ✅ ok |
-| `pkg/coinman/client` | 2.0s | ✅ ok |
-| `pkg/coinman/engine` | 9.9s | ✅ ok |
-| `pkg/coinman/history` | 3.2s | ✅ ok |
-| `cmd/btc_guanfu` | 5.8s | ✅ ok |
-| `pkg/coinman/mathutil` | — | 无测试文件 |
-| `pkg/coinman/model` | — | 无测试文件 |
+| `internal/cache` | 1.4s | ✅ ok |
+| `internal/client` | 2.0s | ✅ ok |
+| `internal/engine` | 9.9s | ✅ ok |
+| `internal/history` | 3.2s | ✅ ok |
+| `cmd/guanfu` | 5.8s | ✅ ok |
+| `internal/mathutil` | — | 无测试文件 |
+| `internal/model` | — | 无测试文件 |
 
 ---
 
 ## 2. 功能测试
 
-### 2.1 人类表格输出 (`btc-guanfu`)
+### 2.1 人类表格输出 (`guanfu`)
 
 ```
 观复 · BTC 盘面 (2026-05-02)   价格: $78,304.11
@@ -78,11 +78,11 @@
   stablecoin_market_cap_usd  $271,481.39M
 ```
 
-**结果**：✅ 6 个 domain 全部输出，指标值合理，label 与 q 一致
+**结果**：✅ 8 个 domain 全部输出，指标值合理，label 与 q 一致
 
 ### 2.2 JSON 输出 (`--json`)
 
-**结果**：✅ 完整 JSON 结构，所有字段正确。`date`、`snapshot`、6 个 domain map、`stale_warnings` 全部存在。
+**结果**：✅ 完整 JSON 结构，所有字段正确。`date`、`snapshot`、8 个 domain map、`stale_warnings` 全部存在。
 
 ### 2.3 单域过滤 (`--domain`)
 

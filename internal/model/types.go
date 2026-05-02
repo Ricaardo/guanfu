@@ -92,25 +92,25 @@ type MarketSnapshot struct {
 	FearGreedAsOf      string
 
 	// Cross-asset prices (v3 新增)
-	GoldPriceUSD    decimal.Decimal // 黄金现货 USD/oz (Binance PAXG)
-	QQQPrice        decimal.Decimal // QQQ ETF
-	SPYPrice        decimal.Decimal // SPY ETF
-	GoldPriceAsOf   string
-	QQQPriceAsOf    string
-	SPYPriceAsOf    string
-	GoldHistory     []decimal.Decimal
-	QQQHistory      []decimal.Decimal
-	SPYHistory      []decimal.Decimal
+	GoldPriceUSD  decimal.Decimal // 黄金现货 USD/oz (Binance PAXG)
+	QQQPrice      decimal.Decimal // QQQ ETF
+	SPYPrice      decimal.Decimal // SPY ETF
+	GoldPriceAsOf string
+	QQQPriceAsOf  string
+	SPYPriceAsOf  string
+	GoldHistory   []decimal.Decimal
+	QQQHistory    []decimal.Decimal
+	SPYHistory    []decimal.Decimal
 	// Extended (v3.1, Futu)
-	GoldETFPriceUSD decimal.Decimal // GLD 实物黄金 ETF
-	GoldETFHistory  []decimal.Decimal
-	GoldETFAsOf     string
-	UUPPrice        decimal.Decimal // 做多美元 ETF (DXY proxy)
-	UUPHistory      []decimal.Decimal
-	UUPPriceAsOf    string
-	VIXYPrice       decimal.Decimal // VIX 波动率 ETF
-	VIXYHistory     []decimal.Decimal
-	VIXYPriceAsOf   string
+	GoldETFPriceUSD   decimal.Decimal // GLD 实物黄金 ETF
+	GoldETFHistory    []decimal.Decimal
+	GoldETFAsOf       string
+	UUPPrice          decimal.Decimal // 做多美元 ETF (DXY proxy)
+	UUPHistory        []decimal.Decimal
+	UUPPriceAsOf      string
+	VIXYPrice         decimal.Decimal // VIX 波动率 ETF
+	VIXYHistory       []decimal.Decimal
+	VIXYPriceAsOf     string
 	CrossAssetFetched bool
 
 	// 非致命数据源问题。BuildPanel 会透传到 stale_warnings。
@@ -129,13 +129,15 @@ type CoinSnapshot struct {
 // 投资盘面：纯指标，不做评分聚合，不输出 action。
 // 由 Claude/skill 文档完成解读 + 决策。
 //
-// 6 个 domain 对应投资决策的不同视角：
+// 8 个 domain 对应投资决策的不同视角：
 //   - cycle: 在 4 年减半周期 / 长期均线意义上的位置
 //   - valuation: 估值（MVRV / NUPL / AHR / Mayer / SOPR）
 //   - network: 矿工 / 哈希率 / mempool 网络健康
 //   - positioning: 杠杆 / 资金费率 / 情绪
 //   - macro: 美元 / 实际利率 / 流动性 / 风险资产相关性
 //   - flow: ETF 净流入 / 稳定币供应 / ETH/BTC 资金偏好
+//   - technical: RSI / MACD / EMA / MA / Bollinger / 波动率
+//   - cross_asset: 黄金 / QQQ / SPY / UUP / VIXY 相对强弱
 
 // Indicator 单个指标项
 type Indicator struct {

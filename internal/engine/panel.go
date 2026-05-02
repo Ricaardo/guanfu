@@ -1,6 +1,6 @@
 // CoinMan v2: IndicatorPanel —— 投资盘面（无评分，无 action）
 //
-// BuildPanel() 直接从 MarketSnapshot 计算所有指标，按 6 个 domain 分组返回。
+// BuildPanel() 直接从 MarketSnapshot 计算所有指标，按 8 个 domain 分组返回。
 // 每个指标包含：原始值、历史分位、解读标签、数据源、更新时间、备注。
 //
 // 设计原则：
@@ -927,7 +927,7 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 	// EMA 交叉 (12/26)
 	ema12 := mathutil.CalculateEMA(snap.BTCPriceHistory, 12)
 	ema26 := mathutil.CalculateEMA(snap.BTCPriceHistory, 26)
-	emaCross := f(ema12) / f(ema26) - 1
+	emaCross := f(ema12)/f(ema26) - 1
 	p.Technical["ema_cross"] = model.Indicator{
 		Value:     emaCross * 100,
 		Label:     emaCrossLabel(emaCross),
@@ -954,8 +954,8 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 		}
 		// MA50 vs MA200 排列
 		p.Technical["ma_alignment"] = model.Indicator{
-			Value: (ma50 - ma200) / ma200 * 100,
-			Label: maAlignLabel(ma50, ma200),
+			Value:     (ma50 - ma200) / ma200 * 100,
+			Label:     maAlignLabel(ma50, ma200),
 			Source:    "binance",
 			UpdatedAt: btcTS,
 			Note:      "(MA50 - MA200) / MA200 %。>0 = 金叉多头，<0 = 死叉空头",

@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"github.com/Ricaardo/guanfu/internal/cache"
-	"github.com/Ricaardo/guanfu/internal/model"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Ricaardo/guanfu/internal/cache"
+	"github.com/Ricaardo/guanfu/internal/model"
 	"github.com/go-resty/resty/v2"
 	"github.com/shopspring/decimal"
 )
@@ -131,7 +131,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := c.fetchBTCData(snap); err != nil {
+		if err := c.fetchBTCData(ctx, snap); err != nil {
 			log.Printf("Error fetching BTC data: %v", err)
 			addErr(err)
 			addWarning("binance BTC data fetch failed: %v", err)
@@ -142,7 +142,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := c.fetchETHData(snap); err != nil {
+		if err := c.fetchETHData(ctx, snap); err != nil {
 			log.Printf("Error fetching ETH data: %v", err)
 			addWarning("binance ETH data fetch failed: %v", err)
 			// 不将ETH获取错误作为致命错误，因为BTC数据更重要
@@ -158,7 +158,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	go func() {
 		defer wg.Done()
 		var err error
-		top50, err = c.fetchTop50List()
+		top50, err = c.fetchTop50List(ctx)
 		if err != nil {
 			log.Printf("Error fetching Top 50: %v", err)
 			addWarning("coingecko top50 fetch failed: %v", err)
@@ -170,7 +170,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := c.fetchFearGreed(snap); err != nil {
+		if err := c.fetchFearGreed(ctx, snap); err != nil {
 			log.Printf("Error fetching FearGreed: %v", err)
 			addWarning("alternative.me fear & greed fetch failed: %v", err)
 			// Fear & Greed is non-critical
@@ -181,7 +181,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := c.fetchRates(snap); err != nil {
+		if err := c.fetchRates(ctx, snap); err != nil {
 			log.Printf("Error fetching Rates: %v", err)
 			addWarning("fx/usdt rates fetch failed: %v", err)
 			addErr(err)
@@ -192,7 +192,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := c.fetchGlobalCap(snap); err != nil {
+		if err := c.fetchGlobalCap(ctx, snap); err != nil {
 			log.Printf("Error fetching Global Cap: %v", err)
 			addWarning("coingecko global market cap fetch failed: %v", err)
 			addErr(err)
@@ -203,7 +203,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := c.fetchStablecoinCap(snap); err != nil {
+		if err := c.fetchStablecoinCap(ctx, snap); err != nil {
 			log.Printf("Error fetching Stablecoin Cap: %v", err)
 			addWarning("coingecko stablecoin market cap fetch failed: %v", err)
 			// 不将稳定币数据获取作为致命错误
@@ -216,7 +216,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := c.fetchFuturesData(snap); err != nil {
+		if err := c.fetchFuturesData(ctx, snap); err != nil {
 			log.Printf("Error fetching Futures Data: %v", err)
 			addWarning("binance futures data fetch failed: %v", err)
 			addErr(err)
@@ -365,7 +365,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	// 10. Fetch Histories for Top 50 (Dependent on Step 2)
 	if len(top50) > 0 {
 		log.Printf("Fetching history for %d coins...", len(top50))
-		coins := c.fetchCoinsHistory(top50)
+		coins := c.fetchCoinsHistory(ctx, top50)
 		snap.Top50Coins = coins
 		// 山寨季指数：Top 50 中 90 日跑赢 BTC 的占比 × 100
 		snap.AltcoinSeasonIndex = calculateAltcoinSeason(coins, snap.BTCPriceHistory)
@@ -404,13 +404,13 @@ func usableCachedSnapshot(snap *model.MarketSnapshot) (bool, string) {
 
 // --- Implementation Methods ---
 
-func (c *RealClient) fetchBTCData(snap *model.MarketSnapshot) error {
+func (c *RealClient) fetchBTCData(ctx context.Context, snap *model.MarketSnapshot) error {
 	// Binance Klines: https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=1000
 	// Response: [[OpenTime, Open, High, Low, Close, Vol, ...], ...]
 	// Order: Oldest first.
 	// We need: Newest first for our model (index 0 = today).
 
-	klines, err := c.fetchBinanceDailyKlines("BTCUSDT", btcHistoryTargetDays)
+	klines, err := c.fetchBinanceDailyKlines(ctx, "BTCUSDT", btcHistoryTargetDays)
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func (c *RealClient) fetchBTCData(snap *model.MarketSnapshot) error {
 	return nil
 }
 
-func (c *RealClient) fetchBinanceDailyKlines(symbol string, targetDays int) ([][]interface{}, error) {
+func (c *RealClient) fetchBinanceDailyKlines(ctx context.Context, symbol string, targetDays int) ([][]interface{}, error) {
 	if targetDays <= 0 {
 		targetDays = binanceKlineLimit
 	}
@@ -463,6 +463,10 @@ func (c *RealClient) fetchBinanceDailyKlines(symbol string, targetDays int) ([][
 	var all [][]interface{}
 
 	for len(all) < targetDays {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		limit := binanceKlineLimit
 		if remaining := targetDays - len(all); remaining < limit {
 			limit = remaining
@@ -470,6 +474,7 @@ func (c *RealClient) fetchBinanceDailyKlines(symbol string, targetDays int) ([][
 
 		var batch [][]interface{}
 		_, err := c.client.R().
+			SetContext(ctx).
 			SetResult(&batch).
 			SetQueryParam("symbol", symbol).
 			SetQueryParam("interval", "1d").
@@ -523,8 +528,8 @@ func klineOpenTimeMillis(kline []interface{}) (int64, bool) {
 }
 
 // fetchETHData 获取ETH数据（与 BTC 同量级，3000 天）
-func (c *RealClient) fetchETHData(snap *model.MarketSnapshot) error {
-	klines, err := c.fetchBinanceDailyKlines("ETHUSDT", btcHistoryTargetDays)
+func (c *RealClient) fetchETHData(ctx context.Context, snap *model.MarketSnapshot) error {
+	klines, err := c.fetchBinanceDailyKlines(ctx, "ETHUSDT", btcHistoryTargetDays)
 	if err != nil {
 		return err
 	}
@@ -562,19 +567,19 @@ func (c *RealClient) fetchETHData(snap *model.MarketSnapshot) error {
 	return nil
 }
 
-func (c *RealClient) fetchTop50List() ([]CGMarketItem, error) {
+func (c *RealClient) fetchTop50List(ctx context.Context) ([]CGMarketItem, error) {
 	// https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1
 	url := "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1"
 	var items []CGMarketItem
-	_, err := c.client.R().SetResult(&items).Get(url)
+	_, err := c.client.R().SetContext(ctx).SetResult(&items).Get(url)
 	return items, err
 }
 
-func (c *RealClient) fetchFearGreed(snap *model.MarketSnapshot) error {
+func (c *RealClient) fetchFearGreed(ctx context.Context, snap *model.MarketSnapshot) error {
 	// https://api.alternative.me/fng/?limit=1
 	url := "https://api.alternative.me/fng/?limit=1"
 	var resp CGFearGreed
-	_, err := c.client.R().SetResult(&resp).Get(url)
+	_, err := c.client.R().SetContext(ctx).SetResult(&resp).Get(url)
 	if err != nil {
 		return err
 	}
@@ -588,7 +593,7 @@ func (c *RealClient) fetchFearGreed(snap *model.MarketSnapshot) error {
 	return nil
 }
 
-func (c *RealClient) fetchRates(snap *model.MarketSnapshot) error {
+func (c *RealClient) fetchRates(ctx context.Context, snap *model.MarketSnapshot) error {
 	var wg sync.WaitGroup
 
 	// 1. USD/CNY
@@ -597,7 +602,7 @@ func (c *RealClient) fetchRates(snap *model.MarketSnapshot) error {
 		defer wg.Done()
 		var rateResp ExchangeRateResp
 		// https://api.exchangerate-api.com/v4/latest/USD
-		_, err := c.client.R().SetResult(&rateResp).Get("https://api.exchangerate-api.com/v4/latest/USD")
+		_, err := c.client.R().SetContext(ctx).SetResult(&rateResp).Get("https://api.exchangerate-api.com/v4/latest/USD")
 		if err == nil {
 			if r, ok := rateResp.Rates["CNY"]; ok {
 				snap.USDPriceCNY = r
@@ -613,7 +618,7 @@ func (c *RealClient) fetchRates(snap *model.MarketSnapshot) error {
 		defer wg.Done()
 		var cgResp CGSimplePrice
 		// https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny
-		_, err := c.client.R().SetResult(&cgResp).Get("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny")
+		_, err := c.client.R().SetContext(ctx).SetResult(&cgResp).Get("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=cny")
 		if err == nil {
 			snap.USDTPriceCNY = cgResp.Tether.CNY
 		} else {
@@ -625,7 +630,7 @@ func (c *RealClient) fetchRates(snap *model.MarketSnapshot) error {
 	return nil
 }
 
-func (c *RealClient) fetchGlobalCap(snap *model.MarketSnapshot) error {
+func (c *RealClient) fetchGlobalCap(ctx context.Context, snap *model.MarketSnapshot) error {
 	// https://api.coingecko.com/api/v3/global
 	// Response: {"data": {"total_market_cap": {"usd": 123...}, "market_cap_percentage": {"btc": 52.1}}}
 	type GlobalResp struct {
@@ -636,7 +641,7 @@ func (c *RealClient) fetchGlobalCap(snap *model.MarketSnapshot) error {
 	}
 
 	var resp GlobalResp
-	_, err := c.client.R().SetResult(&resp).Get("https://api.coingecko.com/api/v3/global")
+	_, err := c.client.R().SetContext(ctx).SetResult(&resp).Get("https://api.coingecko.com/api/v3/global")
 	if err != nil {
 		return err
 	}
@@ -651,7 +656,7 @@ func (c *RealClient) fetchGlobalCap(snap *model.MarketSnapshot) error {
 	return nil
 }
 
-func (c *RealClient) fetchCoinsHistory(items []CGMarketItem) []model.CoinSnapshot {
+func (c *RealClient) fetchCoinsHistory(ctx context.Context, items []CGMarketItem) []model.CoinSnapshot {
 	// We need to fetch history for these coins.
 	// Use Binance for speed. Map Symbol -> SymbolUSDT.
 	// Limit concurrency to avoid rate limits (Binance 1200/min is plenty, but let's be safe).
@@ -672,8 +677,16 @@ func (c *RealClient) fetchCoinsHistory(items []CGMarketItem) []model.CoinSnapsho
 		wg.Add(1)
 		go func(it CGMarketItem) {
 			defer wg.Done()
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
+
+			if err := ctx.Err(); err != nil {
+				return
+			}
 
 			// Try to fetch from Binance
 			// Symbol mapping: "btc" -> "BTCUSDT"
@@ -683,7 +696,7 @@ func (c *RealClient) fetchCoinsHistory(items []CGMarketItem) []model.CoinSnapsho
 			url := fmt.Sprintf("https://api.binance.com/api/v3/klines?symbol=%s&interval=1d&limit=121", symbol)
 
 			var klines [][]interface{}
-			resp, err := c.client.R().SetResult(&klines).Get(url)
+			resp, err := c.client.R().SetContext(ctx).SetResult(&klines).Get(url)
 
 			if err == nil && resp.StatusCode() == 200 && len(klines) > 0 {
 				// Parse
@@ -714,7 +727,7 @@ func (c *RealClient) fetchCoinsHistory(items []CGMarketItem) []model.CoinSnapsho
 	return coins
 }
 
-func (c *RealClient) fetchFuturesData(snap *model.MarketSnapshot) error {
+func (c *RealClient) fetchFuturesData(ctx context.Context, snap *model.MarketSnapshot) error {
 	var wg sync.WaitGroup
 
 	// 1. Funding Rate
@@ -724,7 +737,7 @@ func (c *RealClient) fetchFuturesData(snap *model.MarketSnapshot) error {
 		// GET /fapi/v1/premiumIndex?symbol=BTCUSDT
 		url := "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT"
 		var resp BinancePremiumIndex
-		_, err := c.client.R().SetResult(&resp).Get(url)
+		_, err := c.client.R().SetContext(ctx).SetResult(&resp).Get(url)
 		if err == nil {
 			if val, err := decimal.NewFromString(resp.LastFundingRate); err == nil {
 				snap.BTCFundingRate = val
@@ -744,7 +757,7 @@ func (c *RealClient) fetchFuturesData(snap *model.MarketSnapshot) error {
 		// 修了原代码并发条件竞争 bug：原逻辑在 BTCPrice 未到时把 qty 直接当 USD 值存。
 		url := "https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT"
 		var resp BinanceOpenInterest
-		_, err := c.client.R().SetResult(&resp).Get(url)
+		_, err := c.client.R().SetContext(ctx).SetResult(&resp).Get(url)
 		if err == nil {
 			if qty, err := decimal.NewFromString(resp.OpenInterest); err == nil {
 				snap.BTCOpenInterest = qty
@@ -759,12 +772,12 @@ func (c *RealClient) fetchFuturesData(snap *model.MarketSnapshot) error {
 }
 
 // fetchStablecoinCap 获取稳定币市值数据
-func (c *RealClient) fetchStablecoinCap(snap *model.MarketSnapshot) error {
+func (c *RealClient) fetchStablecoinCap(ctx context.Context, snap *model.MarketSnapshot) error {
 	// 获取稳定币市值：通过CoinGecko获取主要稳定币数据
 	// 使用CoinGecko API获取稳定币市值
 	url := "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=tether,usd-coin,dai,binance-usd,frax&order=market_cap_desc&per_page=100&page=1&sparkline=false"
 	var stablecoins []CGMarketItem
-	_, err := c.client.R().SetResult(&stablecoins).Get(url)
+	_, err := c.client.R().SetContext(ctx).SetResult(&stablecoins).Get(url)
 	if err != nil {
 		return err
 	}

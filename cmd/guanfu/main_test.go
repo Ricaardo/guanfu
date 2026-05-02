@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/Ricaardo/guanfu/internal/model"
@@ -34,4 +37,59 @@ func TestFilterDomainPreservesMetadata(t *testing.T) {
 	if got.Flow != nil {
 		t.Fatalf("unexpected flow domain: %+v", got.Flow)
 	}
+}
+
+func TestPrintHumanPanelPlainOmitsEmojiAndBoxDrawing(t *testing.T) {
+	panel := &model.IndicatorPanel{
+		Date: "2026-05-02",
+		Snapshot: model.SnapshotData{
+			BTCPrice:       100000,
+			BTCDominance:   0.61,
+			FearGreed:      45,
+			TotalMarketCap: 3_000_000_000_000,
+		},
+		Cycle: map[string]model.Indicator{
+			"phase": {Label: "markup"},
+		},
+		StaleWarnings: []string{"coinmetrics unavailable"},
+	}
+
+	output := captureStdout(t, func() {
+		printHumanPanel(panel, "cycle", true)
+	})
+
+	for _, forbidden := range []string{"观复", "🌊", "├", "⚠"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("plain output contains %q:\n%s", forbidden, output)
+		}
+	}
+	for _, want := range []string{"guanfu BTC panel", "Cycle 周期定位", "Data tips:"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("plain output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	os.Stdout = old
+
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	return string(b)
 }

@@ -1,4 +1,4 @@
-# 观复 (btc-guanfu): BTC 投资盘面系统
+# 观复 (guanfu): BTC 投资盘面系统
 
 > 致虚极，守静笃。**万物并作，吾以观复。**
 > ——《道德经》第十六章
@@ -43,7 +43,7 @@
 │  解读层 (SKILL.md)                                │
 │  每个指标的语义、历史阈值、组合 pattern、失效情形   │
 ├─────────────────────────────────────────────────┤
-│  盘面层 (btc-guanfu 二进制)                        │
+│  盘面层 (guanfu 二进制)                            │
 │  数据采集 → 指标计算 → 历史分位 → 纯指标输出       │
 └─────────────────────────────────────────────────┘
 ```
@@ -71,7 +71,7 @@ engine/calculator.go    engine/panel.go
          │                    │
          └────────┬───────────┘
                   │
-          client/real.go      ← 13 个数据源并发拉取
+          client/real.go      ← 多数据源并发拉取
           client/mempool.go   ← mempool.space 网络数据
           client/coinmetrics.go ← 链上估值
           client/cross_asset.go ← 跨资产 (Binance PAXG + Futu/Yahoo)
@@ -87,17 +87,18 @@ engine/calculator.go    engine/panel.go
 
 | 路径 | 职责 |
 |------|------|
-| `cmd/btc_guanfu/main.go` | CLI：flag 解析、人类表格 / JSON 输出 |
-| `pkg/coinman/client/real.go` | 数据采集：Binance、CoinGecko、mempool、SoSoValue、CoinMetrics、FRED |
-| `pkg/coinman/client/mempool.go` | mempool.space：哈希率、难度、mempool 拥堵 |
-| `pkg/coinman/client/coinmetrics.go` | CoinMetrics：MVRV、NUPL、MVRV Z-Score |
-| `pkg/coinman/engine/panel.go` | BuildPanel：6 域指标计算 + 历史分位回填 + label 函数 |
-| `pkg/coinman/engine/calculator.go` | v1 评分引擎（向后兼容 NewsEngine 推送） |
-| `pkg/coinman/history/store.go` | SQLite 历史存储：Record / QuantileAsOf / ValueAt |
-| `pkg/coinman/mathutil/ma.go` | 技术指标：MA、EMA、MACD、RSI、Sigmoid、局部极值 |
-| `pkg/coinman/model/types.go` | 数据模型：MarketSnapshot、IndicatorPanel、Indicator |
-| `pkg/coinman/cache/cache.go` | 磁盘缓存：当日快照序列化，避免重复拉取 |
-| `~/.claude/skills/btc-guanfu/SKILL.md` | 知识库：指标语义、历史阈值、pattern 库、失效情形 |
+| `cmd/guanfu/main.go` | CLI：flag 解析、人类表格 / JSON 输出 |
+| `cmd/guanfu-mcp/main.go` | MCP Server：tools/resources/stdout JSON-RPC |
+| `internal/client/real.go` | 数据采集：Binance、CoinGecko、mempool、SoSoValue、CoinMetrics、FRED |
+| `internal/client/mempool.go` | mempool.space：哈希率、难度、mempool 拥堵 |
+| `internal/client/coinmetrics.go` | CoinMetrics：MVRV、NUPL、MVRV Z-Score |
+| `internal/engine/panel.go` | BuildPanel：8 域指标计算 + 历史分位回填 + label 函数 |
+| `internal/engine/calculator.go` | v1 评分引擎（兼容旧调用；盘面层不输出总分） |
+| `internal/history/store.go` | SQLite 历史存储：Record / QuantileAsOf / ValueAt |
+| `internal/mathutil/ma.go` | 技术指标：MA、EMA、MACD、RSI、Sigmoid、局部极值 |
+| `internal/model/types.go` | 数据模型：MarketSnapshot、IndicatorPanel、Indicator |
+| `internal/cache/cache.go` | 磁盘缓存：当日快照序列化，避免重复拉取 |
+| `docs/SKILL.md` | 知识库：指标语义、历史阈值、pattern 库、失效情形 |
 
 ---
 
@@ -189,23 +190,23 @@ engine/calculator.go    engine/panel.go
 
 ```bash
 # 完整盘面（人类可读表格）
-btc-guanfu
+guanfu
 
 # JSON 输出（喂 Claude / 程序）
-btc-guanfu --json | jq
+guanfu --json | jq
 
 # 仅看一个 domain
-btc-guanfu --domain cycle
-btc-guanfu --domain valuation
+guanfu --domain cycle
+guanfu --domain valuation
 
 # AHR999 拟合半衰期（默认 1460 = 4 年）
-btc-guanfu --halflife 730   # 2 年，对快牛快熊敏感
+guanfu --halflife 730   # 2 年，对快牛快熊敏感
 
 # 自定义 history.db 路径
-btc-guanfu --history-db /path/to/custom.db
+guanfu --history-db /path/to/custom.db
 
 # 调整拉数据超时
-btc-guanfu --timeout 180s
+guanfu --timeout 180s
 ```
 
 ### 环境变量
@@ -215,16 +216,18 @@ btc-guanfu --timeout 180s
 | `FRED_API_KEY` | FRED 宏观数据（无 key 则 Macro 域全 placeholder） |
 | `COINMETRICS_API_KEY` | CoinMetrics 付费端点（免费 tier 也有社区端点可用） |
 | `GUANFU_NO_HISTORY=1` | 禁用 history.db 写入/查询 |
+| `GUANFU_HISTORY_DB` | MCP Server 使用的 history.db 路径（CLI 用 `--history-db`） |
+| `GUANFU_SKILL_PATH` | MCP Resource `guanfu://knowledge/skill.md` 的 SKILL.md 路径 |
 | `CACHE_DIR` | 磁盘缓存目录（默认 `./cache`） |
 
 ### 冷启动
 
-首次运行 ~5-8s（拉 Binance + mempool + SoSoValue + F&G + CoinGecko Top50），后续缓存命中 < 1s。
+首次完整冷启动通常 60-90s（拉 Binance 历史 K 线、mempool、SoSoValue、F&G、CoinGecko Top50 等），后续缓存命中 < 1s。
 
 ### 重建二进制
 
 ```bash
-cd ~/news && go build -o bin/btc-guanfu ./cmd/btc_guanfu
+go build -o bin/guanfu ./cmd/guanfu
 ```
 
 ---
@@ -426,7 +429,7 @@ diff = (ma30 - ma60) / ma60
 
 - **周一早晨**：market-pulse(MHS) → event-calendar(本周事件) → thesis-tracker(decay 检查) → portfolio-manager(偏离)
 - **周日晚**：trade-journal(复盘) → thesis-tracker(更新) → market-pulse(趋势) → research(下周 idea)
-- **每日**：观复盘面（5s 扫一遍 6 域指标变化）
+- **每日**：观复盘面（缓存命中 <1s；完整冷启动通常 60-90s，扫一遍 8 域指标变化）
 
 ---
 
@@ -445,7 +448,7 @@ diff = (ma30 - ma60) / ma60
 | 技术域 | 无 | 无 | RSI/MACD/EMA/MA50-200/BB/波动 (7 指标) |
 | 跨资产域 | 无 | 无 | BTC vs Gold/QQQ/SPY/UUP/VIXY + correlations + rel strength (12 指标) |
 | 历史分位 | 无 | SQLite 每日采集 15 个指标 → 730 天分位 | 同 v2 |
-| 决策依据 | 1 个 score | 6 域盘面 + SKILL.md + Claude | 8 域盘面 + 520 行 SKILL.md + 8 步读盘法 + AI |
+| 决策依据 | 1 个 score | 6 域盘面 + SKILL.md + Claude | 8 域盘面 + SKILL.md + 8 步读盘法 + AI |
 | 山寨季 | ❌ (1-btc_dom)×100 | blockchaincenter → 自算 | 自算 (Top50 kline, 零外部依赖) |
 | 黄金 | 无 | 无 | Binance PAXG + Futu GLD 双源交叉验证 |
 | DXY | 无 | FRED DTWEXBGS (需 key) | Futu UUP 实时 + FRED 备用 |

@@ -5,7 +5,7 @@
 
 guanfu 是一个 BTC 投资盘面 CLI 工具，输出 **8 个域 40+ 指标**的纯数据盘面。每个指标包含原始值、历史分位、解读标签和数据源。**不输出评分 / action / state** — 决策由人和 AI 综合完成。
 
-[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## 设计哲学
@@ -20,11 +20,11 @@ guanfu 出自《道德经》第十六章："致虚极，守静笃。万物并作
 │  8 域 42 指标 × q 分位 × 组合 pattern     │
 │  → 概率性判断，不输出确定性结论            │
 ├──────────────────────────────────────────┤
-│  解读层 (SKILL.md, 520 行)                 │
+│  解读层 (SKILL.md)                         │
 │  每个指标的语义、历史阈值、失效情形、联动   │
 ├──────────────────────────────────────────┤
-│  盘面层 (guanfu 二进制, 7151 行 Go)        │
-│  13 个数据源 → 指标计算 → 历史分位 → JSON  │
+│  盘面层 (guanfu 二进制)                    │
+│  多数据源 → 指标计算 → 历史分位 → JSON     │
 └──────────────────────────────────────────┘
 ```
 
@@ -40,10 +40,11 @@ guanfu 出自《道德经》第十六章："致虚极，守静笃。万物并作
 ```bash
 # 一行安装
 go install github.com/Ricaardo/guanfu/cmd/guanfu@latest
+go install github.com/Ricaardo/guanfu/cmd/guanfu-similar@latest  # 可选：历史相似度
 
 # 或源码构建
 git clone https://github.com/Ricaardo/guanfu.git
-cd guanfu && make build
+cd guanfu && make all
 ```
 
 **Futu Bridge（可选，获取 QQQ/SPY/DXY/VIX 实时数据）**：
@@ -56,7 +57,7 @@ cp internal/client/futu_bridge.py bin/
 ## 使用
 
 ```bash
-# 完整盘面（人类可读，冷启动 ~80s，缓存命中 < 1s）
+# 完整盘面（人类可读，冷启动通常 60-90s，缓存命中 < 1s）
 guanfu
 
 # JSON 输出 → 喂 Claude / ChatGPT
@@ -70,6 +71,7 @@ guanfu --domain cross_asset  # 跨资产对比
 # 参数
 guanfu --halflife 730        # AHR 半衰期（默认 1460=4年）
 guanfu --timeout 180s        # 超时
+guanfu --plain               # 纯文本输出（无 emoji / box drawing）
 GUANFU_NO_HISTORY=1 guanfu   # 跳过 history.db
 ```
 
@@ -82,6 +84,15 @@ GUANFU_NO_HISTORY=1 guanfu   # 跳过 history.db
 guanfu --json > panel.json
 cat panel.json | your-ai-client --system "$(cat docs/SKILL.md)"
 ```
+
+**历史相似度（推广/复盘用）**：
+
+```bash
+guanfu --json > current.json
+guanfu-similar --current current.json --history-dir data/panels --top 8
+```
+
+相似度只比较双方都有 `q` 的指标，方法见 [docs/backtest-methodology.md](docs/backtest-methodology.md)。公开文案里的历史收益数字必须由该流程生成，并披露样本数量、窗口和反例。
 
 ## 8 域指标体系
 
@@ -103,6 +114,8 @@ cat panel.json | your-ai-client --system "$(cat docs/SKILL.md)"
 | `FRED_API_KEY` | FRED 宏观数据（无 key 则 Macro 域为 placeholder） |
 | `COINMETRICS_API_KEY` | CoinMetrics 付费端点 |
 | `GUANFU_NO_HISTORY=1` | 禁用 history.db 写入/查询 |
+| `GUANFU_HISTORY_DB` | MCP Server 使用的 history.db 路径（CLI 用 `--history-db`） |
+| `GUANFU_SKILL_PATH` | MCP Resource `guanfu://knowledge/skill.md` 的 SKILL.md 路径 |
 | `CACHE_DIR` | 缓存目录（默认 `./cache`） |
 | `FUTU_GATEWAY` | 富途 OpenD 地址（默认 `127.0.0.1:11111`） |
 | `FUTU_ENABLED=0` | 禁用富途，直接用 Yahoo 降级 |
@@ -138,7 +151,7 @@ guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
 | 平台 | 方式 | 状态 |
 |------|------|------|
 | **Claude Code** | `btc-guanfu` skill → 调用 CLI JSON | ✅ 已可用 |
-| **Claude Desktop** | MCP Server 封装 guanfu | 📋 计划 |
+| **Claude Desktop / Cursor** | MCP Server 封装 guanfu | ✅ 已可用 |
 | **ChatGPT** | GPT Action → REST API | 📋 计划 |
 | **任意 AI** | CLI JSON + System Prompt | ✅ 已可用 |
 
@@ -173,8 +186,11 @@ fair_value = exp(α + β × log(age))    ← Huber IRLS 动态拟合
 ```
 guanfu/
 ├── cmd/guanfu/          # CLI 入口
+├── cmd/guanfu-mcp/      # MCP Server 入口
+├── cmd/guanfu-similar/  # 历史 JSON 盘面相似度工具
+├── .github/workflows/   # CI / release
 ├── internal/
-│   ├── client/          # 13 个数据源并发拉取
+│   ├── client/          # 多数据源并发拉取
 │   ├── engine/          # 指标计算 + 8 域盘面构建
 │   ├── history/         # SQLite 历史分位
 │   ├── model/           # 数据类型

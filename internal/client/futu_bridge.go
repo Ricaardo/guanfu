@@ -86,20 +86,13 @@ func futuBridgeSymbols(symbols []string, days int) (*CrossAssetFutuPrices, error
 
 func futuBridgePath() string {
 	if p := os.Getenv("FUTU_BRIDGE"); p != "" {
-		return p
+		return filepath.Clean(p)
 	}
-	// Try next to binary first, then CWD, then source dir
-	candidates := []string{
-		filepath.Join(filepath.Dir(os.Args[0]), "futu_bridge.py"),
-		"futu_bridge.py",
-		filepath.Join("internal", "client", "futu_bridge.py"),
+	exe, err := os.Executable()
+	if err != nil {
+		exe = os.Args[0]
 	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return "futu_bridge.py" // let exec fail with clear error
+	return filepath.Join(filepath.Dir(exe), "futu_bridge.py")
 }
 
 func min(a, b int) int {

@@ -274,7 +274,7 @@ CrossAsset 跨资产 ✅ BTC独立   高            高（与QQQ零相关）
 
 | 局限 | 影响 | 缓解 |
 |------|------|------|
-| history.db 冷启动 | 14 个指标的 q 分位缺失 | kline 导出的 q 不受影响 |
+| history.db 冷启动 | 15 个指标的 q 分位缺失 | kline 导出的 q 不受影响 |
 | CoinMetrics 免费 tier | realized_cap 为反推值 | MVRV/NUPL 方向性不受影响 |
 | M2 滞后 60 天 | 宏观判断有时延 | 结合 UUP（Futu 实时）做补充 |
 | Futu 需 Python bridge | 多一个依赖 | 降级到 Yahoo 可兜底 |

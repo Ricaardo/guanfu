@@ -3,16 +3,17 @@
 // 「致虚极，守静笃。万物并作，吾以观复。」——《道德经》第十六章
 //
 // 不输出评分 / action / state。纯指标盘面，由 Claude/skill 文档完成解读。
-// 万物并作 = 6 域指标同时呈现；观复 = 在历史分位中看其往复回归。
+// 万物并作 = 8 域指标同时呈现；观复 = 在历史分位中看其往复回归。
 //
 // Usage:
 //
 //	guanfu                       # 人类盘面（markdown 表）
 //	guanfu --json                # JSON 扁平结构（喂程序 / Claude）
 //	guanfu --pretty              # pretty JSON
-//	guanfu --domain cycle        # 仅看单 domain (cycle/valuation/network/positioning/macro/flow)
+//	guanfu --domain cycle        # 仅看单 domain
 //	guanfu --halflife 730        # AHR 拟合半衰期（默认 1460 = 4 年）
 //	guanfu --timeout 180s        # 拉数据超时
+//	guanfu --plain               # 纯文本输出（无 emoji / box drawing）
 package main
 
 import (
@@ -51,10 +52,12 @@ var domainNames = []struct {
 func main() {
 	jsonOut := flag.Bool("json", false, "JSON 输出")
 	pretty := flag.Bool("pretty", false, "pretty JSON 输出")
-	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow")
+	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow/technical/cross_asset")
 	timeout := flag.Duration("timeout", 90*time.Second, "拉数据超时")
 	halfLife := flag.Int("halflife", 0, "AHR 拟合半衰期（天，默认 1460）")
 	historyDB := flag.String("history-db", "", "history.db 路径（默认 ~/.guanfu/history.db；GUANFU_NO_HISTORY=1 禁用）")
+	plain := flag.Bool("plain", false, "纯文本输出（无 emoji / box drawing）")
+	noEmoji := flag.Bool("no-emoji", false, "等同 --plain")
 	flag.Parse()
 
 	cfg := &model.Config{
@@ -107,14 +110,21 @@ func main() {
 	}
 
 	// 人类盘面
-	printHumanPanel(panel, *domainFilter)
+	printHumanPanel(panel, *domainFilter, *plain || *noEmoji)
 }
 
-func printHumanPanel(p *model.IndicatorPanel, filter string) {
-	fmt.Printf("观复 · BTC 盘面 (%s)   价格: $%.2f\n", p.Date, p.Snapshot.BTCPrice)
-	fmt.Printf("├─ BTC dominance: %.2f%%   F&G: %.0f   总市值: $%.1fT\n",
-		p.Snapshot.BTCDominance*100, p.Snapshot.FearGreed,
-		p.Snapshot.TotalMarketCap/1e12)
+func printHumanPanel(p *model.IndicatorPanel, filter string, plain bool) {
+	if plain {
+		fmt.Printf("guanfu BTC panel (%s)   price: $%.2f\n", p.Date, p.Snapshot.BTCPrice)
+		fmt.Printf("BTC dominance: %.2f%%   F&G: %.0f   total cap: $%.1fT\n",
+			p.Snapshot.BTCDominance*100, p.Snapshot.FearGreed,
+			p.Snapshot.TotalMarketCap/1e12)
+	} else {
+		fmt.Printf("观复 · BTC 盘面 (%s)   价格: $%.2f\n", p.Date, p.Snapshot.BTCPrice)
+		fmt.Printf("├─ BTC dominance: %.2f%%   F&G: %.0f   总市值: $%.1fT\n",
+			p.Snapshot.BTCDominance*100, p.Snapshot.FearGreed,
+			p.Snapshot.TotalMarketCap/1e12)
+	}
 	fmt.Println()
 
 	for _, d := range domainNames {
@@ -144,7 +154,11 @@ func printHumanPanel(p *model.IndicatorPanel, filter string) {
 			continue
 		}
 
-		fmt.Printf("%s %s\n", d.Icon, d.Title)
+		if plain {
+			fmt.Println(d.Title)
+		} else {
+			fmt.Printf("%s %s\n", d.Icon, d.Title)
+		}
 		printDomainTable(indicators)
 		fmt.Println()
 	}
@@ -154,7 +168,11 @@ func printHumanPanel(p *model.IndicatorPanel, filter string) {
 	stale = append(stale, p.StaleWarnings...)
 	stale = dedupeStrings(stale)
 	if len(stale) > 0 {
-		fmt.Println("⚠ 数据提示:")
+		if plain {
+			fmt.Println("Data tips:")
+		} else {
+			fmt.Println("⚠ 数据提示:")
+		}
 		for _, s := range stale {
 			fmt.Printf("  - %s\n", s)
 		}

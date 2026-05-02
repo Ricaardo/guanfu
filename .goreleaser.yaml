@@ -1,0 +1,78 @@
+version: 2
+
+project_name: guanfu
+
+builds:
+  - id: guanfu
+    main: ./cmd/guanfu
+    binary: guanfu
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+  - id: guanfu-mcp
+    main: ./cmd/guanfu-mcp
+    binary: guanfu-mcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+  - id: guanfu-similar
+    main: ./cmd/guanfu-similar
+    binary: guanfu-similar
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: guanfu
+    ids:
+      - guanfu
+      - guanfu-mcp
+      - guanfu-similar
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE*
+      - docs/SKILL.md
+      - docs/mcp-setup.md
+      - docs/backtest-methodology.md
+      - src: internal/client/futu_bridge.py
+        dst: futu_bridge.py
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: git

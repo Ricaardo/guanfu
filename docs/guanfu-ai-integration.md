@@ -51,7 +51,7 @@ guanfu 已经可以通过 Claude Code skill 使用：
 ```markdown
 # SKILL.md
 当用户询问 BTC 相关问题时：
-1. 运行 `/Users/x/news/bin/btc-guanfu --json`
+1. 运行 `guanfu --json`
 2. 解析 JSON 输出
 3. 查阅 SKILL.md 知识库
 4. 综合输出分析
@@ -200,7 +200,7 @@ paths:
 - ✅ 任何 AI 均可调用（ChatGPT、Claude API、Gemini 等）
 - ✅ 可公开访问
 - ❌ 需要部署和维护
-- ❌ 有延迟（网络 + 数据拉取 5-8s）
+- ❌ 有延迟（冷启动通常 60-90s，缓存命中 <1s）
 
 ---
 

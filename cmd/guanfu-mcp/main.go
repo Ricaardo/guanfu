@@ -19,7 +19,8 @@
 //	    "guanfu": {
 //	      "command": "/path/to/guanfu-mcp",
 //	      "env": {
-//	        "GUANFU_NO_HISTORY": "1",
+//	        "GUANFU_HISTORY_DB": "/path/to/history.db",
+//	        "GUANFU_SKILL_PATH": "/path/to/docs/SKILL.md",
 //	        "FUTU_GATEWAY": "127.0.0.1:11111"
 //	      }
 //	    }
@@ -33,13 +34,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"log"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/Ricaardo/guanfu/internal/client"
 	"github.com/Ricaardo/guanfu/internal/engine"
+	"github.com/Ricaardo/guanfu/internal/history"
 	"github.com/Ricaardo/guanfu/internal/model"
 )
 
@@ -53,9 +55,9 @@ type rpcRequest struct {
 }
 
 type rpcResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      any    `json:"id"`
-	Result  any    `json:"result,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	ID      any       `json:"id"`
+	Result  any       `json:"result,omitempty"`
 	Error   *rpcError `json:"error,omitempty"`
 }
 
@@ -90,7 +92,8 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
-        "domain": {"type": "string", "enum": ["cycle","valuation","network","positioning","macro","flow","technical","cross_asset"]}
+        "domain": {"type": "string", "enum": ["cycle","valuation","network","positioning","macro","flow","technical","cross_asset"]},
+        "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       },
       "required": ["domain"]
     }
@@ -101,7 +104,8 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
-        "name": {"type": "string", "description": "指标 key 名称，如 ahr999, hash_ribbons, fear_greed"}
+        "name": {"type": "string", "description": "指标 key 名称，如 ahr999, hash_ribbons, fear_greed"},
+        "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       },
       "required": ["name"]
     }
@@ -116,6 +120,8 @@ var (
 	panelCacheTTL = 5 * time.Minute
 	panelCacheAt  time.Time
 )
+
+const defaultPanelTimeout = 90 * time.Second
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
@@ -132,6 +138,9 @@ func main() {
 			continue
 		}
 		resp := handleRequest(&req)
+		if resp == nil {
+			continue
+		}
 		data, _ := json.Marshal(resp)
 		fmt.Fprintln(writer, string(data))
 	}
@@ -163,8 +172,13 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 			Name      string          `json:"name"`
 			Arguments json.RawMessage `json:"arguments"`
 		}
-		json.Unmarshal(req.Params, &params)
-		result := handleToolCall(params.Name, params.Arguments)
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return errResp(req.ID, -32602, "invalid tools/call params: "+err.Error())
+		}
+		result, rpcErr := handleToolCall(params.Name, params.Arguments)
+		if rpcErr != nil {
+			return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: rpcErr}
+		}
 		return ok(req.ID, map[string]any{"content": []map[string]any{{"type": "text", "text": result}}})
 
 	case "resources/list":
@@ -174,9 +188,16 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 		]`)})
 
 	case "resources/read":
-		var params struct{ URI string `json:"uri"` }
-		json.Unmarshal(req.Params, &params)
-		content := handleResourceRead(params.URI)
+		var params struct {
+			URI string `json:"uri"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return errResp(req.ID, -32602, "invalid resources/read params: "+err.Error())
+		}
+		content, rpcErr := handleResourceRead(params.URI)
+		if rpcErr != nil {
+			return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: rpcErr}
+		}
 		return ok(req.ID, map[string]any{"contents": []map[string]any{{"uri": params.URI, "mimeType": "text/plain", "text": content}}})
 
 	default:
@@ -184,51 +205,79 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 	}
 }
 
-func handleToolCall(name string, args json.RawMessage) string {
+func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 	switch name {
 	case "get_btc_panel":
-		panel := getOrFetchPanel(90 * time.Second)
+		timeout, rpcErr := timeoutFromArgs(args)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		panel := getOrFetchPanel(timeout)
 		b, _ := json.MarshalIndent(panel, "", "  ")
-		return string(b)
+		return string(b), nil
 
 	case "get_domain":
-		var p struct{ Domain string `json:"domain"` }
-		json.Unmarshal(args, &p)
-		panel := getOrFetchPanel(90 * time.Second)
+		var p struct {
+			Domain         string `json:"domain"`
+			TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+		}
+		if rpcErr := decodeArgs(args, &p); rpcErr != nil {
+			return "", rpcErr
+		}
+		if !validDomain(p.Domain) {
+			return "", &rpcError{Code: -32602, Message: "invalid domain: " + p.Domain}
+		}
+		timeout, rpcErr := timeoutFromSeconds(p.TimeoutSeconds)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		panel := getOrFetchPanel(timeout)
 		dom := getDomainJSON(panel, p.Domain)
 		b, _ := json.MarshalIndent(dom, "", "  ")
-		return string(b)
+		return string(b), nil
 
 	case "get_indicator":
-		var p struct{ Name string `json:"name"` }
-		json.Unmarshal(args, &p)
-		panel := getOrFetchPanel(90 * time.Second)
+		var p struct {
+			Name           string `json:"name"`
+			TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+		}
+		if rpcErr := decodeArgs(args, &p); rpcErr != nil {
+			return "", rpcErr
+		}
+		if p.Name == "" {
+			return "", &rpcError{Code: -32602, Message: "indicator name is required"}
+		}
+		timeout, rpcErr := timeoutFromSeconds(p.TimeoutSeconds)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		panel := getOrFetchPanel(timeout)
 		ind := findIndicator(panel, p.Name)
 		if ind != nil {
 			b, _ := json.MarshalIndent(ind, "", "  ")
-			return string(b)
+			return string(b), nil
 		}
-		return fmt.Sprintf(`{"error": "indicator '%s' not found"}`, p.Name)
+		return "", &rpcError{Code: -32602, Message: fmt.Sprintf("indicator %q not found", p.Name)}
 
 	default:
-		return `{"error": "unknown tool"}`
+		return "", &rpcError{Code: -32601, Message: "unknown tool: " + name}
 	}
 }
 
-func handleResourceRead(uri string) string {
+func handleResourceRead(uri string) (string, *rpcError) {
 	switch uri {
 	case "guanfu://knowledge/skill.md":
 		data, err := os.ReadFile(skillPath())
 		if err != nil {
-			return "SKILL.md not found: " + err.Error()
+			return "", &rpcError{Code: -32603, Message: "SKILL.md not found: " + err.Error()}
 		}
-		return string(data)
+		return string(data), nil
 	case "guanfu://panel/latest":
-		panel := getOrFetchPanel(90 * time.Second)
+		panel := getOrFetchPanel(defaultPanelTimeout)
 		b, _ := json.MarshalIndent(panel, "", "  ")
-		return string(b)
+		return string(b), nil
 	default:
-		return "unknown resource"
+		return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
 	}
 }
 
@@ -253,6 +302,15 @@ func getOrFetchPanel(timeout time.Duration) *model.IndicatorPanel {
 
 	cfg := &model.Config{}
 	calc := engine.NewCalculator(cfg)
+	if os.Getenv("GUANFU_NO_HISTORY") != "1" {
+		store, err := history.Open(os.Getenv("GUANFU_HISTORY_DB"))
+		if err != nil {
+			log.Printf("history.Open failed (continuing without history quantiles): %v", err)
+		} else {
+			defer store.Close()
+			calc = calc.WithHistory(store)
+		}
+	}
 	panel := calc.BuildPanel(snap)
 
 	panelCacheMu.Lock()
@@ -267,15 +325,33 @@ func getOrFetchPanel(timeout time.Duration) *model.IndicatorPanel {
 
 func getDomainJSON(p *model.IndicatorPanel, domain string) map[string]model.Indicator {
 	switch domain {
-	case "cycle":       return p.Cycle
-	case "valuation":   return p.Valuation
-	case "network":     return p.Network
-	case "positioning": return p.Positioning
-	case "macro":       return p.Macro
-	case "flow":        return p.Flow
-	case "technical":   return p.Technical
-	case "cross_asset": return p.CrossAsset
-	default:            return nil
+	case "cycle":
+		return p.Cycle
+	case "valuation":
+		return p.Valuation
+	case "network":
+		return p.Network
+	case "positioning":
+		return p.Positioning
+	case "macro":
+		return p.Macro
+	case "flow":
+		return p.Flow
+	case "technical":
+		return p.Technical
+	case "cross_asset":
+		return p.CrossAsset
+	default:
+		return nil
+	}
+}
+
+func validDomain(domain string) bool {
+	switch domain {
+	case "cycle", "valuation", "network", "positioning", "macro", "flow", "technical", "cross_asset":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -305,6 +381,35 @@ func errResp(id any, code int, msg string) *rpcResponse {
 	return &rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}}
 }
 
-// Suppress unused import warnings
-var _ = fmt.Sprintf
-var _ = io.Discard
+func decodeArgs(args json.RawMessage, dest any) *rpcError {
+	if len(args) == 0 || string(args) == "null" {
+		return nil
+	}
+	if err := json.Unmarshal(args, dest); err != nil {
+		return &rpcError{Code: -32602, Message: "invalid tool arguments: " + err.Error()}
+	}
+	return nil
+}
+
+func timeoutFromArgs(args json.RawMessage) (time.Duration, *rpcError) {
+	var p struct {
+		TimeoutSeconds int `json:"timeout_seconds"`
+	}
+	if rpcErr := decodeArgs(args, &p); rpcErr != nil {
+		return 0, rpcErr
+	}
+	return timeoutFromSeconds(p.TimeoutSeconds)
+}
+
+func timeoutFromSeconds(seconds int) (time.Duration, *rpcError) {
+	if seconds < 0 {
+		return 0, &rpcError{Code: -32602, Message: "timeout_seconds must be non-negative"}
+	}
+	if seconds == 0 {
+		return defaultPanelTimeout, nil
+	}
+	if seconds > 300 {
+		return 0, &rpcError{Code: -32602, Message: "timeout_seconds must be <= 300"}
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
