@@ -7,7 +7,7 @@
 
 - [设计哲学](#设计哲学)
 - [架构概览](#架构概览)
-- [6 域指标体系](#6-域指标体系)
+- [8 域指标体系](#8-域指标体系)
 - [使用指南](#使用指南)
 - [历史分位系统](#历史分位系统)
 - [数据源矩阵](#数据源矩阵)
@@ -15,7 +15,7 @@
 - [反模式](#反模式)
 - [关键算法详解](#关键算法详解)
 - [Skill 联动](#skill-联动)
-- [v1 → v2 改造历史](#v1--v2-改造历史)
+- [v1 → v2 → v3 演进历史](#v1--v2--v3-演进历史)
 
 ---
 
@@ -27,7 +27,7 @@
 
 | 老子原文 | 系统映射 |
 |----------|----------|
-| **万物并作** | 6 个 domain × 30+ 个指标（周期 / 估值 / 网络 / 杠杆 / 宏观 / 资金流）同时呈现 |
+| **万物并作** | 8 个 domain × 42 个指标（周期 / 估值 / 网络 / 杠杆 / 宏观 / 资金流 / 技术 / 跨资产）同时呈现 |
 | **观复** | 在每个指标的历史分位中看它往复回归 — halving 周期回环、估值高低反覆、流入流出来去 |
 | **致虚守静** | 不输出评分 / action / state。工具守"静"，决策权归于人 |
 
@@ -61,19 +61,22 @@
 ## 架构概览
 
 ```
-cmd/btc_guanfu/main.go          ← CLI 入口 (人类表格 / JSON 输出)
+cmd/guanfu/main.go             ← CLI 入口 (人类表格 / JSON 输出)
          │
     ┌────┴────┐
     │         │
     v         v
 engine/calculator.go    engine/panel.go
-  (v1 评分，废弃中)      (v2 指标盘 BuildPanel)
+  (v1 评分，废弃中)      (v3 指标盘 BuildPanel, 8 域 42 指标)
          │                    │
          └────────┬───────────┘
                   │
-          client/real.go      ← 12+ 数据源并发拉取
+          client/real.go      ← 13 个数据源并发拉取
           client/mempool.go   ← mempool.space 网络数据
           client/coinmetrics.go ← 链上估值
+          client/cross_asset.go ← 跨资产 (Binance PAXG + Futu/Yahoo)
+          client/futu.go      ← 富途 OpenD Go 客户端 (自写 protobuf)
+          client/futu_bridge.go ← Python bridge (官方 SDK 加密握手)
                   │
           history/store.go    ← SQLite 每日采集 → 历史分位
                   │
@@ -98,7 +101,7 @@ engine/calculator.go    engine/panel.go
 
 ---
 
-## 6 域指标体系
+## 8 域指标体系
 
 每个指标包含 6 个字段：
 
@@ -427,18 +430,22 @@ diff = (ma30 - ma60) / ma60
 
 ---
 
-## v1 → v2 改造历史
+## v1 → v2 → v3 演进历史
 
-| 维度 | v1 (coinman) | v2 (观复) |
-|------|-------------|----------|
-| 总分 | ❌ 0-100 设计性稀释 | 不输出 |
-| Action/State | ❌ 硬编码阈值 = 假精度 | 不输出，Claude + 人综合 |
-| 子分 | 4 维 sigmoid 隐式压缩 | 6 域原始指标 + 历史分位 |
-| 数据源 | BTC + ETH + Top50 + USDT/CNY | + mempool + ETF + F&G + FRED + CoinMetrics |
-| 估值层 | RSI + AHR | AHR(改进版) + Mayer + 200wSMA + Pi Cycle + MVRV/NUPL |
-| 网络层 | 无 | hash rate + ribbons + difficulty + mempool |
-| 资金流 | 仅稳定币增速 | ETF 7d/30d + 稳定币市值 + 稳定币 30d 增速 + ETH/BTC |
-| 宏观层 | 无 | DXY + 10Y real yield + M2 YoY + SPX corr (FRED) |
-| 历史分位 | 无 | SQLite 每日采集 15 个指标 → 730 天分位 |
-| 决策依据 | 1 个 score | 6 域盘面 + 知识库 + Claude 综合 |
-| 山寨季指数 | ❌ (1-btc_dominance)×100 | ✅ 基于 Top50 90 日跑赢 BTC 占比自算 |
+| 维度 | v1 (coinman) | v2 (观复) | v3 (当前) |
+|------|-------------|----------|----------|
+| 总分 | ❌ 0-100 设计性稀释 | 不输出 | 不输出 |
+| Action/State | ❌ 硬编码阈值 = 假精度 | 不输出，Claude + 人综合 | 8 域 42 指标 + q 分位 + AI 综合 |
+| 子分 | 4 维 sigmoid 隐式压缩 | 6 域原始指标 + 历史分位 | 8 域 42 原始指标 + 历史分位 |
+| 数据源 | BTC + ETH + Top50 + USDT/CNY | + mempool + ETF + F&G + FRED + CoinMetrics | + Futu (6 assets) + Binance PAXG + Yahoo (backup) |
+| 估值层 | RSI + AHR | AHR(改进版) + Mayer + 200wSMA + Pi Cycle + MVRV/NUPL | 同 v2 + 动态分位评分 |
+| 网络层 | 无 | hash rate + ribbons + difficulty + mempool | 同 v2 + 180d MA 窗口 |
+| 资金流 | 仅稳定币增速 | ETF 7d/30d + 稳定币市值 + 稳定币 30d 增速 + ETH/BTC | 同 v2 + real-time stablecoin cap |
+| 宏观层 | 无 | DXY + 10Y real yield + M2 YoY + SPX corr (FRED) | + Futu UUP (DXY 实时代理) |
+| 技术域 | 无 | 无 | RSI/MACD/EMA/MA50-200/BB/波动 (7 指标) |
+| 跨资产域 | 无 | 无 | BTC vs Gold/QQQ/SPY/UUP/VIXY + correlations + rel strength (12 指标) |
+| 历史分位 | 无 | SQLite 每日采集 15 个指标 → 730 天分位 | 同 v2 |
+| 决策依据 | 1 个 score | 6 域盘面 + SKILL.md + Claude | 8 域盘面 + 520 行 SKILL.md + 8 步读盘法 + AI |
+| 山寨季 | ❌ (1-btc_dom)×100 | blockchaincenter → 自算 | 自算 (Top50 kline, 零外部依赖) |
+| 黄金 | 无 | 无 | Binance PAXG + Futu GLD 双源交叉验证 |
+| DXY | 无 | FRED DTWEXBGS (需 key) | Futu UUP 实时 + FRED 备用 |
