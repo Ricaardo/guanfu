@@ -3,10 +3,12 @@
 > 致虚极，守静笃。**万物并作，吾以观复。**
 > ——《道德经》第十六章
 
-guanfu 是一个 BTC 投资盘面 CLI 工具，输出 **8 个域 40+ 指标**的纯数据盘面。每个指标包含原始值、历史分位、解读标签和数据源。**不输出评分 / action / state** — 决策由人和 AI 综合完成。
+guanfu 是一个 BTC 投资盘面 CLI 工具，输出 **8 个域 44 指标**的纯数据盘面（攒满 30 天历史后 45）。每个指标包含原始值、历史分位、解读标签和数据源。**不输出评分 / action / state** — 决策由人和 AI 综合完成。
 
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+> **免责声明**：观复输出的是历史分位 + 模式参考，**不是投资建议**。BTC 价格高度波动，过去的指标 pattern 不保证未来重现。任何决策请结合自己的风险承受能力、持仓周期和资金状况，盈亏自负。
 
 ## 设计哲学
 
@@ -17,7 +19,7 @@ guanfu 出自《道德经》第十六章："致虚极，守静笃。万物并作
 ```
 ┌──────────────────────────────────────────┐
 │  决策层 (Human + Claude / ChatGPT)        │
-│  8 域 42 指标 × q 分位 × 组合 pattern     │
+│  8 域 44 指标 × q 分位 × 组合 pattern     │
 │  → 概率性判断，不输出确定性结论            │
 ├──────────────────────────────────────────┤
 │  解读层 (SKILL.md)                         │
@@ -28,10 +30,10 @@ guanfu 出自《道德经》第十六章："致虚极，守静笃。万物并作
 └──────────────────────────────────────────┘
 ```
 
-**为什么不是评分系统**：v1 (CoinMan) 曾用一个 0-100 总分 + 6 类 action 试图替代综合判断。把 42 个指标压成 1 个数字必然丢失信息——总分永远停在 50 附近，无法区分"杠杆过热导致的上涨"和"机构买入驱动的上涨"。v2 更名为"观复"：不输出评分，只输出原始指标 + 历史分位，由人和 AI 完成综合判断。
+**为什么不是评分系统**：v1 (CoinMan) 曾用一个 0-100 总分 + 6 类 action 试图替代综合判断。把 44 个指标压成 1 个数字必然丢失信息——总分永远停在 50 附近，无法区分"杠杆过热导致的上涨"和"机构买入驱动的上涨"。v2 更名为"观复"：不输出评分，只输出原始指标 + 历史分位，由人和 AI 完成综合判断。
 
 三层映射关系：
-- **万物并作** → 8 域 42 指标同时呈现
+- **万物并作** → 8 域 44 指标同时呈现
 - **观复** → 在 q 分位中观察每个指标的往复回归
 - **致虚守静** → 工具守"静"，不替代主人的判断
 
@@ -51,13 +53,25 @@ cd guanfu && make all
 
 ```bash
 pip install futu-api
-cp internal/client/futu_bridge.py bin/
+
+# 源码安装：
+cp internal/client/futu_bridge.py "$(dirname "$(which guanfu)")/"
+
+# go install 用户：从 release archive 解出 futu_bridge.py，或直接：
+curl -sL https://raw.githubusercontent.com/Ricaardo/guanfu/main/internal/client/futu_bridge.py \
+  -o "$(dirname "$(which guanfu)")/futu_bridge.py"
+
+# 或自定义位置：
+export FUTU_BRIDGE=/path/to/futu_bridge.py
 ```
 
 ## 使用
 
 ```bash
-# 完整盘面（人类可读，冷启动通常 60-90s，缓存命中 < 1s）
+# 第一次运行（不写 history.db，最轻量）
+GUANFU_NO_HISTORY=1 guanfu
+
+# 完整盘面（人类可读，冷启动通常 60-90s，缓存命中 < 1s；首次会创建 ~/.guanfu/history.db）
 guanfu
 
 # JSON 输出 → 喂 Claude / ChatGPT
@@ -94,6 +108,32 @@ guanfu-similar --current current.json --history-dir data/panels --top 8
 
 相似度只比较双方都有 `q` 的指标，方法见 [docs/backtest-methodology.md](docs/backtest-methodology.md)。公开文案里的历史收益数字必须由该流程生成，并披露样本数量、窗口和反例。
 
+## Demo
+
+```text
+$ guanfu --plain
+guanfu BTC panel (2026-05-02)   price: $78209.73
+BTC dominance: 58.46%   F&G: 39   total cap: $2.7T
+
+Cycle 周期定位
+  days_since_halving             742  顶部 / 分配期 (18-30m)
+  mayer_multiple              0.9325  q20  偏低估
+  pi_cycle_top_ratio          0.3868  未触发
+  sma_200w_dev                +29.42%  q81  正常区
+  ...
+
+Valuation 估值
+  ahr999                      0.7118  q24  低估 / 定投区
+  mvrv_z_score                1.2613  中性偏低
+  ...
+
+Network 网络
+  hash_ribbons               下行（矿工投降信号 ⚠）
+  ...
+```
+
+完整 8 域 44 指标见 [`docs/SKILL.md`](docs/SKILL.md)。
+
 ## 8 域指标体系
 
 | 域 | 指标数 | 核心指标 |
@@ -101,11 +141,11 @@ guanfu-similar --current current.json --history-dir data/panels --top 8
 | 🌊 Cycle 周期 | 7 | halving 天数、200wSMA 偏离、Mayer Multiple、Pi Cycle Top |
 | 💰 Valuation 估值 | 4 | AHR999（改进版）、MVRV、MVRV Z-Score、NUPL |
 | ⛏️ Network 网络 | 4 | 哈希率、Hash Ribbons、难度调整、Mempool 拥堵 |
-| 📊 Positioning 杠杆 | 5 | 资金费率、OI/MC、恐慌贪婪、**山寨季指数（自算）** |
+| 📊 Positioning 杠杆 | 4 | 资金费率、OI/MC、恐慌贪婪、**山寨季指数（自算）** |
 | 🌍 Macro 宏观 | 4 | DXY 60d 趋势、10Y TIPS、M2 同比、SPX 相关性 |
-| 💸 Flow 资金流 | 6 | ETF 7d/30d 净流入、稳定币市值及增速、ETH/BTC |
-| 📈 Technical 技术 | 7 | RSI(14)、MACD 柱、EMA 交叉、MA50/200、Bollinger、波动率 |
-| 🔗 CrossAsset 跨资产 | 8 | BTC/Gold·QQQ·SPY 比率、30d 相关性、90d 相对强弱 |
+| 💸 Flow 资金流 | 5 (+1) | ETF 7d/30d 净流入、稳定币市值（30d 增速攒满 30 天后回填） |
+| 📈 Technical 技术 | 8 | RSI(14)、MACD 柱、EMA 交叉、MA50/200、Bollinger、波动率 |
+| 🔗 CrossAsset 跨资产 | 8 | BTC/Gold·QQQ·SPY/UUP/VIXY/GLD 比率、相关性、相对强弱 |
 
 ## 环境变量
 

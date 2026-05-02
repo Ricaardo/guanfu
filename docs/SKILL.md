@@ -6,7 +6,11 @@ description: |
   NOT for: 仅查 BTC 实时价格 → cmc-mcp；altcoin/memecoin → cmc-mcp / okx-dex；K 线图形态分析 → technical-analysis；链上钱包 → okx-wallet。
 license: MIT
 user-invocable: true
-required_tools: []
+required_tools:
+  - guanfu        # https://github.com/Ricaardo/guanfu — `go install github.com/Ricaardo/guanfu/cmd/guanfu@latest`
+optional_tools:
+  - jq            # 解析 --json 输出
+  - guanfu-similar  # 历史相似度复盘
 ---
 
 # 观复 (btc-guanfu): BTC 投资盘面 + 解读手册
