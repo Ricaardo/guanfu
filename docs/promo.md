@@ -24,11 +24,8 @@
 相似度和回测口径由 `guanfu-similar` 与 `docs/backtest-methodology.md` 生成，不手写挑样本。
 判断是你自己的。工具只是帮你观。
 
-这个赛道里，只有 guanfu 同时做了：
-8 域多源聚合 × 历史分位 × AI 原生输出 × 单二进制部署
-
-Go CLI，本地运行，数据不经过服务器。
-开源：github.com/Ricaardo/guanfu
+44 个指标自己拉、自己算、自己存历史。Go 单二进制，本地运行，数据不经过服务器。
+开源 MIT：github.com/Ricaardo/guanfu
 ```
 
 ## 短版（X / 微博，约 200 字）
@@ -36,11 +33,11 @@ Go CLI，本地运行，数据不经过服务器。
 ```
 观复 — BTC 盘面，但不喊单。
 
-8 域 44 指标同时呈现，每个标注历史分位：
+8 域 44 指标同时呈现，每个标注它在历史中的分位：
 现在贵还是便宜？矿工在扩张还是投降？机构在买还是在卖？
 
 不输出评分，不输出 BUY/SELL，决策是你自己的。
-本地 Go CLI，数据不经服务器，可直接喂 Claude / ChatGPT。
+本地 Go CLI，数据不经服务器，JSON 可直接喂 Claude / ChatGPT。
 
 开源 MIT：github.com/Ricaardo/guanfu
 ```
@@ -48,5 +45,5 @@ Go CLI，本地运行，数据不经过服务器。
 ## 一句话版（推文回复 / IM 签名）
 
 ```
-观复 = BTC 8 域 44 指标 × 历史分位 × AI 原生输出。本地 Go CLI，不喊单，决策交给你。github.com/Ricaardo/guanfu
+观复：BTC 44 个指标，每个标注它在历史中的分位。Go CLI，本地跑，不喊单，决策交给你。github.com/Ricaardo/guanfu
 ```
