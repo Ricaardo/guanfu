@@ -106,14 +106,13 @@ func (c *futuConn) RequestHistoryKL(symbol string, days int) ([]FutuKLPoint, err
 	}
 	const maxPerReq = 1000
 	var all []FutuKLPoint
-	page := 0
 
 	for len(all) < days {
 		n := days - len(all)
 		if n > maxPerReq {
 			n = maxPerReq
 		}
-		body := encodeRequestHistoryKL(symbol, int32(page*n), int32(n))
+		body := encodeRequestHistoryKL(symbol, int32(len(all)), int32(n))
 		resp, err := c.sendAndRecv(3102, body) // 3102 = Qot_RequestHistoryKL
 		if err != nil {
 			return all, err
@@ -123,7 +122,6 @@ func (c *futuConn) RequestHistoryKL(symbol string, days int) ([]FutuKLPoint, err
 		if !hasMore || len(points) < n {
 			break
 		}
-		page++
 	}
 	return all, nil
 }
@@ -154,24 +152,20 @@ func (c *futuConn) sendAndRecv(cmd uint32, body []byte) ([]byte, error) {
 
 func futuWrite(conn net.Conn, cmd uint32, sn uint32, body []byte) error {
 	totalLen := futuHeaderLen + len(body)
-	buf := make([]byte, totalLen)
+	// Pre-header (4 bytes) + header (44 bytes) + body
+	pkt := make([]byte, 4+totalLen)
 
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(totalLen))
-	binary.LittleEndian.PutUint32(buf[4:8], futuHeaderLen)
-	binary.LittleEndian.PutUint32(buf[8:12], futuProtoType)
-	binary.LittleEndian.PutUint32(buf[12:16], futuProtoVer)
-	binary.LittleEndian.PutUint32(buf[16:20], sn)
-	binary.LittleEndian.PutUint32(buf[20:24], uint32(len(body)))
-	// 24..43: reserved (zero)
+	binary.LittleEndian.PutUint32(pkt[0:4], uint32(totalLen))   // pre-header
+	binary.LittleEndian.PutUint32(pkt[4:8], uint32(totalLen))   // total in hdr
+	binary.LittleEndian.PutUint32(pkt[8:12], futuHeaderLen)     // header len
+	binary.LittleEndian.PutUint32(pkt[12:16], futuProtoType)    // proto type
+	binary.LittleEndian.PutUint32(pkt[16:20], futuProtoVer)     // proto ver
+	binary.LittleEndian.PutUint32(pkt[20:24], sn)               // serial no
+	binary.LittleEndian.PutUint32(pkt[24:28], uint32(len(body))) // body len
+	// bytes 28..48: reserved (zero, already zero)
 
-	copy(buf[44:], body)
-
-	// 前面再加 4 字节 totalLen (Futu 的 pre-header)
-	full := make([]byte, 4+totalLen)
-	binary.LittleEndian.PutUint32(full[0:4], uint32(totalLen))
-	copy(full[4:], buf)
-
-	_, err := conn.Write(full)
+	copy(pkt[48:], body)
+	_, err := conn.Write(pkt)
 	return err
 }
 
@@ -278,16 +272,15 @@ func pbGetVarint(body []byte, fieldNum uint32) uint64 {
 
 // pbGetString 从 bytes 中取 fieldNum 的 string 值
 func pbGetString(body []byte, fieldNum uint32) string {
-	_, rest := pbSkipField(body)
-	for len(rest) > 0 {
-		fn, wt, rest := pbReadTag(rest)
+	for len(body) > 0 {
+		fn, wt, rest := pbReadTag(body)
 		if fn == fieldNum && wt == 2 {
 			length, n := decodeVarint(rest)
 			if n > 0 && int(length) <= len(rest[n:]) {
 				return string(rest[n : n+int(length)])
 			}
 		}
-		rest = pbSkipFieldValue(wt, rest)
+		body = pbSkipFieldValue(wt, rest)
 	}
 	return ""
 }
@@ -305,7 +298,29 @@ func pbGetDouble(body []byte, fieldNum uint32) float64 {
 	return 0
 }
 
-// pbGetNested 取嵌套消息字节
+// pbGetRepeated returns ALL nested messages for a repeated field.
+// Unlike pbGetNested which returns only the first, this collects every occurrence.
+func pbGetRepeated(body []byte, fieldNum uint32) [][]byte {
+	var out [][]byte
+	for len(body) > 0 {
+		fn, wt, rest := pbReadTag(body)
+		if fn == 0 {
+			break
+		}
+		if fn == fieldNum && wt == 2 {
+			length, n := decodeVarint(rest)
+			if n > 0 && int(length) <= len(rest[n:]) {
+				out = append(out, rest[n:n+int(length)])
+			}
+			body = rest[n+int(length):]
+			continue
+		}
+		body = pbSkipFieldValue(wt, rest)
+	}
+	return out
+}
+
+// pbGetNested 取嵌套消息字节 (第一个匹配)
 func pbGetNested(body []byte, fieldNum uint32) []byte {
 	for len(body) > 0 {
 		fn, wt, rest := pbReadTag(body)
@@ -374,6 +389,7 @@ func pbFindVarint(body []byte, fieldNum uint32) (uint64, []byte) {
 	return 0, nil
 }
 
+// pbSkipField is unused but kept for completeness of the mini protobuf library
 func pbSkipField(body []byte) (uint64, []byte) {
 	_, wt, rest := pbReadTag(body)
 	rest = pbSkipFieldValue(wt, rest)
@@ -469,32 +485,12 @@ func parseFutuSymbol(symbol string) (market int32, code string, err error) {
 //	KLine { string time=1; double open=4; double high=5; double low=6;
 //	        double close=7; double volume=10; }
 func decodeKLineResponse(body []byte) ([]FutuKLPoint, bool) {
-	// s2c → field 1 (Security), field 5 (klList array)
-	klList := pbGetNested(body, 5) // field 5 = repeated KLine
-	if klList == nil {
-		return nil, false
-	}
-
+	// s2c → field 5 = repeated KLine, each element is its own tag+length-delimited pair
+	klBlocks := pbGetRepeated(body, 5)
 	var points []FutuKLPoint
-	// 遍历 klList 中的每条 KLine (嵌套消息)
-	for len(klList) > 0 {
-		fn, wt, rest := pbReadTag(klList)
-		if fn == 0 {
-			break
-		}
-		if fn == 2 && wt == 2 { // field 5 -> repeated -> each element is field 5? Actually no...
-			// In repeated messages, each element is embedded as length-delimited
-			length, n := decodeVarint(rest)
-			if n > 0 && int(length) <= len(rest[n:]) {
-				kline := rest[n : n+int(length)]
-				points = append(points, decodeKLine(kline))
-				klList = rest[n+int(length):]
-				continue
-			}
-		}
-		klList = pbSkipFieldValue(wt, rest)
+	for _, block := range klBlocks {
+		points = append(points, decodeKLine(block))
 	}
-
 	// hasMore → field 8
 	nextPage := pbGetVarint(body, 8)
 	return points, nextPage == 1
