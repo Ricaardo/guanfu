@@ -408,14 +408,19 @@ func pbSkipField(body []byte) (uint64, []byte) {
 //
 //	message InitConnect {
 //	  string clientID = 1;    // 客户端标识
-//	  int32  clientVer = 2;   // 客户端版本 (0 = 无需加密)
+//	  int32  clientVer = 2;   // 0=旧协议(无加密), 1=新协议(需 RSA+AES 握手)
 //	  bool   recvNotify = 3;  // 是否接收推送
+//	  string programmingLanguage = 4;
 //	}
+//
+// clientVer=0 跳过 OpenD 的加密握手层，使用纯 TCP+protobuf。
+// Python SDK 默认 clientVer=1 会触发密钥交换，Go 实现如需加密需额外 ~200 行。
 func encodeInitConnect() []byte {
 	var buf []byte
 	buf = pbEncodeString(buf, 1, "guanfu")
-	buf = pbEncodeVarint(buf, 2, 1)   // clientVer
-	buf = pbEncodeBool(buf, 3, false) // recvNotify
+	buf = pbEncodeVarint(buf, 2, 0)      // clientVer=0 → 无加密
+	buf = pbEncodeBool(buf, 3, false)     // recvNotify
+	buf = pbEncodeString(buf, 4, "Go")    // programmingLanguage
 	return buf
 }
 
@@ -580,7 +585,14 @@ func FetchCrossAssetFromFutu(days int) (*CrossAssetFutuPrices, error) {
 
 	c, err := futuConnect(futuAddr())
 	if err != nil {
-		return nil, fmt.Errorf("futu connect: %w", err)
+		// Go direct failed (OpenD requires RSA+AES encryption handshake).
+		// Fall back to Python bridge which uses the official SDK.
+		symbols := []string{"US.QQQ", "US.SPY", "US.GLD", "US.UUP", "US.TLT", "US.VIXY"}
+		out, bridgeErr := futuBridgeSymbols(symbols, days)
+		if bridgeErr != nil {
+			return nil, fmt.Errorf("futu: %w; bridge: %w", err, bridgeErr)
+		}
+		return out, nil
 	}
 	defer c.Close()
 
