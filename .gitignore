@@ -29,6 +29,9 @@ Thumbs.db
 # Cache (runtime data directory)
 /cache/
 
+# Daily panel snapshots and reports (runtime output, per-user)
+/data/
+
 # History database (local)
 *.db
 
