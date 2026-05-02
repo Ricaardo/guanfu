@@ -4,14 +4,20 @@
 
 ## 面板归档
 
-每天保存一次完整 JSON 面板：
+每天保存一次完整 JSON 面板（`~/.guanfu/panels/` 是 `guanfu-similar` 的默认 `--history-dir`）：
 
 ```bash
-mkdir -p data/panels
-GUANFU_NO_HISTORY=1 guanfu --json > "data/panels/$(date -u +%F).json"
+mkdir -p ~/.guanfu/panels
+guanfu --json > "$HOME/.guanfu/panels/$(date -u +%F).json"
 ```
 
-如果要让 ETF、funding、mempool、宏观等指标带历史分位，不要设置 `GUANFU_NO_HISTORY=1`，并长期保留同一个 `~/.guanfu/history.db`。
+挂在 cron / launchd 上每天跑一次：
+
+```cron
+0 9 * * * /usr/bin/env -S bash -lc 'guanfu --json > ~/.guanfu/panels/$(date -u +%F).json 2>> ~/.guanfu/cron.log'
+```
+
+如果要让 ETF、funding、mempool、宏观等指标带历史分位，**不要**设置 `GUANFU_NO_HISTORY=1`，并长期保留同一个 `~/.guanfu/history.db`。
 
 ## 相似度计算
 
@@ -27,8 +33,12 @@ similarity = max(0, 1 - distance) * 100
 ## 命令
 
 ```bash
+# 默认从 ~/.guanfu/panels 读 archive
+guanfu --json | guanfu-similar --top 8
+
+# 显式路径
 guanfu --json > current.json
-guanfu-similar --current current.json --history-dir data/panels --top 8
+guanfu-similar --current current.json --history-dir /path/to/panels --top 8
 ```
 
 输出示例：
@@ -36,7 +46,7 @@ guanfu-similar --current current.json --history-dir data/panels --top 8
 ```markdown
 | rank | date | similarity | matched_q | distance | file |
 |---:|---|---:|---:|---:|---|
-| 1 | 2024-08-05 | 87.2% | 28 | 0.1280 | data/panels/2024-08-05.json |
+| 1 | 2024-08-05 | 87.2% | 28 | 0.1280 | /Users/x/.guanfu/panels/2024-08-05.json |
 ```
 
 ## 收益统计口径

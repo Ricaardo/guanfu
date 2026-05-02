@@ -3,8 +3,9 @@
 // Usage:
 //
 //	guanfu --json > current.json
-//	guanfu-similar --current current.json --history-dir samples/panels --top 5
-//	guanfu-similar --current current.json samples/panels/*.json
+//	guanfu-similar --current current.json                       # default --history-dir ~/.guanfu/panels
+//	guanfu-similar --current current.json --history-dir path    # override
+//	guanfu-similar --current current.json samples/panels/*.json # explicit files
 package main
 
 import (
@@ -16,9 +17,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/Ricaardo/guanfu/internal/model"
 )
+
+const defaultHistoryDir = "~/.guanfu/panels"
 
 type compareResult struct {
 	Date       string
@@ -30,7 +34,7 @@ type compareResult struct {
 
 func main() {
 	currentPath := flag.String("current", "-", "current guanfu JSON panel path, or '-' for stdin")
-	historyDir := flag.String("history-dir", "", "directory containing historical guanfu JSON panels")
+	historyDir := flag.String("history-dir", defaultHistoryDir, "directory containing historical guanfu JSON panels")
 	top := flag.Int("top", 5, "number of nearest panels to print")
 	flag.Parse()
 
@@ -41,9 +45,21 @@ func main() {
 
 	files := append([]string(nil), flag.Args()...)
 	if *historyDir != "" {
-		dirFiles, err := filepath.Glob(filepath.Join(*historyDir, "*.json"))
+		expanded, err := expandHome(*historyDir)
+		if err != nil {
+			exitf("expand history dir: %v", err)
+		}
+		dirFiles, err := filepath.Glob(filepath.Join(expanded, "*.json"))
 		if err != nil {
 			exitf("read history dir: %v", err)
+		}
+		if len(dirFiles) == 0 && len(flag.Args()) == 0 {
+			fmt.Fprintf(os.Stderr,
+				"no panels found in %s.\n"+
+					"  bootstrap the archive with:  guanfu --json > %s/$(date -u +%%F).json\n"+
+					"  or pass explicit files / a different --history-dir.\n",
+				expanded, expanded)
+			os.Exit(2)
 		}
 		files = append(files, dirFiles...)
 	}
@@ -160,6 +176,20 @@ func panelDomains(p *model.IndicatorPanel) map[string]map[string]model.Indicator
 		"technical":   p.Technical,
 		"cross_asset": p.CrossAsset,
 	}
+}
+
+func expandHome(path string) (string, error) {
+	if !strings.HasPrefix(path, "~/") && path != "~" {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if path == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, path[2:]), nil
 }
 
 func dedupeAndSort(values []string) []string {

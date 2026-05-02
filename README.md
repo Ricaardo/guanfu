@@ -102,11 +102,18 @@ cat panel.json | your-ai-client --system "$(cat docs/SKILL.md)"
 **历史相似度（推广/复盘用）**：
 
 ```bash
-guanfu --json > current.json
-guanfu-similar --current current.json --history-dir data/panels --top 8
+# 一次性比对
+guanfu --json | guanfu-similar --top 8         # 默认 --history-dir ~/.guanfu/panels
+
+# 每日 archive 一份盘面（cron / launchd）
+mkdir -p ~/.guanfu/panels
+guanfu --json > ~/.guanfu/panels/$(date -u +%F).json
+
+# crontab 行（每天 09:00）
+0 9 * * * /usr/bin/env -S bash -lc 'guanfu --json > ~/.guanfu/panels/$(date -u +%F).json 2>> ~/.guanfu/cron.log'
 ```
 
-相似度只比较双方都有 `q` 的指标，方法见 [docs/backtest-methodology.md](docs/backtest-methodology.md)。公开文案里的历史收益数字必须由该流程生成，并披露样本数量、窗口和反例。
+archive 攒满 30+ 天后，`guanfu-similar` 给出的"今天与历史最相似的盘面"才有统计意义。相似度只比较双方都有 `q` 的指标，方法见 [docs/backtest-methodology.md](docs/backtest-methodology.md)。公开文案里的历史收益数字必须由该流程生成，并披露样本数量、窗口和反例。
 
 ## Demo
 

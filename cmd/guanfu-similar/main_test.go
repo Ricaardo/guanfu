@@ -2,6 +2,8 @@ package main
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Ricaardo/guanfu/internal/model"
@@ -40,5 +42,29 @@ func TestComparePanelsRequiresSharedQuantiles(t *testing.T) {
 	got := comparePanels(&model.IndicatorPanel{}, &model.IndicatorPanel{})
 	if got.Matched != 0 || !math.IsInf(got.Distance, 1) {
 		t.Fatalf("got %+v, want no match with +Inf distance", got)
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	cases := map[string]string{
+		"":                    "",
+		"/abs/path":           "/abs/path",
+		"~":                   home,
+		"~/.guanfu/panels":    filepath.Join(home, ".guanfu/panels"),
+		"./relative":          "./relative",
+		"~not-tilde-prefixed": "~not-tilde-prefixed",
+	}
+	for in, want := range cases {
+		got, err := expandHome(in)
+		if err != nil {
+			t.Fatalf("expandHome(%q): %v", in, err)
+		}
+		if got != want {
+			t.Errorf("expandHome(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
