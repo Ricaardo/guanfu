@@ -536,19 +536,47 @@ func decodeSnapshotPrice(body []byte) (float64, string, error) {
 
 // CrossAssetFutuPrices holds prices fetched from Futu OpenD
 type CrossAssetFutuPrices struct {
-	QQQPrice     float64
-	QQQHistory   []float64
-	QQQPriceAsOf string
-	SPYPrice     float64
-	SPYHistory   []float64
+	QQQPrice      float64
+	QQQHistory    []float64
+	QQQPriceAsOf  string
+	SPYPrice      float64
+	SPYHistory    []float64
 	SPYPriceAsOf  string
-	GLDPrice     float64 // GLD ETF (实物黄金 ETF，补充 PAXG)
-	GLDHistory   []float64
-	GLDPriceAsOf string
-	Warnings     []string
+	GLDPrice      float64 // 实物黄金 ETF
+	GLDHistory    []float64
+	GLDPriceAsOf  string
+	UUPPrice      float64 // 做多美元 ETF (DXY proxy)
+	UUPHistory    []float64
+	UUPPriceAsOf  string
+	TLTPrice      float64 // 20Y+ 美债 ETF
+	TLTHistory    []float64
+	TLTPriceAsOf  string
+	VIXYPrice     float64 // VIX 波动率 ETF
+	VIXYHistory   []float64
+	VIXYPriceAsOf string
+	Warnings      []string
 }
 
-// FetchCrossAssetFromFutu 从本地富途网关拉取 QQQ/SPY 数据
+// futuFetchOne requests history KL for a single symbol, returns (price, history, asOf).
+func (c *futuConn) futuFetchOne(symbol string, days int, warnings *[]string) (float64, []float64, string) {
+	kl, err := c.RequestHistoryKL(symbol, days)
+	if err != nil {
+		*warnings = append(*warnings, fmt.Sprintf("futu %s: %v", symbol, err))
+		return 0, nil, ""
+	}
+	if len(kl) == 0 {
+		return 0, nil, ""
+	}
+	return kl[0].Close, klToFloat64(kl), kl[0].Time.Format("2006-01-02")
+}
+
+// FetchCrossAssetFromFutu 从本地富途网关拉取跨资产数据
+//
+//	QQQ, SPY (美股) — 主要对比标的
+//	GLD (黄金ETF) — 补充 PAXG，提供更长历史
+//	UUP (美元ETF) — DXY 实时代理，替代 FRED
+//	TLT (长期美债) — 利率/避险情绪
+//	VIXY (波动率ETF) — 传统市场恐慌指数
 func FetchCrossAssetFromFutu(days int) (*CrossAssetFutuPrices, error) {
 	if days <= 0 {
 		days = 1000
@@ -562,35 +590,12 @@ func FetchCrossAssetFromFutu(days int) (*CrossAssetFutuPrices, error) {
 
 	out := &CrossAssetFutuPrices{}
 
-	// QQQ
-	qqqKL, err := c.RequestHistoryKL("US.QQQ", days)
-	if err != nil {
-		out.Warnings = append(out.Warnings, fmt.Sprintf("futu QQQ KL: %v", err))
-	} else if len(qqqKL) > 0 {
-		out.QQQHistory = klToFloat64(qqqKL)
-		out.QQQPrice = qqqKL[0].Close
-		out.QQQPriceAsOf = qqqKL[0].Time.Format("2006-01-02")
-	}
-
-	// SPY
-	spyKL, err := c.RequestHistoryKL("US.SPY", days)
-	if err != nil {
-		out.Warnings = append(out.Warnings, fmt.Sprintf("futu SPY KL: %v", err))
-	} else if len(spyKL) > 0 {
-		out.SPYHistory = klToFloat64(spyKL)
-		out.SPYPrice = spyKL[0].Close
-		out.SPYPriceAsOf = spyKL[0].Time.Format("2006-01-02")
-	}
-
-	// GLD (实物黄金 ETF，可选)
-	gldKL, err := c.RequestHistoryKL("US.GLD", days)
-	if err != nil {
-		out.Warnings = append(out.Warnings, fmt.Sprintf("futu GLD KL: %v", err))
-	} else if len(gldKL) > 0 {
-		out.GLDHistory = klToFloat64(gldKL)
-		out.GLDPrice = gldKL[0].Close
-		out.GLDPriceAsOf = gldKL[0].Time.Format("2006-01-02")
-	}
+	out.QQQPrice, out.QQQHistory, out.QQQPriceAsOf = c.futuFetchOne("US.QQQ", days, &out.Warnings)
+	out.SPYPrice, out.SPYHistory, out.SPYPriceAsOf = c.futuFetchOne("US.SPY", days, &out.Warnings)
+	out.GLDPrice, out.GLDHistory, out.GLDPriceAsOf = c.futuFetchOne("US.GLD", days, &out.Warnings)
+	out.UUPPrice, out.UUPHistory, out.UUPPriceAsOf = c.futuFetchOne("US.UUP", days, &out.Warnings)
+	out.TLTPrice, out.TLTHistory, out.TLTPriceAsOf = c.futuFetchOne("US.TLT", days, &out.Warnings)
+	out.VIXYPrice, out.VIXYHistory, out.VIXYPriceAsOf = c.futuFetchOne("US.VIXY", days, &out.Warnings)
 
 	return out, nil
 }

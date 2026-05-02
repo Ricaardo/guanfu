@@ -322,6 +322,36 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 		addWarning("fred macro data unavailable: FRED_API_KEY is not set")
 	}
 
+	// 14. cross-asset fetch (Binance PAXG + Futu/Yahoo QQQ/SPY/GLD/UUP/VIXY)
+	if ca, err := FetchCrossAssetData(ctx, btcHistoryTargetDays); err == nil && ca != nil {
+		snap.CrossAssetFetched = true
+		snap.GoldPriceUSD = decimal.NewFromFloat(ca.GoldPrice)
+		snap.QQQPrice = decimal.NewFromFloat(ca.QQQPrice)
+		snap.SPYPrice = decimal.NewFromFloat(ca.SPYPrice)
+		snap.GoldPriceAsOf = ca.GoldPriceAsOf
+		snap.QQQPriceAsOf = ca.QQQPriceAsOf
+		snap.SPYPriceAsOf = ca.SPYPriceAsOf
+		snap.GoldHistory = toDecimalSlice(ca.GoldHistory)
+		snap.QQQHistory = toDecimalSlice(ca.QQQHistory)
+		snap.SPYHistory = toDecimalSlice(ca.SPYHistory)
+		// v3.1 extended (Futu)
+		snap.GoldETFPriceUSD = decimal.NewFromFloat(ca.GLDPrice)
+		snap.GoldETFHistory = toDecimalSlice(ca.GLDHistory)
+		snap.GoldETFAsOf = ca.GLDPriceAsOf
+		snap.UUPPrice = decimal.NewFromFloat(ca.UUPPrice)
+		snap.UUPHistory = toDecimalSlice(ca.UUPHistory)
+		snap.UUPPriceAsOf = ca.UUPPriceAsOf
+		snap.VIXYPrice = decimal.NewFromFloat(ca.VIXYPrice)
+		snap.VIXYHistory = toDecimalSlice(ca.VIXYHistory)
+		snap.VIXYPriceAsOf = ca.VIXYPriceAsOf
+		for _, w := range ca.Warnings {
+			addWarning("cross-asset: %s", w)
+		}
+	} else if err != nil {
+		log.Printf("Error fetching cross-asset data: %v", err)
+		addWarning("cross-asset fetch failed: %v", err)
+	}
+
 	// If critical errors (BTC data missing), return error
 	if len(snap.BTCPriceHistory) == 0 {
 		return nil, fmt.Errorf("failed to fetch critical BTC data: %v", errList)
@@ -792,4 +822,13 @@ func calculateAltcoinSeason(coins []model.CoinSnapshot, btcHistory []decimal.Dec
 
 	pct := float64(outperformed) / float64(total) * 100
 	return decimal.NewFromFloat(pct)
+}
+
+// toDecimalSlice converts []float64 -> []decimal.Decimal
+func toDecimalSlice(vals []float64) []decimal.Decimal {
+	out := make([]decimal.Decimal, len(vals))
+	for i, v := range vals {
+		out[i] = decimal.NewFromFloat(v)
+	}
+	return out
 }

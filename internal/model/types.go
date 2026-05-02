@@ -92,15 +92,25 @@ type MarketSnapshot struct {
 	FearGreedAsOf      string
 
 	// Cross-asset prices (v3 新增)
-	GoldPriceUSD    decimal.Decimal // 黄金现货 USD/oz
+	GoldPriceUSD    decimal.Decimal // 黄金现货 USD/oz (Binance PAXG)
 	QQQPrice        decimal.Decimal // QQQ ETF
 	SPYPrice        decimal.Decimal // SPY ETF
 	GoldPriceAsOf   string
 	QQQPriceAsOf    string
 	SPYPriceAsOf    string
-	GoldHistory     []decimal.Decimal // 历史价格（与 BTC 对齐长度）
+	GoldHistory     []decimal.Decimal
 	QQQHistory      []decimal.Decimal
 	SPYHistory      []decimal.Decimal
+	// Extended (v3.1, Futu)
+	GoldETFPriceUSD decimal.Decimal // GLD 实物黄金 ETF
+	GoldETFHistory  []decimal.Decimal
+	GoldETFAsOf     string
+	UUPPrice        decimal.Decimal // 做多美元 ETF (DXY proxy)
+	UUPHistory      []decimal.Decimal
+	UUPPriceAsOf    string
+	VIXYPrice       decimal.Decimal // VIX 波动率 ETF
+	VIXYHistory     []decimal.Decimal
+	VIXYPriceAsOf   string
 	CrossAssetFetched bool
 
 	// 非致命数据源问题。BuildPanel 会透传到 stale_warnings。

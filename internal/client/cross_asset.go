@@ -56,7 +56,7 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 		out.Warnings = append(out.Warnings, fmt.Sprintf("Binance PAXG fetch failed: %v", err))
 	}
 
-	// QQQ & SPY: 先试富途，再降级 Yahoo
+	// QQQ/SPY/GLD/UUP/TLT/VIXY: 先试富途，再降级 Yahoo
 	futuOK := false
 	if os.Getenv("FUTU_ENABLED") != "0" {
 		if futuData, err := FetchCrossAssetFromFutu(targetDays); err == nil && futuData != nil {
@@ -66,6 +66,18 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 			out.SPYPrice = futuData.SPYPrice
 			out.SPYHistory = futuData.SPYHistory
 			out.SPYPriceAsOf = futuData.SPYPriceAsOf
+			out.GLDPrice = futuData.GLDPrice
+			out.GLDHistory = futuData.GLDHistory
+			out.GLDPriceAsOf = futuData.GLDPriceAsOf
+			out.UUPPrice = futuData.UUPPrice
+			out.UUPHistory = futuData.UUPHistory
+			out.UUPPriceAsOf = futuData.UUPPriceAsOf
+			out.TLTPrice = futuData.TLTPrice
+			out.TLTHistory = futuData.TLTHistory
+			out.TLTPriceAsOf = futuData.TLTPriceAsOf
+			out.VIXYPrice = futuData.VIXYPrice
+			out.VIXYHistory = futuData.VIXYHistory
+			out.VIXYPriceAsOf = futuData.VIXYPriceAsOf
 			out.Warnings = append(out.Warnings, futuData.Warnings...)
 			if out.QQQPrice > 0 && out.SPYPrice > 0 {
 				futuOK = true
@@ -247,14 +259,32 @@ func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, target
 
 // CrossAssetPrices 跨资产价格数据聚合
 type CrossAssetPrices struct {
+	// Gold (Binance PAXG — tokenized gold)
 	GoldPrice     float64
 	GoldHistory   []float64
 	GoldPriceAsOf string
-	QQQPrice      float64
-	QQQHistory    []float64
-	QQQPriceAsOf  string
-	SPYPrice      float64
-	SPYHistory    []float64
-	SPYPriceAsOf  string
+	// Gold ETF (Futu GLD — physical gold ETF)
+	GLDPrice     float64
+	GLDHistory   []float64
+	GLDPriceAsOf string
+	// US equities (Futu > Yahoo)
+	QQQPrice     float64
+	QQQHistory   []float64
+	QQQPriceAsOf string
+	SPYPrice     float64
+	SPYHistory   []float64
+	SPYPriceAsOf string
+	// DXY proxy (Futu UUP — USD bull ETF)
+	UUPPrice     float64
+	UUPHistory   []float64
+	UUPPriceAsOf string
+	// Treasuries (Futu TLT — 20Y+)
+	TLTPrice     float64
+	TLTHistory   []float64
+	TLTPriceAsOf string
+	// Volatility (Futu VIXY — VIX ETF)
+	VIXYPrice     float64
+	VIXYHistory   []float64
+	VIXYPriceAsOf string
 	Warnings      []string
 }
