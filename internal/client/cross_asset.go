@@ -1,4 +1,4 @@
-// fetch_cross_asset.go — 拉取黄金、QQQ、SPY 价格数据用于跨资产对比。
+// fetch_cross_asset.go — 拉取黄金、QQQ、SPY、GLD、UUP、VIXY 价格数据用于跨资产对比。
 //
 // 数据源:
 //   - 黄金: Binance PAXG/USDT (tokenized gold, 无 API key, 稳定)
@@ -35,7 +35,7 @@ type yahooChartResp struct {
 	} `json:"chart"`
 }
 
-// FetchCrossAssetData 拉取黄金、QQQ、SPY 的近期价格和历史。
+// FetchCrossAssetData 拉取黄金(Binance PAXG) + QQQ/SPY/GLD/UUP/VIXY(Futu>Yahoo) 的近期价格和历史。
 //
 // 数据源优先级:
 //   - 黄金: Binance PAXG/USDT (tokenized gold)
