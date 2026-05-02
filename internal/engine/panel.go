@@ -17,8 +17,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/fengenci/guanfu/internal/mathutil"
-	"github.com/fengenci/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/mathutil"
+	"github.com/Ricaardo/guanfu/internal/model"
 
 	"github.com/shopspring/decimal"
 )

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/fengenci/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/model"
 )
 
 func TestFilterDomainPreservesMetadata(t *testing.T) {

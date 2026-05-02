@@ -1,4 +1,4 @@
-module github.com/fengenci/guanfu
+module github.com/Ricaardo/guanfu
 
 go 1.26.2
 

@@ -26,10 +26,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengenci/guanfu/internal/client"
-	"github.com/fengenci/guanfu/internal/engine"
-	"github.com/fengenci/guanfu/internal/history"
-	"github.com/fengenci/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/client"
+	"github.com/Ricaardo/guanfu/internal/engine"
+	"github.com/Ricaardo/guanfu/internal/history"
+	"github.com/Ricaardo/guanfu/internal/model"
 )
 
 // domain 中英文显示名

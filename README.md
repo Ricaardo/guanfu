@@ -27,13 +27,13 @@ guanfu 是一个 BTC 投资盘面 CLI 工具，输出 6 个域 30+ 指标的纯�
 ## 安装
 
 ```bash
-go install github.com/fengenci/guanfu/cmd/guanfu@latest
+go install github.com/Ricaardo/guanfu/cmd/guanfu@latest
 ```
 
 或从源码构建：
 
 ```bash
-git clone https://github.com/fengenci/guanfu.git
+git clone https://github.com/Ricaardo/guanfu.git
 cd guanfu
 make build
 ```

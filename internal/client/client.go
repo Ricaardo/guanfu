@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/fengenci/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/model"
 	"context"
 )
 

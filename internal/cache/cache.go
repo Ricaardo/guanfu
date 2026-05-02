@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/fengenci/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/model"
 )
 
 // Cache 缓存管理器

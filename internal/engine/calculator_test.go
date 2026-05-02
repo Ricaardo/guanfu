@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengenci/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/model"
 
 	"github.com/shopspring/decimal"
 )

@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 	"math/rand"
-	"github.com/fengenci/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/internal/model"
 	"time"
 
 	"github.com/shopspring/decimal"
