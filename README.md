@@ -38,36 +38,49 @@ guanfu 出自《道德经》第十六章："致虚极，守静笃。万物并作
 ## 安装
 
 ```bash
+# 一行安装
 go install github.com/Ricaardo/guanfu/cmd/guanfu@latest
-```
 
-或从源码构建：
-
-```bash
+# 或源码构建
 git clone https://github.com/Ricaardo/guanfu.git
-cd guanfu
-make build
+cd guanfu && make build
 ```
 
-## 快速开始
+**Futu Bridge（可选，获取 QQQ/SPY/DXY/VIX 实时数据）**：
 
 ```bash
-# 完整盘面（人类可读）
+pip install futu-api
+cp internal/client/futu_bridge.py bin/
+```
+
+## 使用
+
+```bash
+# 完整盘面（人类可读，冷启动 ~80s，缓存命中 < 1s）
 guanfu
 
-# JSON 输出（喂 Claude / 程序）
+# JSON 输出 → 喂 Claude / ChatGPT
 guanfu --json | jq
 
-# 仅看单个域
-guanfu --domain technical          # 技术指标
-guanfu --domain cross_asset        # 跨资产对比
-guanfu --domain valuation          # 估值
+# 只看关心的域
+guanfu --domain valuation    # 估值
+guanfu --domain technical    # 技术指标
+guanfu --domain cross_asset  # 跨资产对比
 
-# AHR999 拟合半衰期
-guanfu --halflife 730              # 2年，对快熊快牛更敏感
+# 参数
+guanfu --halflife 730        # AHR 半衰期（默认 1460=4年）
+guanfu --timeout 180s        # 超时
+GUANFU_NO_HISTORY=1 guanfu   # 跳过 history.db
+```
 
-# 自定义超时
-guanfu --timeout 180s
+**配合 AI 使用**：
+
+```bash
+# Claude Code: 直接对话"BTC 现在怎么样？"（skill 自动调用）
+
+# Claude API / ChatGPT: 将 JSON + SKILL.md 附加到 prompt
+guanfu --json > panel.json
+cat panel.json | your-ai-client --system "$(cat docs/SKILL.md)"
 ```
 
 ## 8 域指标体系
@@ -91,6 +104,9 @@ guanfu --timeout 180s
 | `COINMETRICS_API_KEY` | CoinMetrics 付费端点 |
 | `GUANFU_NO_HISTORY=1` | 禁用 history.db 写入/查询 |
 | `CACHE_DIR` | 缓存目录（默认 `./cache`） |
+| `FUTU_GATEWAY` | 富途 OpenD 地址（默认 `127.0.0.1:11111`） |
+| `FUTU_ENABLED=0` | 禁用富途，直接用 Yahoo 降级 |
+| `FUTU_BRIDGE` | 自定义 futu_bridge.py 路径 |
 
 ## 历史分位系统
 
