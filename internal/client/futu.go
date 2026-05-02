@@ -18,7 +18,6 @@ package client
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -126,16 +125,6 @@ func (c *futuConn) RequestHistoryKL(symbol string, days int) ([]FutuKLPoint, err
 	return all, nil
 }
 
-// RequestSnapPrice 获取股票最新价 (简化快照)
-func (c *futuConn) RequestSnapPrice(symbol string) (float64, string, error) {
-	body := encodeGetSnapshot(symbol)
-	resp, err := c.sendAndRecv(3101, body) // 3101 = Qot_GetSecuritySnapshot
-	if err != nil {
-		return 0, "", err
-	}
-	return decodeSnapshotPrice(resp)
-}
-
 // ─── 底层 send/recv ──────────────────────────────────
 
 func (c *futuConn) sendAndRecv(cmd uint32, body []byte) ([]byte, error) {
@@ -235,14 +224,6 @@ func pbEncodeString(buf []byte, fieldNum uint32, s string) []byte {
 	buf = append(buf, pbVarint(pbTag(fieldNum, 2))...)
 	buf = append(buf, pbVarint(uint64(len(s)))...)
 	buf = append(buf, s...)
-	return buf
-}
-
-func pbEncodeDouble(buf []byte, fieldNum uint32, v float64) []byte {
-	buf = append(buf, pbVarint(pbTag(fieldNum, 1))...) // wire type 1 = 64-bit
-	u := math.Float64bits(v)
-	buf = append(buf, byte(u), byte(u>>8), byte(u>>16), byte(u>>24),
-		byte(u>>32), byte(u>>40), byte(u>>48), byte(u>>56))
 	return buf
 }
 
@@ -389,13 +370,6 @@ func pbFindVarint(body []byte, fieldNum uint32) (uint64, []byte) {
 	return 0, nil
 }
 
-// pbSkipField is unused but kept for completeness of the mini protobuf library
-func pbSkipField(body []byte) (uint64, []byte) {
-	_, wt, rest := pbReadTag(body)
-	rest = pbSkipFieldValue(wt, rest)
-	return 0, rest
-}
-
 // ─── 消息编码 ─────────────────────────────────────────
 
 // Futu 命令号 (C2S):
@@ -519,18 +493,6 @@ func decodeKLine(data []byte) FutuKLPoint {
 		p.Volume = float64(pbGetVarint(data, 14))
 	}
 	return p
-}
-
-// decodeSnapshotPrice 解析 Qot_GetSecuritySnapshot.Ret
-func decodeSnapshotPrice(body []byte) (float64, string, error) {
-	// snapshot → field 4 (BasicInfo) → field 2 (curPrice)
-	snapshot := pbGetNested(body, 4)
-	if snapshot == nil {
-		return 0, "", errors.New("futu snapshot missing BasicInfo")
-	}
-	price := pbGetDouble(snapshot, 2)
-	asOf := pbGetString(snapshot, 5) // updateTime
-	return price, asOf, nil
 }
 
 // ─── 公开接口 ─────────────────────────────────────────

@@ -103,7 +103,8 @@ ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLi
 | SoSoValue | BTC ETF 净流入 | ✅ |
 | alternative.me | 恐慌贪婪指数 | ✅ |
 | CoinMetrics | MVRV/NUPL/MVRV Z | ✅ 社区端点 |
-| Yahoo Finance | GC=F (黄金)、QQQ、SPY | ✅ |
+| Yahoo Finance | GC=F (黄金)、QQQ、SPY (Futu 不可用时的降级) | ✅ |
+| Futu OpenD | QQQ/SPY/GLD/UUP/VIXY (本地网关，需 Python bridge) | ✅ |
 | FRED | DXY/10Y TIPS/M2/SPX | 需注册(免费) |
 
 ## AI 集成
