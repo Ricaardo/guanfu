@@ -1,0 +1,162 @@
+// fetch_cross_asset.go — 拉取黄金、QQQ、SPY 价格数据用于跨资产对比。
+//
+// 数据源：Yahoo Finance (无需 API key)
+// - GC=F (黄金期货) 或直接 XAUUSD via metals-api
+// - QQQ (纳斯达克 100 ETF)
+// - SPY (标普 500 ETF)
+//
+// 价格历史拉取量与 BTC 对齐 (3000d)，用于计算相关性和相对强弱。
+
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
+)
+
+// yahooChartResp Yahoo Finance v8 chart API response
+type yahooChartResp struct {
+	Chart struct {
+		Result []struct {
+			Timestamp  []int64 `json:"timestamp"`
+			Indicators struct {
+				Quote []struct {
+					Close []*float64 `json:"close"`
+				} `json:"quote"`
+			} `json:"indicators"`
+		} `json:"result"`
+	} `json:"chart"`
+}
+
+// FetchCrossAssetData 拉取黄金 (GC=F)、QQQ、SPY 的近期价格和历史。
+func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices, error) {
+	if targetDays <= 0 {
+		targetDays = 3000
+	}
+	hc := &http.Client{Timeout: 12 * time.Second}
+	out := &CrossAssetPrices{}
+
+	// 三个标的并行拉取
+	type result struct {
+		symbol  string
+		price   float64
+		history []float64
+		asOf    string
+		err     error
+	}
+	ch := make(chan result, 3)
+
+	for _, sym := range []string{"GC=F", "QQQ", "SPY"} {
+		go func(symbol string) {
+			price, history, asOf, err := fetchYahooChart(ctx, hc, symbol, targetDays)
+			ch <- result{symbol, price, history, asOf, err}
+		}(sym)
+	}
+
+	for i := 0; i < 3; i++ {
+		r := <-ch
+		if r.err != nil {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("%s fetch failed: %v", r.symbol, r.err))
+			continue
+		}
+		switch r.symbol {
+		case "GC=F":
+			out.GoldPrice = r.price
+			out.GoldHistory = r.history
+			out.GoldPriceAsOf = r.asOf
+		case "QQQ":
+			out.QQQPrice = r.price
+			out.QQQHistory = r.history
+			out.QQQPriceAsOf = r.asOf
+		case "SPY":
+			out.SPYPrice = r.price
+			out.SPYHistory = r.history
+			out.SPYPriceAsOf = r.asOf
+		}
+	}
+
+	if out.GoldPrice == 0 && out.QQQPrice == 0 && out.SPYPrice == 0 {
+		return out, fmt.Errorf("all cross-asset fetches failed")
+	}
+	return out, nil
+}
+
+func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, targetDays int) (price float64, history []float64, asOf string, err error) {
+	now := time.Now().Unix()
+	from := now - int64(targetDays*86400)
+
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("period1", fmt.Sprintf("%d", from))
+	params.Set("period2", fmt.Sprintf("%d", now))
+	params.Set("interval", "1d")
+	params.Set("includePrePost", "false")
+
+	apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?%s", symbol, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+
+	resp, err := hc.Do(req)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return 0, nil, "", fmt.Errorf("yahoo %s http %d: %s", symbol, resp.StatusCode, string(body))
+	}
+
+	var parsed yahooChartResp
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return 0, nil, "", err
+	}
+	if len(parsed.Chart.Result) == 0 || len(parsed.Chart.Result[0].Indicators.Quote) == 0 {
+		return 0, nil, "", fmt.Errorf("yahoo %s empty result", symbol)
+	}
+
+	result := parsed.Chart.Result[0]
+	closes := result.Indicators.Quote[0].Close
+
+	history = make([]float64, len(closes))
+	for i, c := range closes {
+		if c != nil {
+			history[i] = *c
+		}
+	}
+
+	// 找最新有效价格 (从后往前扫描)
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i] > 0 {
+			price = history[i]
+			if i < len(result.Timestamp) {
+				asOf = time.Unix(result.Timestamp[i], 0).UTC().Format("2006-01-02")
+			}
+			break
+		}
+	}
+
+	return price, history, asOf, nil
+}
+
+// CrossAssetPrices 跨资产价格数据聚合
+type CrossAssetPrices struct {
+	GoldPrice    float64
+	GoldHistory  []float64
+	GoldPriceAsOf string
+	QQQPrice     float64
+	QQQHistory   []float64
+	QQQPriceAsOf  string
+	SPYPrice     float64
+	SPYHistory   []float64
+	SPYPriceAsOf  string
+	Warnings     []string
+}

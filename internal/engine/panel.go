@@ -42,6 +42,9 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 		Snapshot: model.SnapshotData{
 			BTCPrice:            f(snap.BTCPrice),
 			ETHPrice:            f(snap.ETHPrice),
+			GoldPrice:           f(snap.GoldPriceUSD),
+			QQQPrice:            f(snap.QQQPrice),
+			SPYPrice:            f(snap.SPYPrice),
 			BTCDominance:        f(snap.BTCDominance),
 			TotalMarketCap:      f(snap.TotalMarketCap),
 			StablecoinMarketCap: f(snap.StablecoinMarketCap),
@@ -54,6 +57,8 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 		Positioning:   map[string]model.Indicator{},
 		Macro:         map[string]model.Indicator{},
 		Flow:          map[string]model.Indicator{},
+		Technical:     map[string]model.Indicator{},
+		CrossAsset:    map[string]model.Indicator{},
 		StaleWarnings: append([]string(nil), snap.SourceWarnings...),
 	}
 
@@ -63,6 +68,8 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 	c.fillPositioning(panel, snap, now)
 	c.fillMacro(panel, snap, now)
 	c.fillFlow(panel, snap, now)
+	c.fillTechnical(panel, snap, now)
+	c.fillCrossAsset(panel, snap, now)
 
 	c.persistAndAnnotateHistory(panel, dataDate)
 	panel.StaleWarnings = dedupeStrings(panel.StaleWarnings)
@@ -184,6 +191,10 @@ func domainMap(p *model.IndicatorPanel, domain string) map[string]model.Indicato
 		return p.Macro
 	case "flow":
 		return p.Flow
+	case "technical":
+		return p.Technical
+	case "cross_asset":
+		return p.CrossAsset
 	}
 	return nil
 }
@@ -883,6 +894,244 @@ func quantileRank(samples []float64, v float64) float64 {
 	return float64(belowOrEqual) / float64(len(sorted))
 }
 
+// ----------------- Technical 技术指标 -----------------
+
+func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSnapshot, ts string) {
+	btcTS := sourceTimestamp(snap.BTCPriceAsOf, ts)
+	if len(snap.BTCPriceHistory) < 50 {
+		return
+	}
+	price := f(snap.BTCPrice)
+
+	// RSI(14)
+	rsi14 := mathutil.CalculateRSI(snap.BTCPriceHistory, 14)
+	p.Technical["rsi_14"] = model.Indicator{
+		Value:     f(rsi14),
+		Label:     rsiLabel(f(rsi14)),
+		Source:    "binance",
+		UpdatedAt: btcTS,
+		Note:      "RSI(14)。<30 超卖，>70 超买",
+	}
+
+	// MACD 柱状图
+	macdHist := mathutil.CalculateMACD(snap.BTCPriceHistory)
+	macdPrev := mathutil.CalculateMACD(snap.BTCPriceHistory[1:])
+	p.Technical["macd_histogram"] = model.Indicator{
+		Value:     f(macdHist),
+		Label:     macdLabelFunc(f(macdHist), f(macdPrev)),
+		Source:    "binance",
+		UpdatedAt: btcTS,
+		Note:      "MACD 柱 (12,26,9)。>0 多头动能，<0 空头动能；柱收窄 = 趋势减弱/反转",
+	}
+
+	// EMA 交叉 (12/26)
+	ema12 := mathutil.CalculateEMA(snap.BTCPriceHistory, 12)
+	ema26 := mathutil.CalculateEMA(snap.BTCPriceHistory, 26)
+	emaCross := f(ema12) / f(ema26) - 1
+	p.Technical["ema_cross"] = model.Indicator{
+		Value:     emaCross * 100,
+		Label:     emaCrossLabel(emaCross),
+		Source:    "binance",
+		UpdatedAt: btcTS,
+		Note:      "(EMA12 - EMA26) / EMA26 %。>0 短期均线在上 = 多头排列，<0 = 空头",
+	}
+
+	// MA50 / MA200
+	ma50, ok50 := smaFromHistory(snap.BTCPriceHistory, 50)
+	ma200, ok200 := smaFromHistory(snap.BTCPriceHistory, 200)
+	if ok50 && ok200 {
+		p.Technical["ma_50"] = model.Indicator{
+			Value:     ma50,
+			Source:    "binance",
+			UpdatedAt: btcTS,
+			Note:      "50 日简单移动均线",
+		}
+		p.Technical["ma_200"] = model.Indicator{
+			Value:     ma200,
+			Source:    "binance",
+			UpdatedAt: btcTS,
+			Note:      "200 日简单移动均线 — 牛熊分界",
+		}
+		// MA50 vs MA200 排列
+		p.Technical["ma_alignment"] = model.Indicator{
+			Value: (ma50 - ma200) / ma200 * 100,
+			Label: maAlignLabel(ma50, ma200),
+			Source:    "binance",
+			UpdatedAt: btcTS,
+			Note:      "(MA50 - MA200) / MA200 %。>0 = 金叉多头，<0 = 死叉空头",
+		}
+	}
+
+	// Bollinger Bands
+	ma20, ok20 := smaFromHistory(snap.BTCPriceHistory, 20)
+	std20 := mathutil.CalculateStdDev(snap.BTCPriceHistory, 20)
+	if ok20 && !std20.IsZero() {
+		upper := ma20 + 2*f(std20)
+		lower := ma20 - 2*f(std20)
+		bbPos := (price - lower) / (upper - lower)
+		p.Technical["bb_position"] = model.Indicator{
+			Value:     bbPos,
+			Label:     bbLabel(bbPos),
+			Source:    "binance",
+			UpdatedAt: btcTS,
+			Note:      fmt.Sprintf("Bollinger (20,2) 位置。0=下轨 %.0f, 1=上轨 %.0f", lower, upper),
+		}
+	}
+
+	// 波动率 (20d)
+	cv20 := f(std20) / ma20 * 100
+	p.Technical["volatility_20d"] = model.Indicator{
+		Value:     cv20,
+		Label:     volLabel(cv20),
+		Source:    "binance",
+		UpdatedAt: btcTS,
+		Note:      "20 日波动率 (CV = std/mean %)。<2% 蓄势，>6% 高波动",
+	}
+}
+
+// ----------------- CrossAsset 跨资产对比 -----------------
+
+func (c *Calculator) fillCrossAsset(p *model.IndicatorPanel, snap *model.MarketSnapshot, ts string) {
+	if !snap.CrossAssetFetched {
+		return
+	}
+	btcTS := sourceTimestamp(snap.BTCPriceAsOf, ts)
+	btc := f(snap.BTCPrice)
+
+	// BTC / Gold
+	if !snap.GoldPriceUSD.IsZero() {
+		gold := f(snap.GoldPriceUSD)
+		ratio := btc / gold
+		p.CrossAsset["btc_gold_ratio"] = model.Indicator{
+			Value:     ratio,
+			Label:     btcGoldLabel(ratio),
+			Source:    "yahoo",
+			UpdatedAt: sourceTimestamp(snap.GoldPriceAsOf, btcTS),
+			Note:      fmt.Sprintf("BTC / 黄金。BTC $%.0f / Gold $%.0f/oz。1 BTC = %.2f oz 黄金", btc, gold, ratio),
+		}
+	}
+
+	// BTC / QQQ
+	if !snap.QQQPrice.IsZero() {
+		qqq := f(snap.QQQPrice)
+		ratio := btc / qqq
+		p.CrossAsset["btc_qqq_ratio"] = model.Indicator{
+			Value:     ratio,
+			Source:    "yahoo",
+			UpdatedAt: sourceTimestamp(snap.QQQPriceAsOf, btcTS),
+			Note:      fmt.Sprintf("BTC / QQQ。BTC $%.0f / QQQ $%.0f。1 BTC = %.2f 股 QQQ", btc, qqq, ratio),
+		}
+	}
+
+	// BTC / SPY
+	if !snap.SPYPrice.IsZero() {
+		spy := f(snap.SPYPrice)
+		ratio := btc / spy
+		p.CrossAsset["btc_spy_ratio"] = model.Indicator{
+			Value:     ratio,
+			Source:    "yahoo",
+			UpdatedAt: sourceTimestamp(snap.SPYPriceAsOf, btcTS),
+			Note:      fmt.Sprintf("BTC / SPY。BTC $%.0f / SPY $%.0f。1 BTC = %.2f 股 SPY", btc, spy, ratio),
+		}
+	}
+
+	// 30d 滚动相关性
+	lookback := 30
+	if len(snap.GoldHistory) >= lookback && len(snap.BTCPriceHistory) >= lookback {
+		corr := rollingCorrelation(snap.BTCPriceHistory, snap.GoldHistory, lookback)
+		p.CrossAsset["btc_gold_corr_30d"] = model.Indicator{
+			Value:     corr,
+			Label:     corrLabel(corr),
+			Source:    "computed",
+			UpdatedAt: ts,
+			Note:      "BTC vs Gold 30 日对数收益率 Pearson 相关系数",
+		}
+	}
+	if len(snap.QQQHistory) >= lookback && len(snap.BTCPriceHistory) >= lookback {
+		corr := rollingCorrelation(snap.BTCPriceHistory, snap.QQQHistory, lookback)
+		p.CrossAsset["btc_qqq_corr_30d"] = model.Indicator{
+			Value:     corr,
+			Label:     corrLabel(corr),
+			Source:    "computed",
+			UpdatedAt: ts,
+			Note:      "BTC vs QQQ 30 日对数收益率 Pearson 相关系数",
+		}
+	}
+	if len(snap.SPYHistory) >= lookback && len(snap.BTCPriceHistory) >= lookback {
+		corr := rollingCorrelation(snap.BTCPriceHistory, snap.SPYHistory, lookback)
+		p.CrossAsset["btc_spy_corr_30d"] = model.Indicator{
+			Value:     corr,
+			Label:     corrLabel(corr),
+			Source:    "computed",
+			UpdatedAt: ts,
+			Note:      "BTC vs SPY 30 日对数收益率 Pearson 相关系数",
+		}
+	}
+
+	// 90 日相对强弱（BTC vs 各资产）
+	period := 90
+	if len(snap.BTCPriceHistory) > period {
+		btcRet := (btc - f(snap.BTCPriceHistory[period])) / f(snap.BTCPriceHistory[period]) * 100
+		if len(snap.GoldHistory) > period && !snap.GoldPriceUSD.IsZero() {
+			goldRet := (f(snap.GoldPriceUSD) - f(snap.GoldHistory[period])) / f(snap.GoldHistory[period]) * 100
+			p.CrossAsset["rel_strength_90d_gold"] = model.Indicator{
+				Value:     btcRet - goldRet,
+				Label:     relStrengthLabel(btcRet - goldRet),
+				Source:    "computed",
+				UpdatedAt: ts,
+				Note:      fmt.Sprintf("BTC 90d %.1f%% vs Gold 90d %.1f%%", btcRet, goldRet),
+			}
+		}
+		if len(snap.QQQHistory) > period && !snap.QQQPrice.IsZero() {
+			qqqRet := (f(snap.QQQPrice) - f(snap.QQQHistory[period])) / f(snap.QQQHistory[period]) * 100
+			p.CrossAsset["rel_strength_90d_qqq"] = model.Indicator{
+				Value:     btcRet - qqqRet,
+				Label:     relStrengthLabel(btcRet - qqqRet),
+				Source:    "computed",
+				UpdatedAt: ts,
+				Note:      fmt.Sprintf("BTC 90d %.1f%% vs QQQ 90d %.1f%%", btcRet, qqqRet),
+			}
+		}
+	}
+}
+
+// rollingCorrelation 计算两个价格序列的对数收益率 Pearson 相关系数
+func rollingCorrelation(a, b []decimal.Decimal, n int) float64 {
+	if len(a) < n+1 || len(b) < n+1 {
+		return 0
+	}
+	ra := make([]float64, n)
+	rb := make([]float64, n)
+	for i := 0; i < n; i++ {
+		if a[i+1].IsZero() || b[i+1].IsZero() {
+			continue
+		}
+		ra[i] = math.Log(f(a[i]) / f(a[i+1]))
+		rb[i] = math.Log(f(b[i]) / f(b[i+1]))
+	}
+	return pearson(ra, rb)
+}
+
+func pearson(x, y []float64) float64 {
+	n := len(x)
+	if n < 2 {
+		return 0
+	}
+	var sx, sy, sxy, sx2, sy2 float64
+	for i := 0; i < n; i++ {
+		sx += x[i]
+		sy += y[i]
+		sxy += x[i] * y[i]
+		sx2 += x[i] * x[i]
+		sy2 += y[i] * y[i]
+	}
+	den := math.Sqrt((float64(n)*sx2 - sx*sx) * (float64(n)*sy2 - sy*sy))
+	if den == 0 {
+		return 0
+	}
+	return (float64(n)*sxy - sx*sy) / den
+}
+
 // ============== Labels ==============
 //
 // 以下 label 函数的阈值基于 2013-2024 周期经验，仅用于人类速览。
@@ -1130,6 +1379,137 @@ func ethBtcLabel(r float64) string {
 		return "ETH 偏强"
 	default:
 		return "ETH 极强（风险偏好高）"
+	}
+}
+
+// ============== Technical Labels ==============
+
+func rsiLabel(v float64) string {
+	switch {
+	case v < 20:
+		return "极度超卖"
+	case v < 30:
+		return "超卖"
+	case v < 45:
+		return "偏弱"
+	case v < 55:
+		return "中性"
+	case v < 70:
+		return "偏强"
+	case v < 80:
+		return "超买"
+	default:
+		return "极度超买"
+	}
+}
+
+func macdLabelFunc(hist, prev float64) string {
+	if hist > 0 {
+		if hist > prev {
+			return "多头增强"
+		}
+		return "多头减弱（可能见顶）"
+	}
+	if hist > prev {
+		return "空头收窄（底部反转信号）"
+	}
+	return "空头增强"
+}
+
+func emaCrossLabel(v float64) string {
+	switch {
+	case v > 3:
+		return "强多头排列"
+	case v > 0:
+		return "多头排列"
+	case v > -3:
+		return "空头排列"
+	default:
+		return "强空头排列"
+	}
+}
+
+func maAlignLabel(ma50, ma200 float64) string {
+	if ma50 > ma200 {
+		return "金叉（多头）"
+	}
+	return "死叉（空头）"
+}
+
+func bbLabel(pos float64) string {
+	switch {
+	case pos < 0:
+		return "跌破下轨（超卖/极端）"
+	case pos < 0.2:
+		return "接近下轨"
+	case pos < 0.8:
+		return "区间中部"
+	case pos < 1:
+		return "接近上轨"
+	default:
+		return "突破上轨（超买/极端）"
+	}
+}
+
+func volLabel(cv float64) string {
+	switch {
+	case cv < 2:
+		return "极低波动（蓄势）"
+	case cv < 4:
+		return "低波动"
+	case cv < 6:
+		return "正常"
+	case cv < 10:
+		return "高波动"
+	default:
+		return "极高波动（恐慌/狂热）"
+	}
+}
+
+// ============== Cross-Asset Labels ==============
+
+func btcGoldLabel(ratio float64) string {
+	switch {
+	case ratio < 5:
+		return "BTC 相对黄金极弱"
+	case ratio < 15:
+		return "BTC 相对黄金偏弱"
+	case ratio < 25:
+		return "中性"
+	case ratio < 40:
+		return "BTC 相对黄金偏强"
+	default:
+		return "BTC 相对黄金极强（历史峰值区）"
+	}
+}
+
+func corrLabel(c float64) string {
+	switch {
+	case c < -0.3:
+		return "负相关（独立行情）"
+	case c < 0.2:
+		return "弱相关"
+	case c < 0.5:
+		return "中等相关"
+	case c < 0.7:
+		return "强相关"
+	default:
+		return "极强相关（同涨同跌）"
+	}
+}
+
+func relStrengthLabel(diff float64) string {
+	switch {
+	case diff > 20:
+		return "BTC 大幅跑赢"
+	case diff > 5:
+		return "BTC 跑赢"
+	case diff > -5:
+		return "持平"
+	case diff > -20:
+		return "BTC 跑输"
+	default:
+		return "BTC 大幅跑输"
 	}
 }
 

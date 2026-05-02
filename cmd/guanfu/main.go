@@ -44,6 +44,8 @@ var domainNames = []struct {
 	{"positioning", "Positioning 杠杆 & 情绪", "📊"},
 	{"macro", "Macro 宏观", "🌍"},
 	{"flow", "Flow 资金流", "💸"},
+	{"technical", "Technical 技术指标", "📈"},
+	{"cross_asset", "CrossAsset 跨资产", "🔗"},
 }
 
 func main() {
@@ -133,6 +135,10 @@ func printHumanPanel(p *model.IndicatorPanel, filter string) {
 			indicators = p.Macro
 		case "flow":
 			indicators = p.Flow
+		case "technical":
+			indicators = p.Technical
+		case "cross_asset":
+			indicators = p.CrossAsset
 		}
 		if len(indicators) == 0 {
 			continue
@@ -234,6 +240,8 @@ func collectStale(p *model.IndicatorPanel) []string {
 	scan("positioning", p.Positioning)
 	scan("macro", p.Macro)
 	scan("flow", p.Flow)
+	scan("technical", p.Technical)
+	scan("cross_asset", p.CrossAsset)
 	return out
 }
 
@@ -257,6 +265,10 @@ func filterDomain(p *model.IndicatorPanel, name string) *model.IndicatorPanel {
 		out.Macro = p.Macro
 	case "flow":
 		out.Flow = p.Flow
+	case "technical":
+		out.Technical = p.Technical
+	case "cross_asset":
+		out.CrossAsset = p.CrossAsset
 	}
 	return out
 }

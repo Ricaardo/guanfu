@@ -91,6 +91,18 @@ type MarketSnapshot struct {
 	AltcoinSeasonIndex decimal.Decimal // 山寨季指数 (0-100)
 	FearGreedAsOf      string
 
+	// Cross-asset prices (v3 新增)
+	GoldPriceUSD    decimal.Decimal // 黄金现货 USD/oz
+	QQQPrice        decimal.Decimal // QQQ ETF
+	SPYPrice        decimal.Decimal // SPY ETF
+	GoldPriceAsOf   string
+	QQQPriceAsOf    string
+	SPYPriceAsOf    string
+	GoldHistory     []decimal.Decimal // 历史价格（与 BTC 对齐长度）
+	QQQHistory      []decimal.Decimal
+	SPYHistory      []decimal.Decimal
+	CrossAssetFetched bool
+
 	// 非致命数据源问题。BuildPanel 会透传到 stale_warnings。
 	SourceWarnings []string
 }
@@ -129,6 +141,9 @@ type Indicator struct {
 type SnapshotData struct {
 	BTCPrice            float64 `json:"btc_price"`
 	ETHPrice            float64 `json:"eth_price,omitempty"`
+	GoldPrice           float64 `json:"gold_price,omitempty"`
+	QQQPrice            float64 `json:"qqq_price,omitempty"`
+	SPYPrice            float64 `json:"spy_price,omitempty"`
 	BTCDominance        float64 `json:"btc_dominance"`
 	TotalMarketCap      float64 `json:"total_market_cap"`
 	StablecoinMarketCap float64 `json:"stablecoin_market_cap"`
@@ -141,13 +156,15 @@ type IndicatorPanel struct {
 	Date     string       `json:"date"`
 	Snapshot SnapshotData `json:"snapshot"`
 
-	// 6 个 domain（每个 domain 是 indicator name → Indicator 的 map）
+	// 8 个 domain（每个 domain 是 indicator name → Indicator 的 map）
 	Cycle       map[string]Indicator `json:"cycle"`
 	Valuation   map[string]Indicator `json:"valuation"`
 	Network     map[string]Indicator `json:"network"`
 	Positioning map[string]Indicator `json:"positioning"`
 	Macro       map[string]Indicator `json:"macro"`
 	Flow        map[string]Indicator `json:"flow"`
+	Technical   map[string]Indicator `json:"technical"`
+	CrossAsset  map[string]Indicator `json:"cross_asset"`
 
 	// 元数据
 	StaleWarnings []string `json:"stale_warnings,omitempty"` // 数据过时/缺失警告
