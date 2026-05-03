@@ -79,6 +79,11 @@ func futuBridgeSymbols(symbols []string, days int) (*CrossAssetFutuPrices, error
 			out2.TLTPrice, out2.TLTHistory, out2.TLTPriceAsOf = r.Price, r.History, r.AsOf
 		case "US.VIXY":
 			out2.VIXYPrice, out2.VIXYHistory, out2.VIXYPriceAsOf = r.Price, r.History, r.AsOf
+		case "US.USO":
+			out2.WTIPrice, out2.WTIHistory, out2.WTIPriceAsOf = r.Price, r.History, r.AsOf
+			if r.Price > 0 {
+				out2.OilPriceSource = "futu:US.USO"
+			}
 		}
 	}
 	return out2, nil

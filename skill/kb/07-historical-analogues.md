@@ -28,7 +28,7 @@
 | 宏观 | `macro.real_yield_10y_pct`, `macro.m2_yoy`, `macro.dxy_60d_trend_pct`, `macro.hy_spread_bps` | 判断外部流动性环境 |
 | 资金流 | `flow.etf_net_flow_30d_usd`, `flow.stablecoin_supply_30d_pct`, `flow.eth_btc_ratio` | 判断边际买盘 / 场内资金轮动 |
 | 技术 | `technical.volatility_20d`, `technical.ma_alignment`, `technical.bb_position` | 判断波动和趋势状态 |
-| 跨资产 | `macro.spx_correlation_30d`, `cross_asset.btc_gold_corr_30d`, `cross_asset.rel_strength_90d_gold` | 判断 BTC 是否被风险资产或避险资产主导 |
+| 跨资产 | `macro.spx_correlation_30d`, `cross_asset.btc_gold_corr_30d`, `cross_asset.rel_strength_90d_gold`, `cross_asset.tlt_60d_trend_pct` | 判断 BTC 是否被风险资产、避险资产或长端利率主导 |
 
 ---
 

@@ -151,7 +151,7 @@ Network 网络
 | 💰 Valuation 估值 | **ahr999_compressed**（推荐）、ahr999（自适应）、ahr999_divergence、MVRV、NUPL |
 | ⛏️ Network 网络 | 哈希率、Hash Ribbons、难度调整、Mempool 拥堵 |
 | 📊 Positioning 杠杆 | 资金费率、OI/MC、恐慌贪婪、山寨季指数（自算） |
-| 🌍 Macro 宏观 | DXY 60d、10Y TIPS、M2 YoY、SPX 相关、**WTI 油价**、**HY 信用利差**、**10Y-2Y 利差** |
+| 🌍 Macro 宏观 | DXY 60d、10Y TIPS、M2 YoY、SPX 相关、**USO 油价 proxy / WTI fallback**、**HY 信用利差**、**10Y-2Y 利差** |
 | 💸 Flow 资金流 | ETF 7d/30d 净流入、稳定币市值、ETH/BTC 资金偏好 |
 | 📈 Technical 技术 | RSI(14)、MACD 柱、EMA 交叉、MA50/200、Bollinger、波动率 |
 | 🔗 CrossAsset 跨资产 | BTC/Gold·QQQ·SPY/UUP/VIXY/GLD 比率、相关性、相对强弱、**BTC/原油** |
@@ -189,9 +189,11 @@ ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLi
 | SoSoValue | BTC ETF 净流入 | ✅ |
 | alternative.me | 恐慌贪婪指数 | ✅ |
 | CoinMetrics | MVRV/NUPL/MVRV Z | ✅ 社区端点 |
-| Yahoo Finance | GC=F (黄金)、QQQ、SPY (Futu 不可用时的降级) | ✅ |
-| Futu OpenD | QQQ/SPY/GLD/UUP/VIXY (本地网关，需 Python bridge) | ✅ |
+| Yahoo Finance | QQQ/SPY fallback、CL=F WTI futures fallback | ✅ |
+| Futu OpenD | QQQ/SPY/GLD/UUP/VIXY、USO 油价 proxy (本地网关，需 Python bridge) | ✅ |
 | FRED | DXY/10Y TIPS/M2/SPX/HY利差/10Y-2Y利差 | 需注册(免费) |
+
+JSON 顶层包含 `source_health`，用于查看每个数据源的 ok/partial/stale/missing/warning 状态、`as_of`、fallback 和 warning。
 
 ## AI 集成
 

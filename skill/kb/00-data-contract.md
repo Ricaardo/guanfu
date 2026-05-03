@@ -50,7 +50,7 @@
 | 哈希率、mempool | 12 小时 | 标记 stale，仅作 1-2 日趋势 |
 | ETF 流入、稳定币市值 | 2 个交易日（周末/假日除外） | 标记 stale，不得做边际资金主证据 |
 | 链上估值（mvrv / nupl） | 2 天 | 标记 stale，仅作背景 |
-| 跨资产价格（GLD / QQQ / SPY / UUP / VIXY / TLT） | 1 个交易日 | 标记 stale，仅作背景 |
+| 跨资产价格（GLD / QQQ / SPY / UUP / VIXY / TLT 等 ETF） | 1 个交易日 | 标记 stale，仅作背景 |
 | 月频宏观（M2、CPI、real yield、HY spread、yield curve） | 45 天 | 标记 stale；M2 因发布周期可放宽到 60 天 |
 | 减半距离、phase、SMA200W | 不会 stale | — |
 

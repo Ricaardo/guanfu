@@ -12,6 +12,7 @@
 - `btc_gold_ratio` 接近历史极端。
 - `rel_strength_90d_gold` 显示 BTC 显著跑赢/跑输黄金。
 - `uup_price`、`vixy_price`、`oil_proxy_usd` 或 `wti_crude_usd` 出现异常。
+- `tlt_60d_trend_pct` 60 日变化绝对值 > 5%（长端利率快速再定价）。
 - BTC 与 SPX/Gold 走势方向冲突。
 
 ---
@@ -86,6 +87,58 @@
 - `cross_asset.uup_price` 上涨 + `macro.dxy_60d_trend_pct` 上行：美元逆风更可信。
 - `cross_asset.uup_price` 上涨但 BTC 也涨：可能是独立叙事或全球避险并存，需看黄金和 SPX。
 - UUP 数据 stale 时，优先用 FRED `dxy_60d_trend_pct`，但承认 60 日窗口的滞后性。
+
+---
+
+## BTC vs 长端美债 (TLT)
+
+`cross_asset.tlt_price` / `cross_asset.tlt_60d_trend_pct` 跟踪 iShares 20+ Year Treasury Bond ETF，是**长端利率**的实时代理（与 30Y 收益率反向）。
+
+### 为什么对 BTC 重要
+
+长端利率 = BTC 这类无现金流资产的**折现率分母**。长端利率上行直接压低风险资产估值。它是宏观传导链中**最直接作用于 BTC 估值的环节**：
+
+```
+财政赤字 / 通胀预期 / Fed 政策 → 30Y 收益率 → TLT 价格 → BTC 估值分母
+```
+
+### 与 `macro.real_yield_10y_pct` 的分工
+
+两者**互补不替代**：
+
+| 指标 | 反映 | 用途 |
+|---|---|---|
+| `tlt_60d_trend_pct` | 名义长端利率方向 | 判断长端债市再定价方向和速度 |
+| `real_yield_10y_pct` | 通胀调整后的实际利率 | 判断持有现金/债券的真实机会成本 |
+
+名义利率上行可能来自：
+- 实际利率上升（紧缩）→ TLT 跌 + real_yield 升 → BTC **双重逆风**
+- 通胀预期上升（滞胀）→ TLT 跌 + real_yield 不动甚至下降 → 含义不同（黄金可能跑赢 BTC）
+
+读盘必须**两个一起看**，不能只看 TLT 就下结论。
+
+### 组合判读
+
+| 组合 | 含义 |
+|---|---|
+| `tlt_60d_trend_pct < -10%` + `real_yield_10y_pct > 2%` | 长端利率冲击 + 实际利率高位 → BTC 估值最大压力（2022-Q3 / 2023-Q3 典型） |
+| `tlt_60d_trend_pct < -10%` + `real_yield_10y_pct < 1%` | 名义利率上行但实际利率不动 → 通胀预期反弹（滞胀疑虑），BTC vs 黄金读盘要谨慎 |
+| `tlt_60d_trend_pct > +10%` + `dxy_60d_trend_pct < 0` + `real_yield_10y_pct` 回落 | 三重宽松信号（衰退避险 / 政策转鸽），BTC 估值顺风 |
+| `tlt_60d_trend_pct > +10%` + `hy_spread_bps` 扩大 | 衰退避险流入长端债 + 信用压力 → BTC 短期跟跌（risk-off），中期看政策反应 |
+| TLT 暴跌 + 美股暴跌 + DXY 走强 | 经典紧缩冲击模式，转 `kb/06-regime-taxonomy.md` 紧缩冲击节 |
+
+### 历史样本锚
+
+- **2020-08 高点 TLT ~170**：COVID 应对 + Fed 零利率 + 大规模 QE，长端利率跌到 ~1.2%。BTC 同期处于减半后第一波上涨初期。
+- **2022-10 低点 TLT ~88**：Fed 50bp/75bp 连续加息，30Y 收益率冲到 ~4.4%。BTC 同期跌至 $15.5k 周期低点。
+- **2023-10 低点 TLT ~82**：财政部加大长端发行 + 通胀粘性，30Y 收益率冲到 ~5%。BTC 在 $26k-30k 区间震荡，但因 ETF 预期未深跌。
+- **2024-09 反弹 TLT ~100**：Fed 50bp 降息预期 + 经济放缓，长端利率回落到 ~4%。BTC 同期上行到 ATH 附近。
+
+### 失效条件
+
+- TLT 跟踪 20+ 年期债券，**对短端利率（Fed 政策利率）不敏感**。短端再定价应看 2Y 收益率 / SHY ETF（guanfu 不直接提供）。
+- 财政部供应冲击（拍卖结果差、Quarterly Refunding 公告）会让 TLT 短期偏离基本面。
+- TLT 是 USD 计价，外资美债持有人减持时 TLT 可能跌，但需结合 `dxy_60d_trend_pct` 判断是利率冲击还是货币冲击。
 
 ---
 

@@ -8,7 +8,7 @@ import (
 
 // CurrentMarketSnapshotSchemaVersion guards the on-disk market cache contract.
 // Bump this when MarketSnapshot gains fields that materially change panel output.
-const CurrentMarketSnapshotSchemaVersion = 5
+const CurrentMarketSnapshotSchemaVersion = 6
 
 // MarketSnapshot 包含了计算宏观评分所需的所有市场数据
 type MarketSnapshot struct {
@@ -73,21 +73,21 @@ type MarketSnapshot struct {
 	OnchainValuationFetched bool
 
 	// FRED 宏观 (Phase 2 新增)
-	DXY60dTrendPct    decimal.Decimal // DTWEXBGS 60 日变化 %
-	DXYLatest         decimal.Decimal // DTWEXBGS 最新值
-	DXYAsOf           string
-	RealYield10YPct   decimal.Decimal // DFII10 最新 %
-	RealYield10YAsOf  string
-	M2YoYPct          decimal.Decimal // M2SL 同比 %
-	M2LatestB         decimal.Decimal // M2SL 最新（十亿美元）
-	M2AsOf            string
-	SPXCorrelation30d decimal.Decimal // BTC vs SPX 30 日收益 Pearson
-	SPXAsOf           string
-	HYSpreadBps       decimal.Decimal // ICE BofA US High Yield OAS (bp)
-	HYSpreadAsOf      string
+	DXY60dTrendPct     decimal.Decimal // DTWEXBGS 60 日变化 %
+	DXYLatest          decimal.Decimal // DTWEXBGS 最新值
+	DXYAsOf            string
+	RealYield10YPct    decimal.Decimal // DFII10 最新 %
+	RealYield10YAsOf   string
+	M2YoYPct           decimal.Decimal // M2SL 同比 %
+	M2LatestB          decimal.Decimal // M2SL 最新（十亿美元）
+	M2AsOf             string
+	SPXCorrelation30d  decimal.Decimal // BTC vs SPX 30 日收益 Pearson
+	SPXAsOf            string
+	HYSpreadBps        decimal.Decimal // ICE BofA US High Yield OAS (bp)
+	HYSpreadAsOf       string
 	YieldCurve10Y2YBps decimal.Decimal // 10Y-2Y Treasury spread (bp)
-	YieldCurveAsOf    string
-	MacroFetched      bool // FRED 是否成功拉取
+	YieldCurveAsOf     string
+	MacroFetched       bool // FRED 是否成功拉取
 
 	// 情绪数据
 	BTCDominance       decimal.Decimal // BTC 市占率 (0.00-1.00)
@@ -96,16 +96,16 @@ type MarketSnapshot struct {
 	FearGreedAsOf      string
 
 	// Deribit 期权 (v4 新增) — DVOL + 25-delta skew
-	DVOL                 decimal.Decimal // 当前 BTC IV 指数
-	DVOL60dTrendPct      decimal.Decimal // (now / 60d 前 - 1) × 100
-	DVOLAvailable        bool
-	DVOLAsOf             string
-	DVOLHistory          []decimal.Decimal // 用于历史分位
+	DVOL            decimal.Decimal // 当前 BTC IV 指数
+	DVOL60dTrendPct decimal.Decimal // (now / 60d 前 - 1) × 100
+	DVOLAvailable   bool
+	DVOLAsOf        string
+	DVOLHistory     []decimal.Decimal // 用于历史分位
 
-	Skew25dNearTermPct   decimal.Decimal // IV(25Δ put) - IV(25Δ call)，pp
-	SkewAvailable        bool
-	SkewAsOf             string
-	SkewExpiry           string
+	Skew25dNearTermPct decimal.Decimal // IV(25Δ put) - IV(25Δ call)，pp
+	SkewAvailable      bool
+	SkewAsOf           string
+	SkewExpiry         string
 
 	// Cross-asset prices (v3 新增)
 	GoldPriceUSD  decimal.Decimal // 黄金现货 USD/oz (Binance PAXG)
@@ -121,15 +121,19 @@ type MarketSnapshot struct {
 	GoldETFPriceUSD   decimal.Decimal // GLD 实物黄金 ETF
 	GoldETFHistory    []decimal.Decimal
 	GoldETFAsOf       string
-	WTIPrice          decimal.Decimal // WTI 原油价格 (Futu USO > Yahoo CL=F)
+	WTIPrice          decimal.Decimal // Oil price/proxy (Futu USO ETF > Yahoo CL=F WTI futures)
 	WTIHistory        []decimal.Decimal
 	WTIPriceAsOf      string
+	OilPriceSource    string          // "futu:US.USO" (ETF proxy) or "yahoo:CL=F" (WTI futures)
 	UUPPrice          decimal.Decimal // 做多美元 ETF (DXY proxy)
 	UUPHistory        []decimal.Decimal
 	UUPPriceAsOf      string
 	VIXYPrice         decimal.Decimal // VIX 波动率 ETF
 	VIXYHistory       []decimal.Decimal
 	VIXYPriceAsOf     string
+	TLTPrice          decimal.Decimal // iShares 20+ Year Treasury Bond ETF (long-end Treasury proxy)
+	TLTHistory        []decimal.Decimal
+	TLTPriceAsOf      string
 	CrossAssetFetched bool
 
 	// 非致命数据源问题。BuildPanel 会透传到 stale_warnings。
@@ -206,6 +210,16 @@ type SnapshotData struct {
 	DataDate            string  `json:"data_date"` // 主数据快照日期
 }
 
+// SourceHealth summarizes whether a data source contributed usable data to the panel.
+type SourceHealth struct {
+	Source       string   `json:"source"`
+	Status       string   `json:"status"` // ok, partial, stale, missing, warning
+	AsOf         string   `json:"as_of,omitempty"`
+	FallbackUsed bool     `json:"fallback_used,omitempty"`
+	Note         string   `json:"note,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
+}
+
 // IndicatorPanel CoinMan v2 主输出
 type IndicatorPanel struct {
 	Date     string       `json:"date"`
@@ -222,7 +236,8 @@ type IndicatorPanel struct {
 	CrossAsset  map[string]Indicator `json:"cross_asset"`
 
 	// 元数据
-	StaleWarnings []string `json:"stale_warnings,omitempty"` // 数据过时/缺失警告
+	StaleWarnings []string       `json:"stale_warnings,omitempty"` // 数据过时/缺失警告
+	SourceHealth  []SourceHealth `json:"source_health,omitempty"`  // 数据源健康 / fallback 状态
 }
 
 // ScoreResult v1 评分结果（DEPRECATED）

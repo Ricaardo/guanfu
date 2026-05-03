@@ -23,6 +23,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"sort"
 	"sync"
 	"time"
 )
@@ -144,12 +145,12 @@ func futuWrite(conn net.Conn, cmd uint32, sn uint32, body []byte) error {
 	// Pre-header (4 bytes) + header (44 bytes) + body
 	pkt := make([]byte, 4+totalLen)
 
-	binary.LittleEndian.PutUint32(pkt[0:4], uint32(totalLen))   // pre-header
-	binary.LittleEndian.PutUint32(pkt[4:8], uint32(totalLen))   // total in hdr
-	binary.LittleEndian.PutUint32(pkt[8:12], futuHeaderLen)     // header len
-	binary.LittleEndian.PutUint32(pkt[12:16], futuProtoType)    // proto type
-	binary.LittleEndian.PutUint32(pkt[16:20], futuProtoVer)     // proto ver
-	binary.LittleEndian.PutUint32(pkt[20:24], sn)               // serial no
+	binary.LittleEndian.PutUint32(pkt[0:4], uint32(totalLen))    // pre-header
+	binary.LittleEndian.PutUint32(pkt[4:8], uint32(totalLen))    // total in hdr
+	binary.LittleEndian.PutUint32(pkt[8:12], futuHeaderLen)      // header len
+	binary.LittleEndian.PutUint32(pkt[12:16], futuProtoType)     // proto type
+	binary.LittleEndian.PutUint32(pkt[16:20], futuProtoVer)      // proto ver
+	binary.LittleEndian.PutUint32(pkt[20:24], sn)                // serial no
 	binary.LittleEndian.PutUint32(pkt[24:28], uint32(len(body))) // body len
 	// bytes 28..48: reserved (zero, already zero)
 
@@ -392,9 +393,9 @@ func pbFindVarint(body []byte, fieldNum uint32) (uint64, []byte) {
 func encodeInitConnect() []byte {
 	var buf []byte
 	buf = pbEncodeString(buf, 1, "guanfu")
-	buf = pbEncodeVarint(buf, 2, 0)      // clientVer=0 → 无加密
-	buf = pbEncodeBool(buf, 3, false)     // recvNotify
-	buf = pbEncodeString(buf, 4, "Go")    // programmingLanguage
+	buf = pbEncodeVarint(buf, 2, 0)    // clientVer=0 → 无加密
+	buf = pbEncodeBool(buf, 3, false)  // recvNotify
+	buf = pbEncodeString(buf, 4, "Go") // programmingLanguage
 	return buf
 }
 
@@ -419,9 +420,9 @@ func encodeRequestHistoryKL(symbol string, start, num int32) []byte {
 	sec = pbEncodeString(sec, 2, code)
 
 	var buf []byte
-	buf = pbEncodeMessage(buf, 1, sec)     // security
-	buf = pbEncodeVarint(buf, 2, 1)        // rehabType = 前复权
-	buf = pbEncodeVarint(buf, 3, 2)        // klType = 日K
+	buf = pbEncodeMessage(buf, 1, sec)        // security
+	buf = pbEncodeVarint(buf, 2, 1)           // rehabType = 前复权
+	buf = pbEncodeVarint(buf, 3, 2)           // klType = 日K
 	buf = pbEncodeVarint(buf, 6, uint64(num)) // num
 	return buf
 }
@@ -499,28 +500,29 @@ func decodeKLine(data []byte) FutuKLPoint {
 
 // CrossAssetFutuPrices holds prices fetched from Futu OpenD
 type CrossAssetFutuPrices struct {
-	QQQPrice      float64
-	QQQHistory    []float64
-	QQQPriceAsOf  string
-	SPYPrice      float64
-	SPYHistory    []float64
-	SPYPriceAsOf  string
-	GLDPrice      float64 // 实物黄金 ETF
-	GLDHistory    []float64
-	GLDPriceAsOf  string
-	UUPPrice      float64 // 做多美元 ETF (DXY proxy)
-	UUPHistory    []float64
-	UUPPriceAsOf  string
-	TLTPrice      float64 // 20Y+ 美债 ETF
-	TLTHistory    []float64
-	TLTPriceAsOf  string
-	VIXYPrice     float64 // VIX 波动率 ETF
-	WTIPrice      float64 // WTI 原油 ETF (USO)
-	WTIHistory    []float64
-	WTIPriceAsOf  string
-	VIXYHistory   []float64
-	VIXYPriceAsOf string
-	Warnings      []string
+	QQQPrice       float64
+	QQQHistory     []float64
+	QQQPriceAsOf   string
+	SPYPrice       float64
+	SPYHistory     []float64
+	SPYPriceAsOf   string
+	GLDPrice       float64 // 实物黄金 ETF
+	GLDHistory     []float64
+	GLDPriceAsOf   string
+	UUPPrice       float64 // 做多美元 ETF (DXY proxy)
+	UUPHistory     []float64
+	UUPPriceAsOf   string
+	TLTPrice       float64 // 20Y+ 美债 ETF
+	TLTHistory     []float64
+	TLTPriceAsOf   string
+	VIXYPrice      float64 // VIX 波动率 ETF
+	WTIPrice       float64 // USO oil ETF proxy
+	WTIHistory     []float64
+	WTIPriceAsOf   string
+	OilPriceSource string
+	VIXYHistory    []float64
+	VIXYPriceAsOf  string
+	Warnings       []string
 }
 
 // futuFetchOne requests history KL for a single symbol, returns (price, history, asOf).
@@ -533,7 +535,14 @@ func (c *futuConn) futuFetchOne(symbol string, days int, warnings *[]string) (fl
 	if len(kl) == 0 {
 		return 0, nil, ""
 	}
+	normalizeFutuKLNewestFirst(kl)
 	return kl[0].Close, klToFloat64(kl), kl[0].Time.Format("2006-01-02")
+}
+
+func normalizeFutuKLNewestFirst(kl []FutuKLPoint) {
+	sort.SliceStable(kl, func(i, j int) bool {
+		return kl[i].Time.After(kl[j].Time)
+	})
 }
 
 // FetchCrossAssetFromFutu 从本地富途网关拉取跨资产数据
@@ -570,6 +579,9 @@ func FetchCrossAssetFromFutu(days int) (*CrossAssetFutuPrices, error) {
 	out.TLTPrice, out.TLTHistory, out.TLTPriceAsOf = c.futuFetchOne("US.TLT", days, &out.Warnings)
 	out.VIXYPrice, out.VIXYHistory, out.VIXYPriceAsOf = c.futuFetchOne("US.VIXY", days, &out.Warnings)
 	out.WTIPrice, out.WTIHistory, out.WTIPriceAsOf = c.futuFetchOne("US.USO", days, &out.Warnings)
+	if out.WTIPrice > 0 {
+		out.OilPriceSource = "futu:US.USO"
+	}
 
 	return out, nil
 }

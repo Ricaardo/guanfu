@@ -265,6 +265,28 @@ func printHumanPanel(p *model.IndicatorPanel, filter string, plain bool) {
 			fmt.Printf("  - %s\n", s)
 		}
 	}
+
+	sourceIssues := collectSourceHealthIssues(p)
+	if len(sourceIssues) > 0 {
+		if plain {
+			fmt.Println("Source health:")
+		} else {
+			fmt.Println("数据源状态:")
+		}
+		for _, h := range sourceIssues {
+			line := fmt.Sprintf("%s=%s", h.Source, h.Status)
+			if h.AsOf != "" {
+				line += fmt.Sprintf(" as_of=%s", h.AsOf)
+			}
+			if h.FallbackUsed {
+				line += " fallback=true"
+			}
+			if h.Note != "" {
+				line += fmt.Sprintf(" — %s", h.Note)
+			}
+			fmt.Printf("  - %s\n", line)
+		}
+	}
 }
 
 // printDomainTable 输出单个 domain 的指标表
@@ -303,6 +325,8 @@ func printDomainTable(indicators map[string]model.Indicator) {
 // formatValue 按指标类型格式化数值
 func formatValue(key string, v float64) string {
 	switch {
+	case key == "oil_proxy_usd" || key == "wti_crude_usd":
+		return fmt.Sprintf("$%7.2f", v)
 	case strings.Contains(key, "_pct") || strings.Contains(key, "_yoy"):
 		return fmt.Sprintf("%+7.2f%%", v)
 	case strings.Contains(key, "days_"):
@@ -351,12 +375,23 @@ func collectStale(p *model.IndicatorPanel) []string {
 	return out
 }
 
+func collectSourceHealthIssues(p *model.IndicatorPanel) []model.SourceHealth {
+	out := make([]model.SourceHealth, 0, len(p.SourceHealth))
+	for _, h := range p.SourceHealth {
+		if h.Status != "" && h.Status != "ok" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // filterDomain 仅保留指定 domain
 func filterDomain(p *model.IndicatorPanel, name string) *model.IndicatorPanel {
 	out := &model.IndicatorPanel{
 		Date:          p.Date,
 		Snapshot:      p.Snapshot,
 		StaleWarnings: append([]string(nil), p.StaleWarnings...),
+		SourceHealth:  append([]model.SourceHealth(nil), p.SourceHealth...),
 	}
 	switch name {
 	case "cycle":

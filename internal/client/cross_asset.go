@@ -43,10 +43,12 @@ type yahooChartResp struct {
 // 数据源优先级:
 //   - 黄金: Binance PAXG/USDT (tokenized gold)
 //   - QQQ/SPY: Futu OpenD (本地网关) > Yahoo Finance (公网备份)
+//   - 油价: Futu USO ETF proxy > Yahoo CL=F WTI futures
 //
 // 环境变量:
-//   FUTU_GATEWAY=127.0.0.1:11111  (默认)
-//   FUTU_ENABLED=0                禁用富途，直接用 Yahoo
+//
+//	FUTU_GATEWAY=127.0.0.1:11111  (默认)
+//	FUTU_ENABLED=0                禁用富途，直接用 Yahoo
 func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices, error) {
 	if targetDays <= 0 {
 		targetDays = 3000
@@ -81,6 +83,10 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 			out.VIXYPrice = futuData.VIXYPrice
 			out.VIXYHistory = futuData.VIXYHistory
 			out.VIXYPriceAsOf = futuData.VIXYPriceAsOf
+			out.WTIPrice = futuData.WTIPrice
+			out.WTIHistory = futuData.WTIHistory
+			out.WTIPriceAsOf = futuData.WTIPriceAsOf
+			out.OilPriceSource = futuData.OilPriceSource
 			out.Warnings = append(out.Warnings, futuData.Warnings...)
 			if out.QQQPrice > 0 && out.SPYPrice > 0 {
 				futuOK = true
@@ -125,7 +131,8 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 		}
 	}
 
-	// WTI 原油：Futu US.USO 优先，失败时用 Yahoo CL=F 降级
+	// Oil price/proxy: Futu US.USO 优先，失败时用 Yahoo CL=F 降级。
+	// USO is an ETF proxy, not a barrel-denominated WTI futures price.
 	if out.WTIPrice <= 0 {
 		if p, h, a, e := fetchYahooChart(ctx, hc, "CL=F", targetDays); e != nil {
 			out.Warnings = append(out.Warnings, fmt.Sprintf("WTI fetch failed: %v", e))
@@ -133,6 +140,7 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 			out.WTIPrice = p
 			out.WTIHistory = h
 			out.WTIPriceAsOf = a
+			out.OilPriceSource = "yahoo:CL=F"
 		}
 	}
 
@@ -251,12 +259,7 @@ func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, target
 	result := parsed.Chart.Result[0]
 	closes := result.Indicators.Quote[0].Close
 
-	history = make([]float64, len(closes))
-	for i, c := range closes {
-		if c != nil {
-			history[i] = *c
-		}
-	}
+	history = yahooClosesNewestFirst(closes)
 
 	// Prefer meta.regularMarketPrice for the latest price (more reliable than iterating closes)
 	if meta := result.Meta; meta.RegularMarketPrice > 0 {
@@ -267,18 +270,35 @@ func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, target
 	}
 	// Fallback: iterate closes
 	if price == 0 {
-		for i := len(history) - 1; i >= 0; i-- {
-			if history[i] > 0 {
-				price = history[i]
-				if i < len(result.Timestamp) {
-					asOf = time.Unix(result.Timestamp[i], 0).UTC().Format("2006-01-02")
-				}
-				break
-			}
-		}
+		price, asOf = latestYahooClose(closes, result.Timestamp)
 	}
 
 	return price, history, asOf, nil
+}
+
+func yahooClosesNewestFirst(closes []*float64) []float64 {
+	history := make([]float64, len(closes))
+	for i, c := range closes {
+		idx := len(closes) - 1 - i
+		if c != nil {
+			history[idx] = *c
+		}
+	}
+	return history
+}
+
+func latestYahooClose(closes []*float64, timestamps []int64) (float64, string) {
+	for i := len(closes) - 1; i >= 0; i-- {
+		if closes[i] == nil || *closes[i] <= 0 {
+			continue
+		}
+		asOf := ""
+		if i < len(timestamps) {
+			asOf = time.Unix(timestamps[i], 0).UTC().Format("2006-01-02")
+		}
+		return *closes[i], asOf
+	}
+	return 0, ""
 }
 
 // CrossAssetPrices 跨资产价格数据聚合
@@ -310,9 +330,11 @@ type CrossAssetPrices struct {
 	VIXYPrice     float64
 	VIXYHistory   []float64
 	VIXYPriceAsOf string
-	// Crude Oil (Yahoo Finance CL=F — WTI futures)
-	WTIPrice     float64
-	WTIHistory   []float64
-	WTIPriceAsOf string
-	Warnings     []string
+	// Oil proxy / WTI futures. Source identifies whether the value is USO ETF
+	// proxy or actual CL=F WTI futures data.
+	WTIPrice       float64
+	WTIHistory     []float64
+	WTIPriceAsOf   string
+	OilPriceSource string
+	Warnings       []string
 }

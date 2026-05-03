@@ -8,7 +8,7 @@
 // 关键不变量：
 //   - 任何 Missing=true 的指标必须自动跳过，不参与计票、不影响覆盖率分母
 //     之外的统计；只在 coverage 字段中如实反映"少了多少指标"
-//   - 簇级去重：估值簇 (mayer+sma_200w_dev+ahr999) 在同向时只算一票
+//   - 簇级去重：估值簇 (mayer+sma_200w_dev+ahr999_compressed) 在同向时只算一票
 //   - 组合型域（positioning/macro/technical 等）至少需要两个确认信号才投票
 //   - 失效门槛：覆盖率 < 50% 时，confidence 自动降为"低"，stance 加 "(低覆盖)"
 //
@@ -70,7 +70,7 @@ func BuildVerdict(p *model.IndicatorPanel) *Verdict {
 	tech := voteTechnical(p)
 	cross := voteCrossAsset(p)
 
-	// 簇级去重：估值簇 (cycle 的 mayer/sma_200w_dev + valuation 的 ahr999)
+	// 簇级去重：估值簇 (cycle 的 mayer/sma_200w_dev + valuation 的 ahr999_compressed)
 	// 当两个域因同源估值信号同向时，扣减一个域为 0，避免重复计数。
 	cycle, val, clusterNote := dedupValuationCluster(cycle, val)
 	if clusterNote != "" {
@@ -178,9 +178,9 @@ func voteValuation(p *model.IndicatorPanel) DomainVote {
 			bear++
 		}
 	}
-	check("ahr999",
-		func(v float64) bool { return v < 0.8 && v > 0 },
-		func(v float64) bool { return v > 2.0 })
+	check("ahr999_compressed",
+		func(v float64) bool { return v < ctComp08 && v > 0 },
+		func(v float64) bool { return v > ctComp50 })
 	check("mvrv_z_score",
 		func(v float64) bool { return v < 0 },
 		func(v float64) bool { return v > 5 })
@@ -465,7 +465,7 @@ func voteCrossAsset(p *model.IndicatorPanel) DomainVote {
 	return d
 }
 
-// dedupValuationCluster — Cycle 域和 Valuation 域因 mayer/sma_200w_dev/ahr999
+// dedupValuationCluster — Cycle 域和 Valuation 域因 mayer/sma_200w_dev/ahr999_compressed
 // 同源估值信号同向时，弱化一个域为 0，避免重复计票。
 //
 // 规则：
@@ -617,8 +617,8 @@ func computeBottomProximity(p *model.IndicatorPanel) float64 {
 	if ind, ok := p.Cycle["sma_200w_dev"]; ok && ind.IsAvailable() {
 		add(2.0, ind.Value < 0)
 	}
-	if ind, ok := p.Valuation["ahr999"]; ok && ind.IsAvailable() {
-		add(2.0, ind.Value < 0.45 && ind.Value > 0)
+	if ind, ok := p.Valuation["ahr999_compressed"]; ok && ind.IsAvailable() {
+		add(2.0, ind.Value < ctComp045 && ind.Value > 0)
 	}
 	if ind, ok := p.Valuation["mvrv_z_score"]; ok && ind.IsAvailable() {
 		add(2.0, ind.Value < 0)

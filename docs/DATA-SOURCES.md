@@ -16,7 +16,7 @@
 | **SoSoValue** | 现货 BTC ETF (IBIT/FBTC等) 净流入 7d/30d、总资产 | 每次运行 | T-1 或 T-2 | 未知 |
 | **alternative.me** | 恐慌贪婪指数 (0-100) | 每次运行 | 实时 | 低 |
 | **CoinMetrics** | MVRV、NUPL、MVRV Z-Score（社区端点） | 每次运行 | T-1 | 免费 tier 有限 |
-| **Yahoo Finance** | GC=F (黄金)、QQQ、SPY（Futu 不可用时的降级） | 每次运行 | 实时 | 低 (yfinance) |
+| **Yahoo Finance** | QQQ/SPY fallback、CL=F WTI futures fallback | 每次运行 | 实时 | 低 (chart API) |
 
 ### 需注册的免费源
 
@@ -28,7 +28,9 @@
 
 | 数据源 | 用途 | 部署方式 |
 |---|---|---|
-| **Futu OpenD** | QQQ、SPY、GLD (黄金ETF)、UUP (做多美元ETF)、VIXY (VIX ETF) | 下载 OpenD → 启动 → 本地 `127.0.0.1:11111` |
+| **Futu OpenD** | QQQ、SPY、GLD (黄金ETF)、UUP (做多美元ETF)、TLT、VIXY、USO (油价 ETF proxy) | 下载 OpenD → 启动 → 本地 `127.0.0.1:11111` |
+
+> 注意：`US.USO` 是原油 ETF proxy，不是 WTI $/桶；只有 Yahoo `CL=F` fallback 才按 WTI futures 解释。JSON 顶层 `source_health` 会标记 fallback 与数据源状态。
 
 ---
 

@@ -368,12 +368,16 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 		snap.WTIPrice = decimal.NewFromFloat(ca.WTIPrice)
 		snap.WTIHistory = toDecimalSlice(ca.WTIHistory)
 		snap.WTIPriceAsOf = ca.WTIPriceAsOf
+		snap.OilPriceSource = ca.OilPriceSource
 		snap.UUPPrice = decimal.NewFromFloat(ca.UUPPrice)
 		snap.UUPHistory = toDecimalSlice(ca.UUPHistory)
 		snap.UUPPriceAsOf = ca.UUPPriceAsOf
 		snap.VIXYPrice = decimal.NewFromFloat(ca.VIXYPrice)
 		snap.VIXYHistory = toDecimalSlice(ca.VIXYHistory)
 		snap.VIXYPriceAsOf = ca.VIXYPriceAsOf
+		snap.TLTPrice = decimal.NewFromFloat(ca.TLTPrice)
+		snap.TLTHistory = toDecimalSlice(ca.TLTHistory)
+		snap.TLTPriceAsOf = ca.TLTPriceAsOf
 		for _, w := range ca.Warnings {
 			addWarning("cross-asset: %s", w)
 		}
@@ -805,7 +809,7 @@ func (c *RealClient) fetchFuturesData(ctx context.Context, snap *model.MarketSna
 func (c *RealClient) fetchStablecoinCap(ctx context.Context, snap *model.MarketSnapshot) error {
 	// 获取稳定币市值：通过CoinGecko获取主要稳定币数据
 	// 使用CoinGecko API获取稳定币市值
-	url := "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=tether,usd-coin,dai,binance-usd,frax&order=market_cap_desc&per_page=100&page=1&sparkline=false"
+	url := "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=tether,usd-coin,dai,first-digital-usd,frax&order=market_cap_desc&per_page=100&page=1&sparkline=false"
 	var stablecoins []CGMarketItem
 	_, err := c.client.R().SetContext(ctx).SetResult(&stablecoins).Get(url)
 	if err != nil {

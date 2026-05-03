@@ -2,6 +2,7 @@ package engine
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,7 +60,7 @@ func TestVerdictBullStanceOnStrongConsensus(t *testing.T) {
 	p := newTestPanel()
 	// 6 个域看涨，且组合型域都提供确认信号。
 	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.7}            // bull
-	p.Valuation["ahr999"] = model.Indicator{Value: 0.4}                // bull
+	p.Valuation["ahr999_compressed"] = model.Indicator{Value: 0.5}     // bull
 	p.Network["hash_ribbons"] = model.Indicator{Label: "上行（扩张）"}       // bull
 	p.Positioning["funding_rate_pct"] = model.Indicator{Value: -0.005} // bull
 	p.Positioning["oi_to_mc"] = model.Indicator{Value: 0.012}          // bull
@@ -107,7 +108,7 @@ func TestVerdictCoverageAffectsConfidence(t *testing.T) {
 	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.7}
 	p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Missing: true}
 	p.Cycle["sma_200w_dev"] = model.Indicator{Missing: true}
-	p.Valuation["ahr999"] = model.Indicator{Missing: true}
+	p.Valuation["ahr999_compressed"] = model.Indicator{Missing: true}
 	p.Positioning["funding_rate_pct"] = model.Indicator{Missing: true}
 	p.Macro["m2_yoy"] = model.Indicator{Missing: true}
 
@@ -125,7 +126,7 @@ func TestVerdictDedupValuationCluster(t *testing.T) {
 	// Cycle 域两个估值类指标看涨 + Valuation 域两个看涨 → 应该去重
 	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.6}
 	p.Cycle["sma_200w_dev"] = model.Indicator{Value: -0.1}
-	p.Valuation["ahr999"] = model.Indicator{Value: 0.3}
+	p.Valuation["ahr999_compressed"] = model.Indicator{Value: 0.5}
 	p.Valuation["mvrv_z_score"] = model.Indicator{Value: -0.5}
 
 	v := BuildVerdict(p)
@@ -135,6 +136,32 @@ func TestVerdictDedupValuationCluster(t *testing.T) {
 	}
 	if len(v.ClusterNotes) == 0 {
 		t.Fatalf("expected a cluster note about dedup")
+	}
+}
+
+func TestVerdictValuationUsesCompressedAHR(t *testing.T) {
+	p := newTestPanel()
+	p.Valuation["ahr999"] = model.Indicator{Value: 0.3}
+	p.Valuation["ahr999_compressed"] = model.Indicator{Value: 2.0}
+
+	v := BuildVerdict(p)
+	valuation := findDomain(v, "valuation")
+	if valuation.Vote != 0 {
+		t.Fatalf("adaptive ahr999 should not drive valuation vote when compressed AHR is neutral, got %+v", valuation)
+	}
+
+	p.Valuation["ahr999_compressed"] = model.Indicator{Value: 0.5}
+	v = BuildVerdict(p)
+	valuation = findDomain(v, "valuation")
+	if valuation.Vote != +1 {
+		t.Fatalf("compressed AHR below bottom threshold should vote bullish, got %+v", valuation)
+	}
+
+	p.Valuation["ahr999_compressed"] = model.Indicator{Value: 3.5}
+	v = BuildVerdict(p)
+	valuation = findDomain(v, "valuation")
+	if valuation.Vote != -1 {
+		t.Fatalf("compressed AHR above top threshold should vote bearish, got %+v", valuation)
 	}
 }
 
@@ -178,6 +205,106 @@ func TestBuildPanelMarksMacroPlaceholdersMissing(t *testing.T) {
 	if macro.Vote != 0 || len(macro.Bullish) != 0 || len(macro.Bearish) != 0 {
 		t.Fatalf("macro placeholders leaked into vote: %+v", macro)
 	}
+}
+
+func TestBuildPanelKeepsAvailableMacroSignalsWhenFREDFails(t *testing.T) {
+	calc := NewCalculator(&model.Config{})
+	wtiHistory := make([]decimal.Decimal, 61)
+	wtiHistory[60] = decimal.NewFromInt(50)
+
+	panel := calc.BuildPanel(&model.MarketSnapshot{
+		Date:           time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
+		BTCPrice:       decimal.NewFromInt(100000),
+		WTIPrice:       decimal.NewFromInt(75),
+		WTIHistory:     wtiHistory,
+		WTIPriceAsOf:   "2026-05-02",
+		OilPriceSource: "yahoo:CL=F",
+	})
+
+	if ind := panel.Macro["dxy_60d_trend_pct"]; !ind.Missing {
+		t.Fatalf("expected DXY placeholder to remain missing when FRED is unavailable: %+v", ind)
+	}
+	if ind, ok := panel.Macro["wti_crude_usd"]; !ok || ind.Missing || ind.Value != 75 {
+		t.Fatalf("expected WTI to be retained despite FRED failure, got ok=%v ind=%+v", ok, ind)
+	}
+	if ind, ok := panel.Macro["wti_crude_60d_trend_pct"]; !ok || ind.Missing || ind.Value != 50 {
+		t.Fatalf("expected WTI 60d trend to be computed, got ok=%v ind=%+v", ok, ind)
+	}
+}
+
+func TestBuildPanelLabelsUSOAsOilProxy(t *testing.T) {
+	calc := NewCalculator(&model.Config{})
+	panel := calc.BuildPanel(&model.MarketSnapshot{
+		Date:           time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
+		BTCPrice:       decimal.NewFromInt(100000),
+		WTIPrice:       decimal.NewFromInt(75),
+		WTIPriceAsOf:   "2026-05-02",
+		OilPriceSource: "futu:US.USO",
+	})
+
+	ind, ok := panel.Macro["oil_proxy_usd"]
+	if !ok || ind.Missing || ind.Source != "futu:US.USO" {
+		t.Fatalf("expected USO to be exposed as oil proxy, got ok=%v ind=%+v", ok, ind)
+	}
+	if _, ok := panel.Macro["wti_crude_usd"]; ok {
+		t.Fatal("USO ETF proxy should not be emitted as WTI crude")
+	}
+	if !strings.Contains(ind.Note, "不是 $/桶 WTI") {
+		t.Fatalf("expected USO note to avoid barrel-price interpretation, got %q", ind.Note)
+	}
+}
+
+func TestBuildPanelIncludesSourceHealth(t *testing.T) {
+	calc := NewCalculator(&model.Config{})
+	panel := calc.BuildPanel(&model.MarketSnapshot{
+		Date:              time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
+		BTCPrice:          decimal.NewFromInt(100000),
+		BTCPriceHistory:   []decimal.Decimal{decimal.NewFromInt(100000)},
+		BTCPriceAsOf:      "2026-05-03",
+		ETHPrice:          decimal.NewFromInt(3000),
+		ETHPriceHistory:   []decimal.Decimal{decimal.NewFromInt(3000)},
+		ETHPriceAsOf:      "2026-05-03",
+		ETFNetFlow30dUSD:  decimal.NewFromInt(1),
+		ETFAsOf:           "2026-04-30",
+		ETFStaleDays:      3,
+		WTIPrice:          decimal.NewFromInt(75),
+		WTIPriceAsOf:      "2026-05-02",
+		OilPriceSource:    "yahoo:CL=F",
+		CrossAssetFetched: true,
+		GoldPriceUSD:      decimal.NewFromInt(4500),
+		QQQPrice:          decimal.NewFromInt(500),
+		SPYPrice:          decimal.NewFromInt(550),
+		GoldPriceAsOf:     "2026-05-02",
+		QQQPriceAsOf:      "2026-05-02",
+		SPYPriceAsOf:      "2026-05-02",
+		SourceWarnings:    []string{"fred macro data unavailable: FRED_API_KEY is not set"},
+	})
+
+	spot := findSourceHealth(panel, "binance_spot")
+	if spot.Status != "ok" || spot.AsOf == "" {
+		t.Fatalf("expected binance spot source health ok with as_of, got %+v", spot)
+	}
+	etf := findSourceHealth(panel, "sosovalue_etf")
+	if etf.Status != "stale" || !strings.Contains(etf.Note, "3 days old") {
+		t.Fatalf("expected ETF stale health, got %+v", etf)
+	}
+	fred := findSourceHealth(panel, "fred_macro")
+	if fred.Status != "missing" || len(fred.Warnings) == 0 {
+		t.Fatalf("expected FRED missing health with warning, got %+v", fred)
+	}
+	cross := findSourceHealth(panel, "cross_asset")
+	if cross.Status != "ok" || !cross.FallbackUsed {
+		t.Fatalf("expected cross asset ok with Yahoo fallback noted, got %+v", cross)
+	}
+}
+
+func findSourceHealth(panel *model.IndicatorPanel, source string) model.SourceHealth {
+	for _, h := range panel.SourceHealth {
+		if h.Source == source {
+			return h
+		}
+	}
+	return model.SourceHealth{}
 }
 
 func TestVerdictSMA200WDevUsesRatioUnits(t *testing.T) {

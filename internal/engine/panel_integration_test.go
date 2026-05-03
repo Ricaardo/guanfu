@@ -115,7 +115,7 @@ func TestBuildPanelAllDomainsNonEmpty(t *testing.T) {
 func TestSkillIndicatorContract(t *testing.T) {
 	expected := map[string][]string{
 		"cycle":       {"days_since_halving", "days_to_halving", "sma_200w", "sma_200w_dev", "mayer_multiple", "pi_cycle_top_ratio", "phase"},
-		"valuation":   {"ahr999", "mvrv_z_score", "nupl", "realized_price", "price_to_realized_dev_pct"},
+		"valuation":   {"ahr999", "ahr999_compressed", "mvrv_z_score", "nupl", "realized_price", "price_to_realized_dev_pct"},
 		"network":     {"hash_rate_ehs", "hash_ribbons", "difficulty_change_pct", "mempool_mb"},
 		"positioning": {"funding_rate_pct", "oi_to_mc", "fear_greed", "altcoin_season", "dvol", "dvol_60d_trend_pct", "skew_25d_pct"},
 		"macro":       {"dxy_60d_trend_pct", "real_yield_10y_pct", "m2_yoy", "spx_correlation_30d"},
@@ -216,4 +216,3 @@ func TestSkillIndicatorContract(t *testing.T) {
 		}
 	}
 }
-

@@ -22,6 +22,9 @@ func TestFilterDomainPreservesMetadata(t *testing.T) {
 			"eth_btc_ratio": {Value: 0.04},
 		},
 		StaleWarnings: []string{"coinmetrics unavailable"},
+		SourceHealth: []model.SourceHealth{
+			{Source: "coinmetrics_onchain", Status: "missing"},
+		},
 	}
 
 	got := filterDomain(panel, "cycle")
@@ -30,6 +33,9 @@ func TestFilterDomainPreservesMetadata(t *testing.T) {
 	}
 	if len(got.StaleWarnings) != 1 || got.StaleWarnings[0] != "coinmetrics unavailable" {
 		t.Fatalf("stale warnings not preserved: %+v", got.StaleWarnings)
+	}
+	if len(got.SourceHealth) != 1 || got.SourceHealth[0].Source != "coinmetrics_onchain" {
+		t.Fatalf("source health not preserved: %+v", got.SourceHealth)
 	}
 	if _, ok := got.Cycle["phase"]; !ok {
 		t.Fatal("cycle domain missing")

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"time"
 )
@@ -35,6 +36,13 @@ type ETFData struct {
 	StaleDays        int       `json:"-"` // 距今天数（>=2 警告）
 }
 
+type sosoETFRow struct {
+	Date           string  `json:"date"`
+	TotalNetInflow float64 `json:"totalNetInflow"`
+	TotalNetAssets float64 `json:"totalNetAssets"`
+	CumNetInflow   float64 `json:"cumNetInflow"`
+}
+
 // FetchBTCETFData 拉 SoSoValue ETF 数据并汇总 7d/30d
 func FetchBTCETFData(ctx context.Context) (*ETFData, error) {
 	httpClient := &http.Client{Timeout: 8 * time.Second}
@@ -47,6 +55,9 @@ func FetchBTCETFData(ctx context.Context) (*ETFData, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if key := sosoAPIKey(); key != "" {
+		req.Header.Set("x-soso-api-key", key)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -61,25 +72,24 @@ func FetchBTCETFData(ctx context.Context) (*ETFData, error) {
 	}
 
 	var parsed struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data []struct {
-			Date            string  `json:"date"`
-			TotalNetInflow  float64 `json:"totalNetInflow"`
-			TotalNetAssets  float64 `json:"totalNetAssets"`
-			CumNetInflow    float64 `json:"cumNetInflow"`
-		} `json:"data"`
+		Code int             `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, err
 	}
-	if parsed.Code != 0 || len(parsed.Data) == 0 {
+	rows, err := parseSoSoETFRows(parsed.Data)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Code != 0 || len(rows) == 0 {
 		return nil, fmt.Errorf("sosovalue err: code=%d msg=%s", parsed.Code, parsed.Msg)
 	}
 
 	// 解析 + 按日期升序
-	flows := make([]ETFFlow, 0, len(parsed.Data))
-	for _, d := range parsed.Data {
+	flows := make([]ETFFlow, 0, len(rows))
+	for _, d := range rows {
 		t, err := time.Parse("2006-01-02", d.Date)
 		if err != nil {
 			continue
@@ -114,4 +124,33 @@ func FetchBTCETFData(ctx context.Context) (*ETFData, error) {
 	out.TotalAssetsUSD = flows[len(flows)-1].TotalAssetsUSD
 
 	return out, nil
+}
+
+func sosoAPIKey() string {
+	if key := os.Getenv("SOSOVALUE_API_KEY"); key != "" {
+		return key
+	}
+	return os.Getenv("SOSO_VALUE_API_KEY")
+}
+
+func parseSoSoETFRows(raw json.RawMessage) ([]sosoETFRow, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, fmt.Errorf("empty sosovalue data")
+	}
+
+	var rows []sosoETFRow
+	if err := json.Unmarshal(raw, &rows); err == nil {
+		return rows, nil
+	}
+
+	var wrapped struct {
+		List []sosoETFRow `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, err
+	}
+	if wrapped.List == nil {
+		return nil, fmt.Errorf("sosovalue data has no list")
+	}
+	return wrapped.List, nil
 }

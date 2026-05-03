@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Ricaardo/guanfu/internal/mathutil"
@@ -60,6 +61,7 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 		Technical:     map[string]model.Indicator{},
 		CrossAsset:    map[string]model.Indicator{},
 		StaleWarnings: append([]string(nil), snap.SourceWarnings...),
+		SourceHealth:  buildSourceHealth(snap),
 	}
 
 	c.fillCycle(panel, snap, now)
@@ -75,6 +77,203 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 	panel.StaleWarnings = dedupeStrings(panel.StaleWarnings)
 
 	return panel
+}
+
+func buildSourceHealth(snap *model.MarketSnapshot) []model.SourceHealth {
+	warnings := dedupeStrings(append([]string(nil), snap.SourceWarnings...))
+	out := make([]model.SourceHealth, 0, 10)
+
+	btcOK := !snap.BTCPrice.IsZero() && len(snap.BTCPriceHistory) > 0
+	ethOK := !snap.ETHPrice.IsZero() && len(snap.ETHPriceHistory) > 0
+	out = append(out, healthEntry(
+		"binance_spot",
+		combinedStatus(btcOK, ethOK),
+		latestAsOf(snap.BTCPriceAsOf, snap.ETHPriceAsOf),
+		false,
+		"BTC/ETH spot price, volume and daily history",
+		matchingWarnings(warnings, "binance btc", "binance eth"),
+	))
+
+	futuresOK := !snap.BTCFundingRate.IsZero() || !snap.BTCOpenInterest.IsZero()
+	out = append(out, healthEntry(
+		"binance_futures",
+		statusFromBool(futuresOK),
+		sourceTimestamp("", ""),
+		false,
+		"BTC funding rate and open interest",
+		matchingWarnings(warnings, "binance futures"),
+	))
+
+	coingeckoTotalOK := !snap.TotalMarketCap.IsZero()
+	coingeckoStableOK := !snap.StablecoinMarketCap.IsZero()
+	coingeckoTopOK := len(snap.Top50Coins) > 0
+	out = append(out, healthEntry(
+		"coingecko_market",
+		combinedStatus(coingeckoTotalOK, coingeckoStableOK || coingeckoTopOK),
+		"",
+		false,
+		"global market cap, stablecoin cap and top-50 breadth inputs",
+		matchingWarnings(warnings, "coingecko"),
+	))
+
+	out = append(out, healthEntry(
+		"alternative_fear_greed",
+		statusFromBool(!snap.FearGreedIndex.IsZero() || snap.FearGreedAsOf != ""),
+		snap.FearGreedAsOf,
+		false,
+		"Fear & Greed index",
+		matchingWarnings(warnings, "fear", "greed", "alternative.me"),
+	))
+
+	mempoolOK := !snap.HashRateEHs.IsZero() || snap.HashRibbonsLabel != "" || !snap.MempoolMB.IsZero()
+	out = append(out, healthEntry(
+		"mempool_space",
+		statusFromBool(mempoolOK),
+		snap.MempoolAsOf,
+		false,
+		"hash rate, hash ribbons, difficulty and mempool depth",
+		matchingWarnings(warnings, "mempool"),
+	))
+
+	etfOK := !snap.ETFNetFlow7dUSD.IsZero() || !snap.ETFNetFlow30dUSD.IsZero() || !snap.ETFTotalAssetUSD.IsZero() || snap.ETFAsOf != ""
+	etfStatus := statusFromBool(etfOK)
+	etfNote := "US BTC spot ETF flows and total assets"
+	if etfOK && snap.ETFStaleDays >= 2 {
+		etfStatus = "stale"
+		etfNote = fmt.Sprintf("%s; latest sample is %d days old", etfNote, snap.ETFStaleDays)
+	}
+	out = append(out, healthEntry(
+		"sosovalue_etf",
+		etfStatus,
+		snap.ETFAsOf,
+		false,
+		etfNote,
+		matchingWarnings(warnings, "sosovalue", "etf"),
+	))
+
+	deribitStatus := combinedStatus(snap.DVOLAvailable, snap.SkewAvailable)
+	out = append(out, healthEntry(
+		"deribit_options",
+		deribitStatus,
+		latestAsOf(snap.DVOLAsOf, snap.SkewAsOf),
+		false,
+		"DVOL and 25-delta skew",
+		matchingWarnings(warnings, "deribit"),
+	))
+
+	out = append(out, healthEntry(
+		"coinmetrics_onchain",
+		statusFromBool(snap.OnchainValuationFetched),
+		snap.OnchainValuationAsOf,
+		false,
+		"MVRV, MVRV Z, NUPL and realized cap inputs",
+		matchingWarnings(warnings, "coinmetrics"),
+	))
+
+	out = append(out, healthEntry(
+		"fred_macro",
+		statusFromBool(snap.MacroFetched),
+		latestAsOf(snap.DXYAsOf, snap.RealYield10YAsOf, snap.M2AsOf, snap.SPXAsOf, snap.HYSpreadAsOf, snap.YieldCurveAsOf),
+		false,
+		"DXY, real yield, M2, SPX correlation, HY spread and yield curve",
+		matchingWarnings(warnings, "fred"),
+	))
+
+	crossOK := snap.CrossAssetFetched
+	crossCoreOK := !snap.GoldPriceUSD.IsZero() && !snap.QQQPrice.IsZero() && !snap.SPYPrice.IsZero()
+	crossStatus := combinedStatus(crossOK, crossCoreOK)
+	oilNote := oilSourceHealthNote(snap.OilPriceSource)
+	out = append(out, healthEntry(
+		"cross_asset",
+		crossStatus,
+		latestAsOf(snap.GoldPriceAsOf, snap.QQQPriceAsOf, snap.SPYPriceAsOf, snap.WTIPriceAsOf, snap.UUPPriceAsOf, snap.VIXYPriceAsOf),
+		crossFallbackUsed(snap, warnings),
+		oilNote,
+		matchingWarnings(warnings, "cross-asset", "futu", "yahoo", "paxg", "wti"),
+	))
+
+	return out
+}
+
+func healthEntry(source, status, asOf string, fallback bool, note string, warnings []string) model.SourceHealth {
+	if len(warnings) > 0 && status == "ok" {
+		status = "warning"
+	}
+	return model.SourceHealth{
+		Source:       source,
+		Status:       status,
+		AsOf:         asOf,
+		FallbackUsed: fallback,
+		Note:         note,
+		Warnings:     warnings,
+	}
+}
+
+func statusFromBool(ok bool) string {
+	if ok {
+		return "ok"
+	}
+	return "missing"
+}
+
+func combinedStatus(primaryOK, secondaryOK bool) string {
+	switch {
+	case primaryOK && secondaryOK:
+		return "ok"
+	case primaryOK || secondaryOK:
+		return "partial"
+	default:
+		return "missing"
+	}
+}
+
+func matchingWarnings(warnings []string, needles ...string) []string {
+	var out []string
+	for _, w := range warnings {
+		lower := strings.ToLower(w)
+		for _, needle := range needles {
+			if strings.Contains(lower, strings.ToLower(needle)) {
+				out = append(out, w)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func latestAsOf(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func crossFallbackUsed(snap *model.MarketSnapshot, warnings []string) bool {
+	if snap.OilPriceSource == "yahoo:CL=F" {
+		return true
+	}
+	for _, w := range warnings {
+		lower := strings.ToLower(w)
+		if strings.Contains(lower, "will try yahoo") || strings.Contains(lower, "yahoo") {
+			return true
+		}
+	}
+	return false
+}
+
+func oilSourceHealthNote(source string) string {
+	switch source {
+	case "futu:US.USO":
+		return "cross-asset data includes USO ETF as oil proxy; do not interpret it as WTI $/barrel"
+	case "yahoo:CL=F":
+		return "cross-asset data includes Yahoo CL=F WTI futures fallback"
+	case "":
+		return "gold, QQQ, SPY and optional oil proxy inputs"
+	default:
+		return fmt.Sprintf("cross-asset data includes oil source %s", source)
+	}
 }
 
 // historyTracked 列出从 history.db 取分位的指标 → 所属 domain。
@@ -288,7 +487,7 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 	btcTS := sourceTimestamp(snap.BTCPriceAsOf, ts)
 	onchainTS := sourceTimestamp(snap.OnchainValuationAsOf, ts)
 
-	// ── AHR999 自适应版（当前主指标）──
+	// ── AHR999 自适应版（辅助信号）──
 	_, ahrRaw, ahrQ, ok := c.calcAhr999Detailed(snap)
 	if ok && !ahrRaw.IsZero() {
 		raw := f(ahrRaw)
@@ -607,66 +806,67 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 			UpdatedAt: ts,
 			Note:      "需要 FRED_API_KEY 拉 SP500 后计算",
 		}
-		return
-	}
+	} else {
+		// DXY 60d 趋势 (DTWEXBGS)
+		if !snap.DXY60dTrendPct.IsZero() || !snap.DXYLatest.IsZero() {
+			dxyTrend := f(snap.DXY60dTrendPct)
+			p.Macro["dxy_60d_trend_pct"] = model.Indicator{
+				Value:     dxyTrend,
+				Label:     dxyTrendLabel(dxyTrend),
+				Source:    "fred:DTWEXBGS",
+				UpdatedAt: sourceTimestamp(snap.DXYAsOf, ts),
+				Note:      fmt.Sprintf("Trade-Weighted USD (Broad) 60 日变化 %%。最新 %.2f (as of %s)。下行利好 BTC", f(snap.DXYLatest), snap.DXYAsOf),
+			}
+		}
 
-	// DXY 60d 趋势 (DTWEXBGS)
-	if !snap.DXY60dTrendPct.IsZero() || !snap.DXYLatest.IsZero() {
-		dxyTrend := f(snap.DXY60dTrendPct)
-		p.Macro["dxy_60d_trend_pct"] = model.Indicator{
-			Value:     dxyTrend,
-			Label:     dxyTrendLabel(dxyTrend),
-			Source:    "fred:DTWEXBGS",
-			UpdatedAt: sourceTimestamp(snap.DXYAsOf, ts),
-			Note:      fmt.Sprintf("Trade-Weighted USD (Broad) 60 日变化 %%。最新 %.2f (as of %s)。下行利好 BTC", f(snap.DXYLatest), snap.DXYAsOf),
+		// 10Y 实际利率 (DFII10)
+		if !snap.RealYield10YPct.IsZero() {
+			ry := f(snap.RealYield10YPct)
+			p.Macro["real_yield_10y_pct"] = model.Indicator{
+				Value:     ry,
+				Label:     realYieldLabel(ry),
+				Source:    "fred:DFII10",
+				UpdatedAt: sourceTimestamp(snap.RealYield10YAsOf, ts),
+				Note:      fmt.Sprintf("10Y TIPS 实际利率 %%（as of %s）。>2%% 历史性逆风，<0%% 极度宽松", snap.RealYield10YAsOf),
+			}
+		}
+
+		// M2 同比 (M2SL)
+		if !snap.M2YoYPct.IsZero() || !snap.M2LatestB.IsZero() {
+			m2yoy := f(snap.M2YoYPct)
+			p.Macro["m2_yoy"] = model.Indicator{
+				Value:     m2yoy,
+				Label:     m2YoYLabel(m2yoy),
+				Source:    "fred:M2SL",
+				UpdatedAt: sourceTimestamp(snap.M2AsOf, ts),
+				Note:      fmt.Sprintf("M2 货币供应同比 %%。最新 $%.2fT（as of %s）。扩张 = BTC 顺风", f(snap.M2LatestB)/1000, snap.M2AsOf),
+			}
 		}
 	}
 
-	// 10Y 实际利率 (DFII10)
-	if !snap.RealYield10YPct.IsZero() {
-		ry := f(snap.RealYield10YPct)
-		p.Macro["real_yield_10y_pct"] = model.Indicator{
-			Value:     ry,
-			Label:     realYieldLabel(ry),
-			Source:    "fred:DFII10",
-			UpdatedAt: sourceTimestamp(snap.RealYield10YAsOf, ts),
-			Note:      fmt.Sprintf("10Y TIPS 实际利率 %%（as of %s）。>2%% 历史性逆风，<0%% 极度宽松", snap.RealYield10YAsOf),
-		}
-	}
-
-	// M2 同比 (M2SL)
-	if !snap.M2YoYPct.IsZero() || !snap.M2LatestB.IsZero() {
-		m2yoy := f(snap.M2YoYPct)
-		p.Macro["m2_yoy"] = model.Indicator{
-			Value:     m2yoy,
-			Label:     m2YoYLabel(m2yoy),
-			Source:    "fred:M2SL",
-			UpdatedAt: sourceTimestamp(snap.M2AsOf, ts),
-			Note:      fmt.Sprintf("M2 货币供应同比 %%。最新 $%.2fT（as of %s）。扩张 = BTC 顺风", f(snap.M2LatestB)/1000, snap.M2AsOf),
-		}
-	}
-
-	// WTI 原油价格（Futu USO > Yahoo CL=F）
+	// Oil price/proxy. Futu returns USO ETF proxy; Yahoo CL=F is WTI futures.
 	if !snap.WTIPrice.IsZero() {
-		wtiPrice := f(snap.WTIPrice)
-		p.Macro["wti_crude"] = model.Indicator{
-			Value:     wtiPrice,
-			Label:     wtiLabel(wtiPrice),
-			Source:    "futu:USO / yahoo:CL=F",
+		oilPrice := f(snap.WTIPrice)
+		oilSource := oilSource(snap)
+		priceKey, trendKey := oilIndicatorKeys(oilSource)
+		p.Macro[priceKey] = model.Indicator{
+			Value:     oilPrice,
+			Label:     oilPriceLabel(oilPrice),
+			Source:    oilSource,
 			UpdatedAt: sourceTimestamp(snap.WTIPriceAsOf, ts),
-			Note:      "WTI 原油期货价格 ($/桶)。>100 成本推动型通胀 → Fed 困境 → BTC 不确定性",
+			Note:      oilPriceNote(oilSource),
 		}
 		// 60d 趋势
 		if len(snap.WTIHistory) > 60 {
 			wti60dAgo := f(snap.WTIHistory[60])
 			if wti60dAgo > 0 {
-				wti60dTrend := (wtiPrice - wti60dAgo) / wti60dAgo * 100
-				p.Macro["wti_60d_trend_pct"] = model.Indicator{
+				wti60dTrend := (oilPrice - wti60dAgo) / wti60dAgo * 100
+				p.Macro[trendKey] = model.Indicator{
 					Value:     wti60dTrend,
-					Label:     wtiTrendLabel(wti60dTrend),
-					Source:    "futu:USO / yahoo:CL=F",
+					Label:     oilTrendLabel(wti60dTrend),
+					Source:    oilSource,
 					UpdatedAt: sourceTimestamp(snap.WTIPriceAsOf, ts),
-					Note:      "WTI 60 日变化 %。>20% = 供给冲击风险；<-20% = 需求崩溃",
+					Note:      oilTrendNote(oilSource),
 				}
 			}
 		}
@@ -1186,16 +1386,17 @@ func (c *Calculator) fillCrossAsset(p *model.IndicatorPanel, snap *model.MarketS
 			UpdatedAt: sourceTimestamp(snap.GoldPriceAsOf, btcTS),
 			Note:      fmt.Sprintf("BTC / 黄金。BTC $%.0f / Gold $%.0f/oz。1 BTC = %.2f oz 黄金", btc, gold, ratio),
 		}
-		// BTC / WTI 原油
+		// BTC / oil proxy or WTI futures
 		if !snap.WTIPrice.IsZero() {
 			oil := f(snap.WTIPrice)
 			if oil > 0 {
 				oilRatio := btc / oil
+				oilSource := oilSource(snap)
 				p.CrossAsset["btc_oil_ratio"] = model.Indicator{
 					Value:     oilRatio,
-					Source:    "futu:USO / yahoo:CL=F",
+					Source:    oilSource,
 					UpdatedAt: sourceTimestamp(snap.WTIPriceAsOf, btcTS),
-					Note:      fmt.Sprintf("BTC / WTI。BTC $%.0f / WTI $%.0f。1 BTC = %.0f 桶 WTI 原油", btc, oil, oilRatio),
+					Note:      oilRatioNote(oilSource, btc, oil, oilRatio),
 				}
 			}
 		}
@@ -1264,6 +1465,31 @@ func (c *Calculator) fillCrossAsset(p *model.IndicatorPanel, snap *model.MarketS
 			}
 		}
 		// rel_strength_90d_qqq 已去重：与 SPY 信号几乎等同，留 gold 作为唯一跨资产相对强弱
+	}
+
+	// TLT — 20+ Year Treasury Bond ETF (long-end Treasury price proxy, inverse of 30Y yield)
+	if !snap.TLTPrice.IsZero() {
+		tltPrice := f(snap.TLTPrice)
+		p.CrossAsset["tlt_price"] = model.Indicator{
+			Value:     tltPrice,
+			Label:     tltPriceLabel(tltPrice),
+			Source:    "futu:US.TLT",
+			UpdatedAt: sourceTimestamp(snap.TLTPriceAsOf, ts),
+			Note:      "iShares 20+Y Treasury Bond ETF。长端美债价格代理，与 30Y 收益率反向。下跌 = 长端利率上行 = BTC 估值分母上移",
+		}
+		if len(snap.TLTHistory) > 60 {
+			tlt60dAgo := f(snap.TLTHistory[60])
+			if tlt60dAgo > 0 {
+				tlt60dTrend := (tltPrice - tlt60dAgo) / tlt60dAgo * 100
+				p.CrossAsset["tlt_60d_trend_pct"] = model.Indicator{
+					Value:     tlt60dTrend,
+					Label:     tltTrendLabel(tlt60dTrend),
+					Source:    "futu:US.TLT",
+					UpdatedAt: sourceTimestamp(snap.TLTPriceAsOf, ts),
+					Note:      "TLT 60 日变化 %。<-5% 长端利率快速上行（紧缩 / 通胀反扑），>+5% 长端利率回落（衰退预期 / 政策转鸽）",
+				}
+			}
+		}
 	}
 }
 
@@ -1756,9 +1982,61 @@ func relStrengthLabel(diff float64) string {
 	}
 }
 
-// --- WTI crude oil labels ---
+// --- TLT (long-end Treasury bond ETF) labels ---
+//
+// 历史区间参考（2010-2025）：COVID 高点 ~170（极低利率），2022-23 紧缩低点 ~80（30Y 收益率冲到 ~5%）。
+// TLT 与 30Y 收益率反向：TLT 跌 = 长端利率上行 = BTC 估值分母上移 = 风险资产逆风。
 
-func wtiLabel(price float64) string {
+func tltPriceLabel(price float64) string {
+	switch {
+	case price < 85:
+		return "极低（长端利率高位）"
+	case price < 95:
+		return "偏低（长端利率偏高）"
+	case price < 110:
+		return "中性"
+	case price < 130:
+		return "偏高（长端利率偏低）"
+	default:
+		return "极高（长端利率深度低位）"
+	}
+}
+
+func tltTrendLabel(pct float64) string {
+	switch {
+	case pct < -10:
+		return "暴跌（长端利率冲击 / 紧缩）"
+	case pct < -5:
+		return "下跌（利率走高）"
+	case pct < 5:
+		return "横盘"
+	case pct < 10:
+		return "上涨（利率回落）"
+	default:
+		return "暴涨（衰退避险 / 政策转鸽）"
+	}
+}
+
+// --- Oil proxy / WTI labels ---
+
+func oilSource(snap *model.MarketSnapshot) string {
+	if snap.OilPriceSource != "" {
+		return snap.OilPriceSource
+	}
+	if !snap.WTIPrice.IsZero() {
+		return "unknown:oil"
+	}
+	return ""
+}
+
+func oilIndicatorKeys(source string) (priceKey, trendKey string) {
+	if source == "yahoo:CL=F" {
+		return "wti_crude_usd", "wti_crude_60d_trend_pct"
+	}
+	return "oil_proxy_usd", "oil_proxy_60d_trend_pct"
+}
+
+func oilPriceLabel(price float64) string {
 	switch {
 	case price < 50:
 		return "极低（通缩压力 / 需求崩溃）"
@@ -1775,7 +2053,7 @@ func wtiLabel(price float64) string {
 	}
 }
 
-func wtiTrendLabel(pct float64) string {
+func oilTrendLabel(pct float64) string {
 	switch {
 	case pct < -20:
 		return "暴跌（需求崩塌）"
@@ -1787,6 +2065,39 @@ func wtiTrendLabel(pct float64) string {
 		return "上行（通胀压力↑）"
 	default:
 		return "飙升（供给冲击风险）"
+	}
+}
+
+func oilPriceNote(source string) string {
+	switch source {
+	case "yahoo:CL=F":
+		return "WTI 近月原油期货价格 ($/桶)。>100 成本推动型通胀 → Fed 困境 → BTC 不确定性"
+	case "futu:US.USO":
+		return "USO 原油 ETF 价格，作为油价流动性 proxy；不是 $/桶 WTI，不能按桶数解释"
+	default:
+		return "油价或油价 proxy。来源未知时只用于趋势参考，不能按 WTI 桶价解释"
+	}
+}
+
+func oilTrendNote(source string) string {
+	switch source {
+	case "yahoo:CL=F":
+		return "WTI 近月原油期货 60 日变化 %。>20% = 供给冲击风险；<-20% = 需求崩溃"
+	case "futu:US.USO":
+		return "USO 原油 ETF 60 日变化 %，作为油价 proxy 趋势；避免和 WTI 桶价混用"
+	default:
+		return "油价或油价 proxy 60 日变化 %。来源未知时只用于方向参考"
+	}
+}
+
+func oilRatioNote(source string, btc, oil, ratio float64) string {
+	switch source {
+	case "yahoo:CL=F":
+		return fmt.Sprintf("BTC / WTI。BTC $%.0f / WTI $%.0f。1 BTC = %.0f 桶 WTI 原油", btc, oil, ratio)
+	case "futu:US.USO":
+		return fmt.Sprintf("BTC / USO。BTC $%.0f / USO $%.0f。1 BTC = %.0f 份 USO ETF（油价 proxy，不是桶数）", btc, oil, ratio)
+	default:
+		return fmt.Sprintf("BTC / oil proxy。BTC $%.0f / proxy $%.0f。1 BTC = %.0f proxy units", btc, oil, ratio)
 	}
 }
 

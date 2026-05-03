@@ -23,7 +23,7 @@ def main():
                     closes = data['close'].tolist()
                     closes.reverse()  # newest first
                     out[sym] = {
-                        'price': float(closes[-1]),
+                        'price': float(closes[0]),
                         'history': closes,
                         'as_of': str(data['time_key'].iloc[-1]),
                     }
