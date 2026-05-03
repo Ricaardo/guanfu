@@ -27,9 +27,9 @@
 
 | 老子原文 | 系统映射 |
 |----------|----------|
-| **万物并作** | 8 个 domain × 42 个指标（周期 / 估值 / 网络 / 杠杆 / 宏观 / 资金流 / 技术 / 跨资产）同时呈现 |
+| **万物并作** | 8 个 domain × 40+ 个指标（周期 / 估值 / 网络 / 杠杆 / 宏观 / 资金流 / 技术 / 跨资产）同时呈现 |
 | **观复** | 在每个指标的历史分位中看它往复回归 — halving 周期回环、估值高低反覆、流入流出来去 |
-| **致虚守静** | 不输出评分 / action / state。工具守"静"，决策权归于人 |
+| **致虚守静** | 默认只输出指标；可选 `--verdict` 输出结构化读盘，但不输出交易 / 仓位指令。决策权归于人 |
 
 ### 盘 - 解读 - 决策三层分离
 
@@ -54,7 +54,7 @@
 - 每个指标输出**原始值**（无 sigmoid，无 scaling 隐式压缩）
 - `q`（历史分位）告诉 Claude 当前值在过去分布中的位置
 - `label` 仅用于人类速览，**不应作为决策依据**
-- 不输出评分 / action / state
+- 默认不输出评分 / action / state；`--verdict` 只给结构化读盘，不给交易指令
 
 ---
 
@@ -67,7 +67,7 @@ cmd/guanfu/main.go             ← CLI 入口 (人类表格 / JSON 输出)
     │         │
     v         v
 engine/calculator.go    engine/panel.go
-  (v1 评分，废弃中)      (v3 指标盘 BuildPanel, 8 域 42 指标)
+  (v1 评分，废弃中)      (v3 指标盘 BuildPanel, 8 域 40+ 指标)
          │                    │
          └────────┬───────────┘
                   │
@@ -296,7 +296,7 @@ sqlite3 ~/.guanfu/history.db \
 读 `days_since_halving` + `sma_200w_dev` + `phase`：
 - accumulation / early_post_halving + dev < 0 → 极端低估，DCA 黄金窗口
 - markup + dev 0-100% → 中段，趋势跟随
-- distribution_risk + dev > 150% → 接近顶部
+- distribution_risk + dev > 1.5（显示为 +150%）→ 接近顶部
 
 ### Step 2: 估值一致性（4 项交叉验证）
 
@@ -338,7 +338,7 @@ sqlite3 ~/.guanfu/history.db \
 
 ### 标准顶部组合
 
-✓ `pi_cycle_top_ratio` ≥ 1.0 ✓ `mayer_multiple` > 2.4 ✓ `sma_200w_dev` > 150% ✓ `funding_rate_pct` > 0.1% ✓ `oi_to_mc` > 0.04 ✓ `fear_greed` > 80
+✓ `pi_cycle_top_ratio` ≥ 1.0 ✓ `mayer_multiple` > 2.4 ✓ `sma_200w_dev` > 1.5（+150%） ✓ `funding_rate_pct` > 0.1% ✓ `oi_to_mc` > 0.04 ✓ `fear_greed` > 80
 
 **历史命中**: 2013-12, 2017-12, 2021-04, 2021-11
 
@@ -420,7 +420,7 @@ diff = (ma30 - ma60) / ma60
 | `market-pulse` | 跨资产宏观 MHS，与 BTC 局部信号交叉验证 |
 | `news-dashboard` | 黑天鹅事件 / 监管 / 交易所新闻 |
 | `polymarket` | 加密相关预测市场（BTC 价 / ETF 通过率 / 监管） |
-| `trade-execution` | 观复给方向 → 决定仓位 + 止损 |
+| `trade-execution` | 观复给风险读盘 → 执行层再处理仓位、止损和风险预算 |
 | `trade-journal` | 决策时 log，事后复盘 |
 | `valuation`（贵金属） | BTC 与黄金互补避险，跨资产估值 |
 | `technical-analysis` | 补充技术面（观复专注周期/估值，不含 K 线形态分析） |
@@ -438,8 +438,8 @@ diff = (ma30 - ma60) / ma60
 | 维度 | v1 (coinman) | v2 (观复) | v3 (当前) |
 |------|-------------|----------|----------|
 | 总分 | ❌ 0-100 设计性稀释 | 不输出 | 不输出 |
-| Action/State | ❌ 硬编码阈值 = 假精度 | 不输出，Claude + 人综合 | 8 域 42 指标 + q 分位 + AI 综合 |
-| 子分 | 4 维 sigmoid 隐式压缩 | 6 域原始指标 + 历史分位 | 8 域 42 原始指标 + 历史分位 |
+| Action/State | ❌ 硬编码阈值 = 假精度 | 不输出，Claude + 人综合 | 8 域 40+ 指标 + q 分位 + AI 综合 |
+| 子分 | 4 维 sigmoid 隐式压缩 | 6 域原始指标 + 历史分位 | 8 域 40+ 原始指标 + 历史分位 |
 | 数据源 | BTC + ETH + Top50 + USDT/CNY | + mempool + ETF + F&G + FRED + CoinMetrics | + Futu (6 assets) + Binance PAXG + Yahoo (backup) |
 | 估值层 | RSI + AHR | AHR(改进版) + Mayer + 200wSMA + Pi Cycle + MVRV/NUPL | 同 v2 + 动态分位评分 |
 | 网络层 | 无 | hash rate + ribbons + difficulty + mempool | 同 v2 + 180d MA 窗口 |

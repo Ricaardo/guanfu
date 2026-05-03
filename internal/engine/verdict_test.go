@@ -3,8 +3,10 @@ package engine
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/shopspring/decimal"
 )
 
 // build a panel with a small set of indicators for testing.
@@ -26,7 +28,7 @@ func TestVerdictMissingIsolation(t *testing.T) {
 	// Missing 指标必须不影响其他指标的计票。
 	p := newTestPanel()
 	// 1 个真实看涨指标 + 1 个 missing 看跌指标
-	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.7} // bull
+	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.7}                    // bull
 	p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Missing: true, Value: 1.5} // would be bear if not missing
 
 	v := BuildVerdict(p)
@@ -55,16 +57,22 @@ func TestVerdictNaNIsAvailable(t *testing.T) {
 
 func TestVerdictBullStanceOnStrongConsensus(t *testing.T) {
 	p := newTestPanel()
-	// 5 个域看涨
-	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.7}              // bull
-	p.Valuation["ahr999"] = model.Indicator{Value: 0.4}                   // bull
-	p.Network["hash_ribbons"] = model.Indicator{Label: "上行（扩张）"}    // bull
-	p.Positioning["funding_rate_pct"] = model.Indicator{Value: -0.005}    // bull
-	p.Positioning["oi_to_mc"] = model.Indicator{Value: 0.012}             // bull
-	p.Macro["m2_yoy"] = model.Indicator{Value: 6.0}                       // bull
-	p.Flow["etf_net_flow_30d_usd"] = model.Indicator{Value: 2e9}          // bull
-	p.Technical["rsi_14"] = model.Indicator{Value: 28}                    // bull
-	p.CrossAsset["btc_spy_corr_30d"] = model.Indicator{Value: 0.2}        // bull
+	// 6 个域看涨，且组合型域都提供确认信号。
+	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.7}            // bull
+	p.Valuation["ahr999"] = model.Indicator{Value: 0.4}                // bull
+	p.Network["hash_ribbons"] = model.Indicator{Label: "上行（扩张）"}       // bull
+	p.Positioning["funding_rate_pct"] = model.Indicator{Value: -0.005} // bull
+	p.Positioning["oi_to_mc"] = model.Indicator{Value: 0.012}          // bull
+	p.Macro["m2_yoy"] = model.Indicator{Value: 6.0}                    // bull
+	p.Macro["real_yield_10y_pct"] = model.Indicator{Value: 0.5}        // bull
+	p.Macro["dxy_60d_trend_pct"] = model.Indicator{Value: -2.0}        // bull
+	p.Flow["etf_net_flow_30d_usd"] = model.Indicator{Value: 2e9}       // bull
+	p.Technical["rsi_14"] = model.Indicator{Value: 55}
+	p.Technical["macd_histogram"] = model.Indicator{Value: 100} // bull
+	p.Technical["ema_cross"] = model.Indicator{Value: 1.2}      // bull
+	p.Technical["ma_alignment"] = model.Indicator{Value: 2.0}   // bull
+	p.CrossAsset["btc_spy_corr_30d"] = model.Indicator{Value: 0.2}
+	p.CrossAsset["rel_strength_90d_gold"] = model.Indicator{Value: 8.0} // bull
 
 	v := BuildVerdict(p)
 	if v.NetDirection < 5 {
@@ -73,8 +81,8 @@ func TestVerdictBullStanceOnStrongConsensus(t *testing.T) {
 	if v.Stance != "强积累倾向" {
 		t.Fatalf("expected 强积累倾向, got %q", v.Stance)
 	}
-	if v.Regime != "牛市" {
-		t.Fatalf("expected 牛市, got %q", v.Regime)
+	if v.Regime != "风险偏多" {
+		t.Fatalf("expected 风险偏多, got %q", v.Regime)
 	}
 }
 
@@ -82,6 +90,7 @@ func TestVerdictTopProximity(t *testing.T) {
 	p := newTestPanel()
 	p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Value: 1.0} // hard top signal
 	p.Cycle["mayer_multiple"] = model.Indicator{Value: 2.6}     // top
+	p.Cycle["sma_200w_dev"] = model.Indicator{Value: 1.6}       // top (+160%)
 	p.Valuation["mvrv_z_score"] = model.Indicator{Value: 7.5}   // top
 	p.Positioning["funding_rate_pct"] = model.Indicator{Value: 0.06}
 	p.Positioning["fear_greed"] = model.Indicator{Value: 85}
@@ -115,7 +124,7 @@ func TestVerdictDedupValuationCluster(t *testing.T) {
 	p := newTestPanel()
 	// Cycle 域两个估值类指标看涨 + Valuation 域两个看涨 → 应该去重
 	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.6}
-	p.Cycle["sma_200w_dev"] = model.Indicator{Value: -10}
+	p.Cycle["sma_200w_dev"] = model.Indicator{Value: -0.1}
 	p.Valuation["ahr999"] = model.Indicator{Value: 0.3}
 	p.Valuation["mvrv_z_score"] = model.Indicator{Value: -0.5}
 
@@ -126,6 +135,150 @@ func TestVerdictDedupValuationCluster(t *testing.T) {
 	}
 	if len(v.ClusterNotes) == 0 {
 		t.Fatalf("expected a cluster note about dedup")
+	}
+}
+
+func TestVerdictNeutralAvailableIndicatorsCountTowardCoverage(t *testing.T) {
+	p := newTestPanel()
+	p.Macro["m2_yoy"] = model.Indicator{Value: 3.0}
+	p.Macro["real_yield_10y_pct"] = model.Indicator{Value: 1.5}
+	p.Macro["dxy_60d_trend_pct"] = model.Indicator{Value: 0.2}
+
+	v := BuildVerdict(p)
+	macro := findDomain(v, "macro")
+	if macro.Vote != 0 {
+		t.Fatalf("neutral macro indicators should not vote, got %d", macro.Vote)
+	}
+	if macro.Coverage != 1 {
+		t.Fatalf("neutral but available macro indicators should count as covered, got %.2f", macro.Coverage)
+	}
+	if v.Coverage != 1 {
+		t.Fatalf("global coverage should count neutral available indicators, got %.2f", v.Coverage)
+	}
+}
+
+func TestBuildPanelMarksMacroPlaceholdersMissing(t *testing.T) {
+	calc := NewCalculator(&model.Config{})
+	panel := calc.BuildPanel(&model.MarketSnapshot{
+		Date:     time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
+		BTCPrice: decimal.NewFromInt(100000),
+	})
+
+	for _, key := range []string{"dxy_60d_trend_pct", "real_yield_10y_pct", "m2_yoy", "spx_correlation_30d"} {
+		ind, ok := panel.Macro[key]
+		if !ok {
+			t.Fatalf("expected macro placeholder %s", key)
+		}
+		if !ind.Missing {
+			t.Fatalf("expected macro placeholder %s to be missing", key)
+		}
+	}
+	v := BuildVerdict(panel)
+	macro := findDomain(v, "macro")
+	if macro.Vote != 0 || len(macro.Bullish) != 0 || len(macro.Bearish) != 0 {
+		t.Fatalf("macro placeholders leaked into vote: %+v", macro)
+	}
+}
+
+func TestVerdictSMA200WDevUsesRatioUnits(t *testing.T) {
+	p := newTestPanel()
+	p.Cycle["sma_200w_dev"] = model.Indicator{Value: 1.6}
+
+	v := BuildVerdict(p)
+	cycle := findDomain(v, "cycle")
+	if cycle.Vote != -1 {
+		t.Fatalf("sma_200w_dev=1.6 (+160%%) should be bearish, got %d", cycle.Vote)
+	}
+	if v.TopProximity == 0 {
+		t.Fatalf("sma_200w_dev=1.6 should contribute to top proximity")
+	}
+}
+
+func TestVerdictCompositeDomainsRequireConfirmation(t *testing.T) {
+	p := newTestPanel()
+	p.Network["hash_ribbons"] = model.Indicator{Label: "下行（矿工投降信号）"}
+	p.Positioning["funding_rate_pct"] = model.Indicator{Value: -0.004}
+	p.Macro["m2_yoy"] = model.Indicator{Value: 6.0}
+	p.Technical["macd_histogram"] = model.Indicator{Value: 1.0}
+	p.CrossAsset["btc_spy_corr_30d"] = model.Indicator{Value: 0.1}
+
+	v := BuildVerdict(p)
+	for _, domain := range []string{"network", "positioning", "macro", "technical", "cross_asset"} {
+		if got := findDomain(v, domain).Vote; got != 0 {
+			t.Fatalf("%s should require confirmation, got vote %d", domain, got)
+		}
+	}
+
+	p.Network["difficulty_change_pct"] = model.Indicator{Value: -6.0}
+	p.Positioning["oi_to_mc"] = model.Indicator{Value: 0.01}
+	p.Macro["real_yield_10y_pct"] = model.Indicator{Value: 0.5}
+	p.Technical["ema_cross"] = model.Indicator{Value: 0.5}
+	p.CrossAsset["rel_strength_90d_gold"] = model.Indicator{Value: 2.0}
+
+	v = BuildVerdict(p)
+	if got := findDomain(v, "network").Vote; got != -1 {
+		t.Fatalf("network confirmed capitulation should be bearish, got %d", got)
+	}
+	for _, domain := range []string{"positioning", "macro", "technical", "cross_asset"} {
+		if got := findDomain(v, domain).Vote; got != +1 {
+			t.Fatalf("%s confirmed bullish setup should vote +1, got %d", domain, got)
+		}
+	}
+}
+
+func TestBottomProximitySkipsMissingHashRibbons(t *testing.T) {
+	p := newTestPanel()
+	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.6}
+
+	base := BuildVerdict(p).BottomProximity
+
+	p.Network["hash_ribbons"] = model.Indicator{Missing: true, Label: "下行（矿工投降信号）"}
+	withMissing := BuildVerdict(p).BottomProximity
+	if withMissing != base {
+		t.Fatalf("missing hash_ribbons should not change bottom denominator: base %.4f missing %.4f", base, withMissing)
+	}
+
+	p.Network["hash_ribbons"] = model.Indicator{Label: "交叉中"}
+	withAvailableNeutral := BuildVerdict(p).BottomProximity
+	if withAvailableNeutral >= base {
+		t.Fatalf("available neutral hash_ribbons should count in denominator and reduce proximity: base %.4f neutral %.4f", base, withAvailableNeutral)
+	}
+}
+
+func TestVerdictEvidenceComesFromDomainVotes(t *testing.T) {
+	p := newTestPanel()
+	p.Cycle["mayer_multiple"] = model.Indicator{Value: 0.7}
+	p.Positioning["funding_rate_pct"] = model.Indicator{Value: -0.005}
+	p.Macro["m2_yoy"] = model.Indicator{Value: 6.0}
+	p.Technical["macd_histogram"] = model.Indicator{Value: 1.0}
+
+	v := BuildVerdict(p)
+	if len(v.Reasons) == 0 {
+		t.Fatal("expected domain-level reason from cycle vote")
+	}
+	for _, reason := range v.Reasons {
+		if reason == "positioning: funding_rate_pct=-0.005 (杠杆反向信号)" ||
+			reason == "macro: m2_yoy=6" ||
+			reason == "technical: macd_hist>0" {
+			t.Fatalf("unconfirmed single-indicator signal leaked into reasons: %v", v.Reasons)
+		}
+	}
+}
+
+func TestKillCriteriaAvoidsPositionInstructions(t *testing.T) {
+	p := newTestPanel()
+	p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Value: 1.0}
+	p.Cycle["mayer_multiple"] = model.Indicator{Value: 2.6}
+	p.Cycle["sma_200w_dev"] = model.Indicator{Value: 1.6}
+	p.Valuation["mvrv_z_score"] = model.Indicator{Value: 7.5}
+	p.Positioning["funding_rate_pct"] = model.Indicator{Value: 0.06}
+	p.Positioning["fear_greed"] = model.Indicator{Value: 85}
+
+	v := BuildVerdict(p)
+	for _, criterion := range v.KillCriteria {
+		if containsAny([]string{criterion}, "减仓", "调高仓位") {
+			t.Fatalf("kill criteria should avoid position instructions, got %q", criterion)
+		}
 	}
 }
 

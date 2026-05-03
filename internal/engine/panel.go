@@ -242,7 +242,7 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 			Label:     devLabel(dev),
 			Source:    "binance",
 			UpdatedAt: btcTS,
-			Note:      "(price - 200wSMA) / 200wSMA。<0 历史抄底区，>1 牛市末期",
+			Note:      "(price - 200wSMA) / 200wSMA。<0 历史抄底区，>1.5 牛市末期",
 		}
 	}
 
@@ -556,21 +556,25 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 	if !snap.MacroFetched {
 		// FRED_API_KEY 缺失或拉取失败 — 保留 placeholder
 		p.Macro["dxy_60d_trend_pct"] = model.Indicator{
+			Missing:   true,
 			Source:    "fred (待接入)",
 			UpdatedAt: ts,
 			Note:      "需要 FRED_API_KEY 环境变量。DTWEXBGS 60 日趋势",
 		}
 		p.Macro["real_yield_10y_pct"] = model.Indicator{
+			Missing:   true,
 			Source:    "fred (待接入)",
 			UpdatedAt: ts,
 			Note:      "需要 FRED_API_KEY。DFII10 10Y TIPS",
 		}
 		p.Macro["m2_yoy"] = model.Indicator{
+			Missing:   true,
 			Source:    "fred (待接入)",
 			UpdatedAt: ts,
 			Note:      "需要 FRED_API_KEY。M2SL 同比",
 		}
 		p.Macro["spx_correlation_30d"] = model.Indicator{
+			Missing:   true,
 			Source:    "computed (待接入)",
 			UpdatedAt: ts,
 			Note:      "需要 FRED_API_KEY 拉 SP500 后计算",
