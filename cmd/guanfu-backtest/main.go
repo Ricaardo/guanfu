@@ -58,6 +58,7 @@ func main() {
 	klineCache := flag.String("kline-cache", "", "BTC kline JSON 缓存路径 (date->close map); 优先于 Binance API")
 	reportMD := flag.String("report-md", "", "写入 Markdown baseline 报告到指定路径")
 	indicatorsFile := flag.String("indicators", "", "外部历史指标 JSON (map[date]map[name]value); 文件格式见下方说明")
+	ahrCSV := flag.String("ahr-csv", "", "导出逐日 AHR999 (Original/Modified/Compressed) 到 CSV")
 	flag.Parse()
 
 	if *startStr == "" {
@@ -88,6 +89,10 @@ func main() {
 	// 拉 BTC kline 直到 endT；为算 sma_200w 和 ahr999 长基线，
 	// 从 startT 再往前推 1500 天
 	prelude := startT.AddDate(0, 0, -1500)
+	// When using kline cache with --all-data, use earliest possible date
+	if *klineCache != "" && *allData {
+		prelude = time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC) // BTC genesis
+	}
 	var prices []pricePoint
 	if *klineCache != "" {
 		log.Printf("loading BTC daily kline from cache %s (%s → %s)", *klineCache, prelude.Format("2006-01-02"), endT.Format("2006-01-02"))
@@ -103,6 +108,12 @@ func main() {
 		}
 	}
 	log.Printf("got %d daily closes (%s → %s)", len(prices), prices[0].date.Format("2006-01-02"), prices[len(prices)-1].date.Format("2006-01-02"))
+
+	// If --all-data with kline cache, use the actual earliest date in cache
+	if *allData && *klineCache != "" && prices[0].date.Before(startT) {
+		startT = prices[0].date
+		log.Printf("--all-data with cache: adjusting start to %s", startT.Format("2006-01-02"))
+	}
 
 	// 索引：date string -> idx
 	idx := map[string]int{}
@@ -157,15 +168,28 @@ func main() {
 
 	report := engine.AggregateBacktest(samples, *includeRaw)
 
+	// AHR comparison: used by both --report-md and --ahr-csv
+	var ahr *ahrComparison
+	if *reportMD != "" || *ahrCSV != "" {
+		c := buildAHRComparison(prices, startT, endT, prov)
+		ahr = &c
+	}
+
 	if *reportMD != "" {
-		ahr := buildAHRComparison(prices, startT, endT, prov)
 		d3 := build3DScore(prices, startT, endT, prov)
-		md := renderMarkdownReport(report, ahr, d3, startT, endT, *interval)
+		md := renderMarkdownReport(report, *ahr, d3, startT, endT, *interval)
 		if err := os.WriteFile(*reportMD, []byte(md), 0o644); err != nil {
 			log.Fatalf("write report: %v", err)
 		}
 		log.Printf("wrote Markdown report: %s", *reportMD)
 		return
+	}
+
+	if *ahrCSV != "" {
+		if err := writeAHRCSV(*ahrCSV, *ahr); err != nil {
+			log.Fatalf("write AHR CSV: %v", err)
+		}
+		log.Printf("wrote AHR CSV: %s (%d rows)", *ahrCSV, ahr.DataDays)
 	}
 
 	if *jsonOut {
@@ -594,6 +618,7 @@ type ahrComparison struct {
 	MedianAbsDiffPct  float64
 	LogCorrelation    float64
 	RawDisagreementN  int
+	Points            []ahrPoint
 	OriginalRawStats  []ahrBucketStats
 	ModifiedRawStats  []ahrBucketStats
 	ModifiedQStats    []ahrBucketStats
@@ -699,6 +724,7 @@ func buildAHRComparison(prices []pricePoint, startT, endT time.Time, prov engine
 		return p.CompressedBucket, p.HasCompressed
 	}, compressedBucketOrder())
 	out.RawConfusionPairs = topAHRPairs(confusion, 12)
+	out.Points = points
 	return out
 }
 
@@ -1541,6 +1567,24 @@ func repeat(s string, n int) string {
 		out += s
 	}
 	return out
+}
+
+func writeAHRCSV(path string, ahr ahrComparison) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	f.WriteString("date,price,original_ahr,modified_ahr,modified_q,compressed_ahr,original_bucket,compressed_bucket,fwd_30d_pct,fwd_90d_pct,fwd_180d_pct\n")
+	for _, p := range ahr.Points {
+		f.WriteString(fmt.Sprintf("%s,%.2f,%.6f,%.6f,%.6f,%.6f,%s,%s,%.4f,%.4f,%.4f\n",
+			p.Date, p.Price,
+			p.Original, p.Modified, p.ModifiedQ, p.Compressed,
+			p.OriginalBucket, p.CompressedBucket,
+			p.Fwd30dPct, p.Fwd90dPct, p.Fwd180dPct))
+	}
+	return nil
 }
 
 // 静默 unused warnings (os 用于 import 完整性)
