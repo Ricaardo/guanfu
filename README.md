@@ -132,7 +132,8 @@ Cycle 周期定位
   ...
 
 Valuation 估值
-  ahr999                      0.7118  q24  低估 / 定投区
+  ahr999_compressed           0.5863  低估（定投区）
+  ahr999                      0.7224  q25  低估 / 定投区（自适应辅助）
   mvrv_z_score                1.2613  中性偏低
   ...
 

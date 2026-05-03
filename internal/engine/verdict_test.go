@@ -292,6 +292,10 @@ func TestBuildPanelIncludesSourceHealth(t *testing.T) {
 	if fred.Status != "missing" || len(fred.Warnings) == 0 {
 		t.Fatalf("expected FRED missing health with warning, got %+v", fred)
 	}
+	top50 := findSourceHealth(panel, "coingecko_top50")
+	if top50.Status != "missing" {
+		t.Fatalf("expected top50 missing health when breadth inputs are absent, got %+v", top50)
+	}
 	cross := findSourceHealth(panel, "cross_asset")
 	if cross.Status != "ok" || !cross.FallbackUsed {
 		t.Fatalf("expected cross asset ok with Yahoo fallback noted, got %+v", cross)

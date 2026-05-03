@@ -10,8 +10,8 @@
 
 | 数据源 | 用途 | 频率 | 延迟 | 速率限制 |
 |---|---|---|---|---|
-| **Binance** | BTC/ETH K线 (3000d)、Top50 K线、资金费率、OI、当前价 | 每次运行 | 实时 | 1200 req/min |
-| **CoinGecko** | 总市值、BTC 市占率、稳定币市值 | 每次运行 | 实时 | 10-30 req/min (免费) |
+| **Binance** | BTC/ETH K线 (3000d)、Top50 K线、资金费率、OI、当前价 | 每次运行；缓存命中最多 4 小时 | 实时 | 1200 req/min |
+| **CoinGecko** | 总市值、BTC 市占率、稳定币市值、Top50 列表 | 每次运行；缓存命中最多 4 小时 | 实时 | 10-30 req/min (免费) |
 | **mempool.space** | 哈希率、难度调整、mempool 拥堵 | 每次运行 | 实时 | 无明确限制 |
 | **SoSoValue** | 现货 BTC ETF (IBIT/FBTC等) 净流入 7d/30d、总资产 | 每次运行 | T-1 或 T-2 | 未知 |
 | **alternative.me** | 恐慌贪婪指数 (0-100) | 每次运行 | 实时 | 低 |
@@ -64,6 +64,8 @@ export GUANFU_SKILL_PATH="~/.claude/skills/btc-guanfu/SKILL.md"
 # 缓存
 export CACHE_DIR="./cache"  # 默认
 ```
+
+磁盘行情缓存按 `MarketSnapshot` schema 校验；schema 变化或抓取时间超过 4 小时会自动重拉。MCP 另有进程内缓存，可用 `guanfu-mcp --cache-ttl=5m` 调整。
 
 ### 命令行参数
 

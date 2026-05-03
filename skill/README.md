@@ -35,7 +35,7 @@ guanfu --json > panel.json
 # 在 Claude Code 里："读这个盘面"，附上 panel.json
 ```
 
-或配置 MCP server，Claude Code 自动调 `guanfu://panel/json` resource。见仓库根的 `docs/mcp-setup.md`。
+或配置 MCP server，Claude Code 自动调 `guanfu://panel/latest` resource。见仓库根的 `docs/mcp-setup.md`。
 
 ## 触发
 

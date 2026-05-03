@@ -118,6 +118,34 @@ func TestDisplayQuantileSuppressesInvalidValues(t *testing.T) {
 	}
 }
 
+func TestCalc3DScoreUsesNewestFirstHistory(t *testing.T) {
+	history := make([]decimal.Decimal, 300)
+	for i := range history {
+		history[i] = decimal.NewFromInt(100)
+	}
+	history[10] = decimal.NewFromInt(125)
+	for i := 200; i < len(history); i++ {
+		history[i] = decimal.NewFromInt(10)
+	}
+	snap := &model.MarketSnapshot{
+		Date:            time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
+		BTCPrice:        decimal.NewFromInt(100),
+		BTCPriceHistory: history,
+	}
+
+	_, _, mayer, drawdown, ok := NewCalculator(&model.Config{}).calc3DScore(snap)
+	if !ok {
+		t.Fatal("expected 3D score to be available")
+	}
+	wantMayer := 100.0 / ((199*100.0 + 125.0) / 200.0)
+	if math.Abs(mayer-wantMayer) > 1e-9 {
+		t.Fatalf("d3 mayer = %f, want %f", mayer, wantMayer)
+	}
+	if math.Abs(drawdown-(-0.2)) > 1e-9 {
+		t.Fatalf("d3 drawdown = %f, want -0.2", drawdown)
+	}
+}
+
 func TestBuildPanelIncludesOnchainValuation(t *testing.T) {
 	snap := &model.MarketSnapshot{
 		Date:                    time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
@@ -149,6 +177,20 @@ func TestBuildPanelIncludesOnchainValuation(t *testing.T) {
 	}
 	if _, ok := panel.Valuation["mvrv_z_score"]; !ok {
 		t.Fatal("expected mvrv_z_score indicator")
+	}
+}
+
+func TestBuildPanelMarksAltcoinSeasonMissingWhenTop50Unavailable(t *testing.T) {
+	panel := NewCalculator(&model.Config{}).BuildPanel(&model.MarketSnapshot{
+		Date: time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC),
+	})
+
+	alt, ok := panel.Positioning["altcoin_season"]
+	if !ok {
+		t.Fatal("expected altcoin_season placeholder")
+	}
+	if !alt.Missing {
+		t.Fatalf("expected missing altcoin_season when top50 history is unavailable, got %+v", alt)
 	}
 }
 

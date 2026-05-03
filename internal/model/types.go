@@ -8,12 +8,13 @@ import (
 
 // CurrentMarketSnapshotSchemaVersion guards the on-disk market cache contract.
 // Bump this when MarketSnapshot gains fields that materially change panel output.
-const CurrentMarketSnapshotSchemaVersion = 6
+const CurrentMarketSnapshotSchemaVersion = 7
 
 // MarketSnapshot 包含了计算宏观评分所需的所有市场数据
 type MarketSnapshot struct {
 	Date                  time.Time
 	SnapshotSchemaVersion int // on-disk cache schema version
+	FetchedAt             string
 
 	// BTC 数据
 	BTCPrice         decimal.Decimal   // 当前价格
@@ -30,7 +31,8 @@ type MarketSnapshot struct {
 	ETHPriceAsOf     string
 
 	// 市场结构数据
-	Top50Coins []CoinSnapshot // Top50 代币快照 (排除稳定币)
+	Top50Coins   []CoinSnapshot // Top50 代币快照 (排除稳定币)
+	Top50Fetched bool
 
 	// 资金数据
 	TotalMarketCap        decimal.Decimal   // 总市值
@@ -39,6 +41,7 @@ type MarketSnapshot struct {
 	// 稳定币流动性 (New)
 	StablecoinMarketCap        decimal.Decimal
 	StablecoinMarketCapHistory []decimal.Decimal
+	StablecoinMarketCapFetched bool
 
 	USDTPriceCNY decimal.Decimal // USDT/CNY 价格
 	USDPriceCNY  decimal.Decimal // USD/CNY 汇率
@@ -46,6 +49,7 @@ type MarketSnapshot struct {
 	// 衍生品与链上数据 (新增)
 	BTCFundingRate  decimal.Decimal // 资金费率
 	BTCOpenInterest decimal.Decimal // 合约持仓量 (USDT)
+	FuturesFetched  bool
 
 	// 网络数据 (mempool.space, v2 新增)
 	HashRateEHs         decimal.Decimal // 当前哈希率 (EH/s)
@@ -53,6 +57,7 @@ type MarketSnapshot struct {
 	DifficultyChangePct decimal.Decimal // 最近一次难度调整 %
 	MempoolMB           decimal.Decimal // mempool 拥堵 (MB)
 	MempoolAsOf         string
+	MempoolFetched      bool
 
 	// ETF 数据 (SoSoValue, v2 新增)
 	ETFNetFlow7dUSD  decimal.Decimal // 7 日累计净流入
@@ -90,10 +95,13 @@ type MarketSnapshot struct {
 	MacroFetched       bool // FRED 是否成功拉取
 
 	// 情绪数据
-	BTCDominance       decimal.Decimal // BTC 市占率 (0.00-1.00)
-	FearGreedIndex     decimal.Decimal // 恐慌贪婪指数 (0-100)
-	AltcoinSeasonIndex decimal.Decimal // 山寨季指数 (0-100)
-	FearGreedAsOf      string
+	BTCDominance           decimal.Decimal // BTC 市占率 (0.00-1.00)
+	FearGreedIndex         decimal.Decimal // 恐慌贪婪指数 (0-100)
+	AltcoinSeasonIndex     decimal.Decimal // 山寨季指数 (0-100)
+	GlobalMarketFetched    bool
+	FearGreedFetched       bool
+	AltcoinSeasonAvailable bool
+	FearGreedAsOf          string
 
 	// Deribit 期权 (v4 新增) — DVOL + 25-delta skew
 	DVOL            decimal.Decimal // 当前 BTC IV 指数

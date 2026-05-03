@@ -2,23 +2,24 @@ package engine
 
 import (
 	"math"
+	"sort"
+	"time"
+
 	"github.com/Ricaardo/guanfu/internal/history"
 	"github.com/Ricaardo/guanfu/internal/mathutil"
 	"github.com/Ricaardo/guanfu/internal/model"
-	"sort"
-	"time"
 
 	"github.com/shopspring/decimal"
 )
 
 const (
-	ahrDCAWindowDays         = 200
-	ahrFitWindowDays         = 365 * 8
-	ahrMinFitWindowDays      = 365 * 3
-	ahrRecentHalfLifeDays    = 365 * 4
-	ahrLegacyLogSlope        = 5.84
-	ahrLegacyLogIntercept    = -17.01
-	ahrCompressionExponent   = 0.75 // sqrt-AHR: pow(raw, 0.75) 压缩凸性偏差
+	ahrDCAWindowDays       = 200
+	ahrFitWindowDays       = 365 * 8
+	ahrMinFitWindowDays    = 365 * 3
+	ahrRecentHalfLifeDays  = 365 * 4
+	ahrLegacyLogSlope      = 5.84
+	ahrLegacyLogIntercept  = -17.01
+	ahrCompressionExponent = 0.75 // sqrt-AHR: pow(raw, 0.75) 压缩凸性偏差
 )
 
 type Calculator struct {
@@ -648,7 +649,7 @@ func (c *Calculator) calc3DScore(snap *model.MarketSnapshot) (score int, val flo
 	}
 
 	sma200 := 0.0
-	for i := len(snap.BTCPriceHistory) - 200; i < len(snap.BTCPriceHistory); i++ {
+	for i := 0; i < 200; i++ {
 		v, _ := snap.BTCPriceHistory[i].Float64()
 		sma200 += v
 	}
@@ -657,9 +658,8 @@ func (c *Calculator) calc3DScore(snap *model.MarketSnapshot) (score int, val flo
 	}
 
 	if len(snap.BTCPriceHistory) >= 90 {
-		start := len(snap.BTCPriceHistory) - 90
 		max90 := 0.0
-		for i := start; i < len(snap.BTCPriceHistory); i++ {
+		for i := 0; i < 90; i++ {
 			v, _ := snap.BTCPriceHistory[i].Float64()
 			if v > max90 {
 				max90 = v

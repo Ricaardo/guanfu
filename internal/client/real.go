@@ -25,6 +25,7 @@ const (
 	binanceKlineLimit      = 1000
 	btcHistoryTargetDays   = 3000
 	btcHistoryMinFreshDays = 1200
+	marketCacheMaxAge      = 4 * time.Hour
 )
 
 // NewRealClient 创建RealClient实例并初始化缓存
@@ -112,6 +113,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	snap := &model.MarketSnapshot{
 		Date:                  time.Now(),
 		SnapshotSchemaVersion: model.CurrentMarketSnapshotSchemaVersion,
+		FetchedAt:             time.Now().UTC().Format(time.RFC3339),
 	}
 	var errList []error
 
@@ -163,6 +165,10 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 			log.Printf("Error fetching Top 50: %v", err)
 			addWarning("coingecko top50 fetch failed: %v", err)
 			addErr(err)
+		} else {
+			mu.Lock()
+			snap.Top50Fetched = true
+			mu.Unlock()
 		}
 	}()
 
@@ -228,6 +234,7 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	go func() {
 		defer wg.Done()
 		if mp, err := FetchMempoolData(ctx); err == nil && mp != nil {
+			snap.MempoolFetched = true
 			snap.HashRateEHs = decimal.NewFromFloat(mp.HashRateNowEHs)
 			snap.HashRibbonsLabel = mp.HashRibbons30vs60
 			snap.DifficultyChangePct = decimal.NewFromFloat(mp.DifficultyChangePct)
@@ -399,10 +406,18 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 	// 10. Fetch Histories for Top 50 (Dependent on Step 2)
 	if len(top50) > 0 {
 		log.Printf("Fetching history for %d coins...", len(top50))
+		snap.Top50Fetched = true
 		coins := c.fetchCoinsHistory(ctx, top50)
 		snap.Top50Coins = coins
 		// 山寨季指数：Top 50 中 90 日跑赢 BTC 的占比 × 100
-		snap.AltcoinSeasonIndex = calculateAltcoinSeason(coins, snap.BTCPriceHistory)
+		if asi, ok := calculateAltcoinSeason(coins, snap.BTCPriceHistory); ok {
+			snap.AltcoinSeasonIndex = asi
+			snap.AltcoinSeasonAvailable = true
+		} else {
+			addWarning("binance top50 history unavailable: altcoin season omitted")
+		}
+	} else {
+		addWarning("coingecko top50 unavailable: altcoin season omitted")
 	}
 
 	// TotalMarketCapHistory 目前不被引擎消费，不再合成。
@@ -432,6 +447,16 @@ func usableCachedSnapshot(snap *model.MarketSnapshot) (bool, string) {
 	}
 	if snap.BTCPrice.IsZero() {
 		return false, "missing BTC price"
+	}
+	if snap.FetchedAt == "" {
+		return false, "missing fetch timestamp"
+	}
+	fetchedAt, err := time.Parse(time.RFC3339, snap.FetchedAt)
+	if err != nil {
+		return false, fmt.Sprintf("invalid fetch timestamp %q", snap.FetchedAt)
+	}
+	if age := time.Since(fetchedAt); age > marketCacheMaxAge {
+		return false, fmt.Sprintf("cached snapshot is %s old, max %s", age.Truncate(time.Second), marketCacheMaxAge)
 	}
 	return true, ""
 }
@@ -474,15 +499,11 @@ func (c *RealClient) fetchBTCData(ctx context.Context, snap *model.MarketSnapsho
 		idx := n - 1 - i
 		snap.BTCPriceHistory[idx] = closePrice
 		snap.BTCVolumeHistory[idx] = volume
-		if idx == 0 {
-			if openTime, ok := klineOpenTimeMillis(kSlice); ok {
-				snap.BTCPriceAsOf = time.UnixMilli(openTime).UTC().Format("2006-01-02")
-			}
-		}
 	}
 
 	snap.BTCPrice = snap.BTCPriceHistory[0]
 	snap.BTCVolume24h = snap.BTCVolumeHistory[0]
+	snap.BTCPriceAsOf = time.Now().UTC().Format(time.RFC3339)
 
 	return nil
 }
@@ -620,6 +641,7 @@ func (c *RealClient) fetchFearGreed(ctx context.Context, snap *model.MarketSnaps
 	if len(resp.Data) > 0 {
 		val, _ := decimal.NewFromString(resp.Data[0].Value)
 		snap.FearGreedIndex = val
+		snap.FearGreedFetched = true
 		if ts, err := strconv.ParseInt(resp.Data[0].Timestamp, 10, 64); err == nil && ts > 0 {
 			snap.FearGreedAsOf = time.Unix(ts, 0).UTC().Format(time.RFC3339)
 		}
@@ -682,9 +704,11 @@ func (c *RealClient) fetchGlobalCap(ctx context.Context, snap *model.MarketSnaps
 
 	if cap, ok := resp.Data.TotalMarketCap["usd"]; ok {
 		snap.TotalMarketCap = cap
+		snap.GlobalMarketFetched = true
 	}
 	if dom, ok := resp.Data.MarketCapPct["btc"]; ok {
 		snap.BTCDominance = dom.Div(decimal.NewFromInt(100)) // Convert 52.1 to 0.521
+		snap.GlobalMarketFetched = true
 	}
 
 	return nil
@@ -763,6 +787,12 @@ func (c *RealClient) fetchCoinsHistory(ctx context.Context, items []CGMarketItem
 
 func (c *RealClient) fetchFuturesData(ctx context.Context, snap *model.MarketSnapshot) error {
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	markFetched := func() {
+		mu.Lock()
+		snap.FuturesFetched = true
+		mu.Unlock()
+	}
 
 	// 1. Funding Rate
 	wg.Add(1)
@@ -775,6 +805,7 @@ func (c *RealClient) fetchFuturesData(ctx context.Context, snap *model.MarketSna
 		if err == nil {
 			if val, err := decimal.NewFromString(resp.LastFundingRate); err == nil {
 				snap.BTCFundingRate = val
+				markFetched()
 			}
 		} else {
 			log.Printf("Failed to fetch Funding Rate: %v", err)
@@ -795,6 +826,7 @@ func (c *RealClient) fetchFuturesData(ctx context.Context, snap *model.MarketSna
 		if err == nil {
 			if qty, err := decimal.NewFromString(resp.OpenInterest); err == nil {
 				snap.BTCOpenInterest = qty
+				markFetched()
 			}
 		} else {
 			log.Printf("Failed to fetch OI: %v", err)
@@ -824,6 +856,7 @@ func (c *RealClient) fetchStablecoinCap(ctx context.Context, snap *model.MarketS
 
 	// 保存当前稳定币市值
 	snap.StablecoinMarketCap = totalStablecoinCap
+	snap.StablecoinMarketCapFetched = true
 
 	return nil
 }
@@ -833,15 +866,15 @@ func (c *RealClient) fetchStablecoinCap(ctx context.Context, snap *model.MarketS
 // 定义：Top 50（排除稳定币/wrapped）中，90 日价格涨幅跑赢 BTC 的币的占比 × 100。
 // 与 blockchaincenter.net 的定义一致。我们已经有 Top 50 的 121 天历史，
 // 可以独立计算，无需依赖外部 API。
-func calculateAltcoinSeason(coins []model.CoinSnapshot, btcHistory []decimal.Decimal) decimal.Decimal {
+func calculateAltcoinSeason(coins []model.CoinSnapshot, btcHistory []decimal.Decimal) (decimal.Decimal, bool) {
 	if len(coins) < 10 || len(btcHistory) <= 90 {
-		return decimal.Zero
+		return decimal.Zero, false
 	}
 
 	btcPrice90dAgo := btcHistory[90]
 	btcPriceNow := btcHistory[0]
 	if btcPrice90dAgo.IsZero() {
-		return decimal.Zero
+		return decimal.Zero, false
 	}
 	btcReturn := btcPriceNow.Sub(btcPrice90dAgo).Div(btcPrice90dAgo)
 
@@ -864,11 +897,11 @@ func calculateAltcoinSeason(coins []model.CoinSnapshot, btcHistory []decimal.Dec
 	}
 
 	if total == 0 {
-		return decimal.Zero
+		return decimal.Zero, false
 	}
 
 	pct := float64(outperformed) / float64(total) * 100
-	return decimal.NewFromFloat(pct)
+	return decimal.NewFromFloat(pct), true
 }
 
 // toDecimalSlice converts []float64 -> []decimal.Decimal

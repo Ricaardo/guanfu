@@ -80,7 +80,7 @@ guanfu-mcp-server
      │
      ├── tool: get_panel(domain?)
      ├── tool: get_indicator(name)
-     ├── resource: guanfu://knowledge/SKILL.md
+     ├── resource: guanfu://knowledge/skill.md
      └── resource: guanfu://panel/latest
 ```
 

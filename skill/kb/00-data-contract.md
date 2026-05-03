@@ -26,6 +26,8 @@
 | `note` | 计算备注 | fallback、估算、窗口说明优先看这里 |
 | `missing` | 缺失/placeholder | true 时必须跳过 |
 
+数值 `0` 不代表缺失；只有 `missing=true` 或 `source_health` 显式异常才代表该指标不可用。资金费率、相关性、难度调整、山寨季指数等都可能出现真实 0 值。
+
 ---
 
 ## Source Health 门控

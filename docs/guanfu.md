@@ -121,17 +121,18 @@ engine/calculator.go    engine/panel.go
 |------|------|----------|
 | `days_since_halving` | 距上次减半天数 | 0-180d 早期；180-540d 主升；540-900d 顶部/分配；900-1260d 熊市积累 |
 | `days_to_halving` | 距下次减半天数（估计） | — |
-| `sma_200w` | 200 周 (1400 日) SMA — BTC 长期价格地板 | 跌破 = 历史仅 5 次，每次都是绝对底部 |
+| `sma_200w` | 200 周 (1400 日) SMA — BTC 长期价格地板 | 跌破 = 历史少数深度压力区，需结合宏观/流动性确认 |
 | `sma_200w_dev` | (price - 200wSMA) / 200wSMA | < 0 深度低估；> 1.5 牛市末期 |
 | `mayer_multiple` | price / 200d SMA | < 0.6 抄底；0.6-1.0 偏低估；1.0-2.4 中性；> 2.4 顶部 |
-| `pi_cycle_top_ratio` | 111dMA / (2 × 350dMA) | ≥ 1 触发 = 历史 100% 命中顶部（2013-12, 2017-12, 2021-04） |
+| `pi_cycle_top_ratio` | 111dMA / (2 × 350dMA) | ≥ 1 触发 = 历史顶部风险信号，ETF 时代需交叉验证 |
 | `phase` | 启发式阶段分类 | accumulation / markup / distribution_risk / transition |
 
 ### 💰 Valuation — 估值
 
 | 指标 | 定义 | 关键阈值 |
 |------|------|----------|
-| `ahr999` | (price / 200d-DCA-cost) × (price / fitted-fair-value) | < 0.45 极端抄底；0.45-0.8 定投区；0.8-1.2 合理；> 2.0 泡沫 |
+| `ahr999_compressed` | pow(固定公式 AHR999, 0.75) | 主估值信号；阈值见 `skill/SKILL.md` |
+| `ahr999` | 调和 DCA + 自适应 log-log fair value | 辅助诊断 / 分歧检测，不单独驱动估值域 |
 | `mvrv` | Market Cap / Realized Cap | < 0.8 底部；1.2-2.0 中性；> 3.5 过热 |
 | `mvrv_z_score` | (market_cap - realized_cap) / rolling_1y_std(mcap - rcap) | < 0 抄底；> 7 顶部 |
 | `nupl` | (market_cap - realized_cap) / market_cap | < 0 capitulation；0.25-0.5 optimism；> 0.75 euphoria |
@@ -147,7 +148,7 @@ engine/calculator.go    engine/panel.go
 | 指标 | 定义 | 关键阈值 |
 |------|------|----------|
 | `hash_rate_ehs` | 全网哈希率 (EH/s) | 长期上行 = 矿工对网络投票 |
-| `hash_ribbons` | 30d MA vs 60d MA 交叉 | **下行 = 矿工投降，每次都是大底部前 1-3 月** |
+| `hash_ribbons` | 30d MA vs 60d MA 交叉 | 下行 = 矿工压力 proxy；修复转上行时确认度更高 |
 | `difficulty_change_pct` | 上次难度调整 % | < -7% 投降信号；> +8% 算力 FOMO |
 | `mempool_mb` | 待打包字节数 (MB) | < 5 畅通；> 100 极度拥堵（顶部常见） |
 
@@ -300,7 +301,7 @@ sqlite3 ~/.guanfu/history.db \
 
 ### Step 2: 估值一致性（4 项交叉验证）
 
-读 `ahr999` + `mayer_multiple` + `sma_200w_dev` + `pi_cycle_top_ratio`：
+读 `ahr999_compressed` + `mayer_multiple` + `sma_200w_dev` + `pi_cycle_top_ratio`：
 - **4 项都说低估** → 强烈低估，置信度高
 - **4 项分歧** → 估值信号不清晰，等待
 - **Pi Cycle 触发** → 顶部信号，独立看，权重最高
@@ -332,7 +333,7 @@ sqlite3 ~/.guanfu/history.db \
 
 ### 标准底部组合
 
-✓ `sma_200w_dev` < 0 ✓ `mayer_multiple` < 0.7 ✓ `ahr999` < 0.45 ✓ `hash_ribbons` 下行 ✓ `funding_rate_pct` < -0.01% ✓ `fear_greed` < 20 ✓ `m2_yoy` 转正
+✓ `sma_200w_dev` < 0 ✓ `mayer_multiple` < 0.7 ✓ `ahr999_compressed` < 0.549 ✓ `hash_ribbons` 下行或刚修复 ✓ `funding_rate_pct` < -0.01% ✓ `fear_greed` < 20 ✓ `m2_yoy` 转正
 
 **历史命中**: 2018-12 ($3.2k), 2020-03 ($3.8k), 2022-12 ($15.5k), 2024-08 ($53k)
 
@@ -348,7 +349,7 @@ sqlite3 ~/.guanfu/history.db \
 
 - ❌ **看一个指标做决策** — 至少 3 个 domain 一致才有意义
 - ❌ **从 4 个估值指标里挑利己的** — 4 个都看低估再说
-- ❌ **忽略 stale_days 警告** — ETF 数据是 T-1，遇到周末/假期更滞后
+- ❌ **忽略 stale 警告** — ETF 数据是 T-1，遇到周末/假期更滞后
 - ❌ **盘面不写入交易日志就行动** — 用 `trade-journal` skill 留痕
 - ❌ **黑天鹅时还看观复** — 监管 / 交易所暴雷 / 协议漏洞超出指标范围
 - ❌ **用观复决策 altcoin** — 仅覆盖 BTC + ETH/BTC 比率 + 山寨季指数
@@ -359,18 +360,19 @@ sqlite3 ~/.guanfu/history.db \
 
 ## 关键算法详解
 
-### AHR999（自适应改进版）
+### AHR999（三层口径）
 
 ```
-ahr999 = (price / DCA_200d) × (price / fair_value)
+ahr999_compressed = pow((price / DCA_200d) × (price / fixed_power_law_fair_value), 0.75)
+ahr999            = (price / DCA_200d) × (price / adaptive_fair_value)
 
 其中:
   DCA_200d = 200 / Σ(1/price_i)        ← 调和均值（定投成本），非算术均值
-  fair_value = exp(α + β × log(age))    ← 动态加权回归，非固定系数
+  ahr999_compressed = 主估值信号
+  ahr999 = 自适应诊断量，仅用于辅助确认和 divergence
 ```
 
-**拟合流程**：
-1. 取最近 8 年 BTC 日线，构造 (log-age, log-price) 样本
+固定压缩版的阈值和回测口径以 `skill/SKILL.md` 为准；自适应版不单独驱动估值域。
 2. 时间衰减加权：`weight = 0.5^(i / halfLife)`，越近权重越大
 3. 初始加权最小二乘 → α₀, β₀
 4. Huber 单步重加权 (c=2×MAD) → 降 2021 顶/LUNA-FTX 极端样本权重

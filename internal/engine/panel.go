@@ -81,7 +81,7 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 
 func buildSourceHealth(snap *model.MarketSnapshot) []model.SourceHealth {
 	warnings := dedupeStrings(append([]string(nil), snap.SourceWarnings...))
-	out := make([]model.SourceHealth, 0, 10)
+	out := make([]model.SourceHealth, 0, 11)
 
 	btcOK := !snap.BTCPrice.IsZero() && len(snap.BTCPriceHistory) > 0
 	ethOK := !snap.ETHPrice.IsZero() && len(snap.ETHPriceHistory) > 0
@@ -94,38 +94,46 @@ func buildSourceHealth(snap *model.MarketSnapshot) []model.SourceHealth {
 		matchingWarnings(warnings, "binance btc", "binance eth"),
 	))
 
-	futuresOK := !snap.BTCFundingRate.IsZero() || !snap.BTCOpenInterest.IsZero()
+	futuresOK := snap.FuturesFetched || !snap.BTCFundingRate.IsZero() || !snap.BTCOpenInterest.IsZero()
 	out = append(out, healthEntry(
 		"binance_futures",
 		statusFromBool(futuresOK),
-		sourceTimestamp("", ""),
+		sourceTimestamp(snap.FetchedAt, ""),
 		false,
 		"BTC funding rate and open interest",
 		matchingWarnings(warnings, "binance futures"),
 	))
 
-	coingeckoTotalOK := !snap.TotalMarketCap.IsZero()
-	coingeckoStableOK := !snap.StablecoinMarketCap.IsZero()
-	coingeckoTopOK := len(snap.Top50Coins) > 0
+	coingeckoTotalOK := snap.GlobalMarketFetched || !snap.TotalMarketCap.IsZero()
+	coingeckoStableOK := snap.StablecoinMarketCapFetched || !snap.StablecoinMarketCap.IsZero()
 	out = append(out, healthEntry(
 		"coingecko_market",
-		combinedStatus(coingeckoTotalOK, coingeckoStableOK || coingeckoTopOK),
+		combinedStatus(coingeckoTotalOK, coingeckoStableOK),
 		"",
 		false,
-		"global market cap, stablecoin cap and top-50 breadth inputs",
-		matchingWarnings(warnings, "coingecko"),
+		"global market cap and stablecoin cap inputs",
+		matchingWarnings(warnings, "coingecko global", "stablecoin"),
+	))
+	top50OK := snap.Top50Fetched && len(snap.Top50Coins) > 0 && snap.AltcoinSeasonAvailable
+	out = append(out, healthEntry(
+		"coingecko_top50",
+		statusFromBool(top50OK),
+		sourceTimestamp(snap.FetchedAt, ""),
+		false,
+		"CoinGecko top-50 list plus Binance top-50 history for altcoin season",
+		matchingWarnings(warnings, "top50", "altcoin season"),
 	))
 
 	out = append(out, healthEntry(
 		"alternative_fear_greed",
-		statusFromBool(!snap.FearGreedIndex.IsZero() || snap.FearGreedAsOf != ""),
+		statusFromBool(snap.FearGreedFetched || !snap.FearGreedIndex.IsZero() || snap.FearGreedAsOf != ""),
 		snap.FearGreedAsOf,
 		false,
 		"Fear & Greed index",
 		matchingWarnings(warnings, "fear", "greed", "alternative.me"),
 	))
 
-	mempoolOK := !snap.HashRateEHs.IsZero() || snap.HashRibbonsLabel != "" || !snap.MempoolMB.IsZero()
+	mempoolOK := snap.MempoolFetched || !snap.HashRateEHs.IsZero() || snap.HashRibbonsLabel != "" || !snap.MempoolMB.IsZero()
 	out = append(out, healthEntry(
 		"mempool_space",
 		statusFromBool(mempoolOK),
@@ -314,7 +322,7 @@ func (c *Calculator) persistAndAnnotateHistory(p *model.IndicatorPanel, date str
 	todayKV := map[string]float64{}
 	for k, dom := range historyTracked {
 		ind, ok := getDomainIndicator(p, dom, k)
-		if !ok || (ind.Value == 0 && ind.Label == "") {
+		if !ok || ind.Missing || (ind.Value == 0 && ind.Label == "") {
 			continue
 		}
 		todayKV[k] = ind.Value
@@ -668,7 +676,7 @@ func (c *Calculator) fillNetwork(p *model.IndicatorPanel, snap *model.MarketSnap
 	}
 
 	// 难度调整
-	if !snap.DifficultyChangePct.IsZero() {
+	if snap.MempoolFetched || !snap.DifficultyChangePct.IsZero() {
 		dc := f(snap.DifficultyChangePct)
 		p.Network["difficulty_change_pct"] = model.Indicator{
 			Value:     dc,
@@ -680,7 +688,7 @@ func (c *Calculator) fillNetwork(p *model.IndicatorPanel, snap *model.MarketSnap
 	}
 
 	// Mempool 拥堵
-	if !snap.MempoolMB.IsZero() {
+	if snap.MempoolFetched || !snap.MempoolMB.IsZero() {
 		mb := f(snap.MempoolMB)
 		p.Network["mempool_mb"] = model.Indicator{
 			Value:     mb,
@@ -698,7 +706,7 @@ func (c *Calculator) fillPositioning(p *model.IndicatorPanel, snap *model.Market
 	fearGreedTS := sourceTimestamp(snap.FearGreedAsOf, ts)
 
 	// Funding rate
-	if !snap.BTCFundingRate.IsZero() {
+	if snap.FuturesFetched || !snap.BTCFundingRate.IsZero() {
 		fr := f(snap.BTCFundingRate)
 		p.Positioning["funding_rate_pct"] = model.Indicator{
 			Value:     fr * 100, // 转百分比方便看
@@ -726,7 +734,7 @@ func (c *Calculator) fillPositioning(p *model.IndicatorPanel, snap *model.Market
 	}
 
 	// Fear & Greed
-	if !snap.FearGreedIndex.IsZero() {
+	if snap.FearGreedFetched || !snap.FearGreedIndex.IsZero() {
 		fg := f(snap.FearGreedIndex)
 		p.Positioning["fear_greed"] = model.Indicator{
 			Value:     fg,
@@ -738,7 +746,7 @@ func (c *Calculator) fillPositioning(p *model.IndicatorPanel, snap *model.Market
 	}
 
 	// Altcoin Season Index（自算 — 与 blockchaincenter.net 定义一致）
-	if !snap.AltcoinSeasonIndex.IsZero() {
+	if snap.AltcoinSeasonAvailable || !snap.AltcoinSeasonIndex.IsZero() {
 		asi := f(snap.AltcoinSeasonIndex)
 		p.Positioning["altcoin_season"] = model.Indicator{
 			Value:     asi,
@@ -746,6 +754,13 @@ func (c *Calculator) fillPositioning(p *model.IndicatorPanel, snap *model.Market
 			Source:    "computed:Binance Top50 vs BTC 90d",
 			UpdatedAt: ts,
 			Note:      "Top 50 中 90 日跑赢 BTC 的占比 (0-100)。>75=山寨季, <25=BTC 季。基于实时 Binance kline 计算",
+		}
+	} else {
+		p.Positioning["altcoin_season"] = model.Indicator{
+			Missing:   true,
+			Source:    "computed:Binance Top50 vs BTC 90d",
+			UpdatedAt: ts,
+			Note:      "Top50 历史不足或抓取失败，山寨季指数本次跳过",
 		}
 	}
 
@@ -853,7 +868,7 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 		}
 
 		// 10Y 实际利率 (DFII10)
-		if !snap.RealYield10YPct.IsZero() {
+		if snap.RealYield10YAsOf != "" || !snap.RealYield10YPct.IsZero() {
 			ry := f(snap.RealYield10YPct)
 			p.Macro["real_yield_10y_pct"] = model.Indicator{
 				Value:     ry,
@@ -906,7 +921,7 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 	}
 
 	// 信用利差 — HY Spread (BAMLH0A0HYM2)
-	if !snap.HYSpreadBps.IsZero() {
+	if snap.HYSpreadAsOf != "" || !snap.HYSpreadBps.IsZero() {
 		hyBps := f(snap.HYSpreadBps)
 		p.Macro["hy_spread_bps"] = model.Indicator{
 			Value:     hyBps,
@@ -918,7 +933,7 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 	}
 
 	// 收益率曲线 — 10Y-2Y spread (T10Y2Y)
-	if !snap.YieldCurve10Y2YBps.IsZero() {
+	if snap.YieldCurveAsOf != "" || !snap.YieldCurve10Y2YBps.IsZero() {
 		ycBps := f(snap.YieldCurve10Y2YBps)
 		p.Macro["yield_curve_10y2y_bps"] = model.Indicator{
 			Value:     ycBps,
@@ -930,7 +945,7 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 	}
 
 	// BTC vs SPX 30d 相关
-	if !snap.SPXCorrelation30d.IsZero() {
+	if snap.SPXAsOf != "" || !snap.SPXCorrelation30d.IsZero() {
 		corr := f(snap.SPXCorrelation30d)
 		p.Macro["spx_correlation_30d"] = model.Indicator{
 			Value:     corr,
@@ -1008,7 +1023,7 @@ func (c *Calculator) fillFlow(p *model.IndicatorPanel, snap *model.MarketSnapsho
 	etfTS := sourceTimestamp(snap.ETFAsOf, ts)
 
 	// 现货 BTC ETF 净流入
-	if !snap.ETFNetFlow7dUSD.IsZero() || !snap.ETFNetFlow30dUSD.IsZero() {
+	if snap.ETFAsOf != "" || !snap.ETFNetFlow7dUSD.IsZero() || !snap.ETFNetFlow30dUSD.IsZero() {
 		f7 := f(snap.ETFNetFlow7dUSD)
 		f30 := f(snap.ETFNetFlow30dUSD)
 		assets := f(snap.ETFTotalAssetUSD)
@@ -1043,7 +1058,7 @@ func (c *Calculator) fillFlow(p *model.IndicatorPanel, snap *model.MarketSnapsho
 	}
 
 	// Stablecoin 总市值（入库供后续计算 30d 增速）
-	if !snap.StablecoinMarketCap.IsZero() {
+	if snap.StablecoinMarketCapFetched || !snap.StablecoinMarketCap.IsZero() {
 		scap := f(snap.StablecoinMarketCap)
 		p.Flow["stablecoin_market_cap_usd"] = model.Indicator{
 			Value:     scap,

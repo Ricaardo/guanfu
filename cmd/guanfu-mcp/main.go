@@ -140,10 +140,14 @@ const defaultPanelTimeout = 90 * time.Second
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
+	cacheTTL := flag.Duration("cache-ttl", panelCacheTTL, "in-memory panel cache TTL")
 	flag.Parse()
 	if *showVersion {
 		version.Print(os.Stdout, "guanfu-mcp")
 		return
+	}
+	if *cacheTTL > 0 {
+		panelCacheTTL = *cacheTTL
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
