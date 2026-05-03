@@ -11,21 +11,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"math"
-	"net/http"
 	"os"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
-)
 
-const binanceBTCUSDTStart = "2017-08-17"
+	"github.com/Ricaardo/guanfu/internal/client"
+)
 
 type pricePoint struct {
 	date  time.Time
@@ -59,7 +56,7 @@ func main() {
 
 	if *startStr == "" {
 		if *allData {
-			*startStr = binanceBTCUSDTStart
+			*startStr = client.BTCFullHistoryStart
 		} else {
 			*startStr = time.Now().AddDate(-4, 0, 0).Format("2006-01-02")
 		}
@@ -73,8 +70,14 @@ func main() {
 
 	// 拉数据 + 1500d prelude
 	prelude := startT.AddDate(0, 0, -1500)
-	prices := fetchBTCDailyClose(prelude, endT)
+	if *allData {
+		prelude = time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC)
+	}
+	prices := loadBTCDailyClose(prelude, endT)
 	log.Printf("got %d daily closes", len(prices))
+	if len(prices) == 0 {
+		log.Fatalf("no BTC daily closes available for %s → %s", prelude.Format("2006-01-02"), endT.Format("2006-01-02"))
+	}
 
 	closes := make([]float64, len(prices))
 	dates := make([]time.Time, len(prices))
@@ -222,68 +225,31 @@ func printResults(results []d3Result) {
 	}
 }
 
-// --- data fetching ---
+// --- data loading ---
 
-func fetchBTCDailyClose(from, to time.Time) []pricePoint {
-	const limit = 1000
+func loadBTCDailyClose(from, to time.Time) []pricePoint {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	points, err := client.LoadOrUpdateBTCDailyHistory(ctx, os.Getenv("CACHE_DIR"))
+	if err != nil {
+		log.Fatalf("load BTC daily history: %v", err)
+	}
 	var out []pricePoint
-	cursor := to.UnixMilli()
-	hc := &http.Client{Timeout: 30 * time.Second}
-	startMs := from.UnixMilli()
-	for cursor > startMs {
-		url := fmt.Sprintf("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=%d&endTime=%d", limit, cursor)
-		req, _ := http.NewRequest("GET", url, nil)
-		resp, err := hc.Do(req)
-		if err != nil {
-			log.Fatalf("fetch: %v", err)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		var raw [][]interface{}
-		if err := json.Unmarshal(body, &raw); err != nil {
-			log.Fatalf("parse: %v", err)
-		}
-		if len(raw) == 0 {
-			break
-		}
-		batch := make([]pricePoint, 0, len(raw))
-		for _, row := range raw {
-			ts, _ := row[0].(float64)
-			closeStr, _ := row[4].(string)
-			c, _ := strconv.ParseFloat(closeStr, 64)
-			batch = append(batch, pricePoint{date: time.UnixMilli(int64(ts)).UTC().Truncate(24 * time.Hour), close: c})
-		}
-		out = append(batch, out...)
-		earliest := batch[0].date.UnixMilli()
-		if earliest <= startMs {
-			break
-		}
-		cursor = earliest - 1
-		if len(batch) < limit {
-			break
-		}
-	}
-	seen := map[string]bool{}
-	filtered := out[:0]
-	for _, p := range out {
-		k := p.date.Format("2006-01-02")
-		if seen[k] {
+	for _, p := range points {
+		d, err := time.Parse("2006-01-02", p.Date)
+		if err != nil || d.Before(from) || d.After(to) {
 			continue
 		}
-		seen[k] = true
-		if p.date.Before(from) || p.date.After(to) {
-			continue
+		close, _ := p.Close.Float64()
+		if close > 0 && !math.IsNaN(close) && !math.IsInf(close, 0) {
+			out = append(out, pricePoint{date: d, close: close})
 		}
-		filtered = append(filtered, p)
 	}
-	sort.Slice(filtered, func(i, j int) bool { return filtered[i].date.Before(filtered[j].date) })
-	return filtered
+	sort.Slice(out, func(i, j int) bool { return out[i].date.Before(out[j].date) })
+	return out
 }
 
 func bitcoinAgeDays(date time.Time) float64 {
 	genesis := time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC)
 	return date.Sub(genesis).Hours() / 24.0
 }
-
-var _ = os.Args
-var _ = strings.Join

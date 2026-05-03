@@ -8,7 +8,7 @@ import (
 
 // CurrentMarketSnapshotSchemaVersion guards the on-disk market cache contract.
 // Bump this when MarketSnapshot gains fields that materially change panel output.
-const CurrentMarketSnapshotSchemaVersion = 7
+const CurrentMarketSnapshotSchemaVersion = 8
 
 // MarketSnapshot 包含了计算宏观评分所需的所有市场数据
 type MarketSnapshot struct {

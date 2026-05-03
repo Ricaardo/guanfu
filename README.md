@@ -167,6 +167,7 @@ Network 网络
 | `GUANFU_HISTORY_DB` | MCP Server 使用的 history.db 路径（CLI 用 `--history-db`） |
 | `GUANFU_SKILL_PATH` | MCP Resource `guanfu://knowledge/skill.md` 的 SKILL.md 路径 |
 | `CACHE_DIR` | 缓存目录（默认 `./cache`） |
+| `GUANFU_BTC_KLINE_CACHE` | BTC 全历史日线缓存路径（默认 `$CACHE_DIR/btc_daily_history.json`） |
 | `FUTU_GATEWAY` | 富途 OpenD 地址（默认 `127.0.0.1:11111`） |
 | `FUTU_ENABLED=0` | 禁用富途，直接用 Yahoo 降级 |
 | `FUTU_BRIDGE` | 自定义 futu_bridge.py 路径 |
@@ -184,12 +185,13 @@ ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLi
 
 | 数据源 | 用途 | 免费 |
 |--------|------|------|
-| Binance | BTC/ETH K线 (3000d)、Top50、资金费率、OI | ✅ |
+| CoinMetrics + Binance | BTC 日线全历史（2010-07-18 至最新；CoinMetrics `PriceUSD` + Binance 最新日线覆盖） | ✅ |
+| Binance | ETH K线 (3000d)、Top50、资金费率、OI | ✅ |
 | CoinGecko | 总市值、BTC 市占率、稳定币市值 | ✅ |
 | mempool.space | 哈希率 (3y)、难度、mempool | ✅ |
 | SoSoValue | BTC ETF 净流入 | ✅ |
 | alternative.me | 恐慌贪婪指数 | ✅ |
-| CoinMetrics | MVRV/NUPL/MVRV Z | ✅ 社区端点 |
+| CoinMetrics | BTC `PriceUSD` 全历史、MVRV/NUPL/MVRV Z | ✅ 社区端点 |
 | Yahoo Finance | QQQ/SPY fallback、CL=F WTI futures fallback | ✅ |
 | Futu OpenD | QQQ/SPY/GLD/UUP/VIXY、USO 油价 proxy (本地网关，需 Python bridge) | ✅ |
 | FRED | DXY/10Y TIPS/M2/SPX/HY利差/10Y-2Y利差 | 需注册(免费) |
@@ -242,17 +244,13 @@ guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
 ## 回测
 
 ```bash
-# AHR999 全历史对比报告（含原版/改良版/压缩版/3D评分）
-guanfu-backtest --start 2014-01-01 --kline-cache cache/btc_kline.json \
-  --interval 7 --report-md report.md
+# AHR999 全历史对比报告（默认复用生产 BTC 日线缓存）
+guanfu-backtest --all-data --interval 7 --report-md report.md
 ```
 
-支持 `--kline-cache` 从 JSON 文件加载全量历史 K 线（默认仅从 Binance API 拉取，起始于 2017-08-17）。缓存生成：
+生产与回测共用 BTC 日线缓存：默认 `CACHE_DIR/btc_daily_history.json`（`CACHE_DIR` 默认 `./cache`），也可用 `GUANFU_BTC_KLINE_CACHE=/path/to/btc_daily_history.json` 指定固定路径。缓存会从 CoinMetrics `PriceUSD` 建立 2010-07-18 起的全历史，并在每次未命中快照缓存的运行中用 Binance 最新日线增量覆盖。
 
-```bash
-# 从 CSV 导入（2010-2024）并合并 yfinance 近期数据
-python3 bin/import_csv_kline.py /path/to/BTC_history.csv
-```
+`--kline-cache` 仍支持外部 JSON：既支持生产缓存 envelope，也兼容旧格式 `{"YYYY-MM-DD": close_price, ...}`。
 
 回测报告结构：Verdict 基线 → AHR999 三版对比（原始/改良/压缩）→ 3D 评分（V/M/P 8 组合）→ 分桶过渡矩阵。
 
@@ -290,11 +288,10 @@ guanfu/
 │   ├── mathutil/        # 技术指标 (MA/EMA/MACD/RSI/BB)
 │   ├── version/         # 构建版本信息
 │   └── cache/           # 磁盘缓存
-├── bin/                 # 编译输出 + Python 辅助脚本
-│   ├── import_csv_kline.py  # CSV → kline cache JSON
-│   └── futu_bridge.py       # 富途 OpenD Python bridge
+├── bin/                 # 本地编译输出（可选）
 ├── cache/               # 运行时缓存
-│   └── btc_kline.json   # 全量 K 线缓存 (2010-2026, 可选)
+│   ├── market_cache.json
+│   └── btc_daily_history.json   # BTC 全量日线缓存 (2010 至最新)
 ├── docs/                # 项目文档（数据源、回测方法、MCP 配置）
 ├── skill/               # Claude Code skill 包（SKILL.md + kb/）
 ├── Makefile

@@ -17,8 +17,9 @@ import (
 )
 
 type RealClient struct {
-	client *resty.Client
-	cache  *cache.Cache
+	client   *resty.Client
+	cache    *cache.Cache
+	cacheDir string
 }
 
 const (
@@ -46,7 +47,8 @@ func NewRealClient() *RealClient {
 		client: resty.New().
 			SetTimeout(10 * time.Second).
 			SetRetryCount(3),
-		cache: cache,
+		cache:    cache,
+		cacheDir: cacheDir,
 	}
 }
 
@@ -439,8 +441,9 @@ func usableCachedSnapshot(snap *model.MarketSnapshot) (bool, string) {
 	if snap.SnapshotSchemaVersion != model.CurrentMarketSnapshotSchemaVersion {
 		return false, fmt.Sprintf("schema version %d != %d", snap.SnapshotSchemaVersion, model.CurrentMarketSnapshotSchemaVersion)
 	}
-	if len(snap.BTCPriceHistory) < btcHistoryMinFreshDays {
-		return false, fmt.Sprintf("BTC history has %d days, need at least %d for adaptive AHR999", len(snap.BTCPriceHistory), btcHistoryMinFreshDays)
+	requiredBTCHistoryDays := btcMinFullHistoryDays(time.Now())
+	if len(snap.BTCPriceHistory) < requiredBTCHistoryDays {
+		return false, fmt.Sprintf("BTC history has %d days, need at least %d for full 2010-to-latest AHR999 inputs", len(snap.BTCPriceHistory), requiredBTCHistoryDays)
 	}
 	if snap.BTCPriceAsOf == "" {
 		return false, "missing BTC source timestamp"
@@ -464,48 +467,11 @@ func usableCachedSnapshot(snap *model.MarketSnapshot) (bool, string) {
 // --- Implementation Methods ---
 
 func (c *RealClient) fetchBTCData(ctx context.Context, snap *model.MarketSnapshot) error {
-	// Binance Klines: https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=1000
-	// Response: [[OpenTime, Open, High, Low, Close, Vol, ...], ...]
-	// Order: Oldest first.
-	// We need: Newest first for our model (index 0 = today).
-
-	klines, err := c.fetchBinanceDailyKlines(ctx, "BTCUSDT", btcHistoryTargetDays)
+	points, err := c.loadOrUpdateBTCDailyHistory(ctx)
 	if err != nil {
 		return err
 	}
-
-	if len(klines) == 0 {
-		return fmt.Errorf("empty klines")
-	}
-
-	// Reverse to Newest First
-	n := len(klines)
-	snap.BTCPriceHistory = make([]decimal.Decimal, n)
-	snap.BTCVolumeHistory = make([]decimal.Decimal, n)
-
-	for i, k := range klines {
-		// k[4] is Close Price, k[5] is Volume
-		// k is []interface{}, but typed as []interface{} so indexing works?
-		// Wait, k is []interface{}? No, k is interface{} inside [][]interface{}?
-		// No, [][]interface{} is slice of slice of interface{}.
-		// So k is []interface{}.
-
-		kSlice := k // k is []interface{}
-
-		closePrice, _ := decimal.NewFromString(kSlice[4].(string))
-		volume, _ := decimal.NewFromString(kSlice[5].(string))
-
-		// Store in reverse order (0 = Newest = Last element of klines)
-		idx := n - 1 - i
-		snap.BTCPriceHistory[idx] = closePrice
-		snap.BTCVolumeHistory[idx] = volume
-	}
-
-	snap.BTCPrice = snap.BTCPriceHistory[0]
-	snap.BTCVolume24h = snap.BTCVolumeHistory[0]
-	snap.BTCPriceAsOf = time.Now().UTC().Format(time.RFC3339)
-
-	return nil
+	return applyBTCDailyHistoryToSnapshot(points, snap)
 }
 
 func (c *RealClient) fetchBinanceDailyKlines(ctx context.Context, symbol string, targetDays int) ([][]interface{}, error) {

@@ -220,10 +220,11 @@ guanfu --timeout 180s
 | `GUANFU_HISTORY_DB` | MCP Server 使用的 history.db 路径（CLI 用 `--history-db`） |
 | `GUANFU_SKILL_PATH` | MCP Resource `guanfu://knowledge/skill.md` 的 SKILL.md 路径 |
 | `CACHE_DIR` | 磁盘缓存目录（默认 `./cache`） |
+| `GUANFU_BTC_KLINE_CACHE` | BTC 全历史日线缓存路径（默认 `$CACHE_DIR/btc_daily_history.json`） |
 
 ### 冷启动
 
-首次完整冷启动通常 60-90s（拉 Binance 历史 K 线、mempool、SoSoValue、F&G、CoinGecko Top50 等），后续缓存命中 < 1s。
+首次完整冷启动通常 60-90s（拉 CoinMetrics BTC 2010+ 日线、Binance 最新日线/ETH/Top50、mempool、SoSoValue、F&G、CoinGecko Top50 等），后续缓存命中 < 1s。
 
 ### 重建二进制
 
@@ -239,7 +240,7 @@ go build -o bin/guanfu ./cmd/guanfu
 
 ETF / mempool / 资金费率 / 宏观这类指标没有公开历史 API。观复通过 **SQLite 历史表** 自己每天采集一行，攒够样本后才能回填 `q` 字段。
 
-BTC 价格相关指标（`sma_200w_dev`、`mayer_multiple`、`eth_btc_ratio` 等）的 `q` 由 Binance kline 历史直接计算，**不进 history.db**。
+BTC 价格相关指标（`sma_200w_dev`、`mayer_multiple`、AHR、技术指标等）的 `q` 由 BTC 全历史日线缓存直接计算：CoinMetrics `PriceUSD` 覆盖 2010-07-18 起全历史，Binance `BTCUSDT` 覆盖最近日线和当日最新值。它们**不进 history.db**。
 
 ### 采集指标 (15 个)
 
@@ -277,12 +278,13 @@ sqlite3 ~/.guanfu/history.db \
 
 | 数据源 | 用途 | 需要 Key | 免费 tier |
 |--------|------|----------|-----------|
-| Binance | BTC/ETH 价格 + K 线历史 (3000d) + Top50 历史 + 资金费率 + OI | 否 | 公开 |
+| CoinMetrics + Binance | BTC 日线全历史（2010-07-18 至最新；CoinMetrics `PriceUSD` + Binance 最新日线覆盖） | 否 | 公开 / 社区端点 |
+| Binance | ETH 价格 + K 线历史 (3000d) + Top50 历史 + 资金费率 + OI | 否 | 公开 |
 | CoinGecko | 总市值 + BTC 市占率 + 稳定币市值 | 否 | 公开（有频率限制） |
 | mempool.space | 哈希率 (3y) + 难度调整 + mempool 拥堵 | 否 | 公开 |
 | SoSoValue | 现货 BTC ETF 净流入 (7d/30d) + 总持仓 | 否 | 公开 |
 | alternative.me | 恐慌贪婪指数 | 否 | 公开 |
-| CoinMetrics | MVRV / NUPL / MVRV Z-Score | `COINMETRICS_API_KEY` | 社区端点可用 |
+| CoinMetrics | BTC `PriceUSD` 全历史、MVRV / NUPL / MVRV Z-Score | `COINMETRICS_API_KEY` | 社区端点可用 |
 | FRED | DXY / 10Y TIPS / M2 / SPX | `FRED_API_KEY` | 需注册(免费) |
 | Blockchain Center | ~~山寨季指数~~ → **已改为自算** | 否 | 不再依赖 |
 

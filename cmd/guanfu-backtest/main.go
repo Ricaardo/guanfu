@@ -5,7 +5,7 @@
 //   guanfu-backtest --start 2024-01-01 --end 2026-04-01 --interval 1 --json > result.json
 //
 // 数据源：
-//   - BTC daily kline 从 Binance 公开 API 直拉（可缓存到 ./cache/）
+//   - BTC daily kline 与生产路径一致：CoinMetrics PriceUSD 2010+ 全历史 + Binance 最新日线（可缓存到 ./cache/）
 //   - 仅用 kline 衍生的指标做回测：mayer_multiple, sma_200w_dev, pi_cycle_top_ratio,
 //     rsi_14, macd_histogram, ma_alignment, ahr999 (压缩版, 与生产算法一致)
 //   - 外部指标（ETF / 资金费率 / 宏观 / MVRV 等）通过 --indicators JSON 加载；无文件时 Missing → 自动跳过
@@ -17,25 +17,24 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"math"
-	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Ricaardo/guanfu/internal/client"
 	"github.com/Ricaardo/guanfu/internal/engine"
 	"github.com/Ricaardo/guanfu/internal/model"
 )
 
 const (
-	binanceBTCUSDTStart     = "2017-08-17"
+	backtestBTCPriceSource  = "coinmetrics:PriceUSD+binance:BTCUSDT"
 	ahrDCAWindowDays        = 200
 	ahrFitWindowDays        = 365 * 8
 	ahrMinFitWindowDays     = 365 * 3
@@ -54,8 +53,8 @@ func main() {
 	interval := flag.Int("interval", 7, "采样间隔天数（1=daily, 7=weekly）")
 	jsonOut := flag.Bool("json", false, "JSON 输出（默认人类报告）")
 	includeRaw := flag.Bool("samples", false, "JSON 输出包含每个采样点（量大）")
-	allData := flag.Bool("all-data", false, "从 Binance BTCUSDT 可用首日开始回测（2017-08-17）")
-	klineCache := flag.String("kline-cache", "", "BTC kline JSON 缓存路径 (date->close map); 优先于 Binance API")
+	allData := flag.Bool("all-data", false, "从 BTC 全历史首日开始回测（2010-07-18）")
+	klineCache := flag.String("kline-cache", "", "BTC kline JSON 缓存路径；支持生产缓存 envelope 或旧 date->close map")
 	reportMD := flag.String("report-md", "", "写入 Markdown baseline 报告到指定路径")
 	indicatorsFile := flag.String("indicators", "", "外部历史指标 JSON (map[date]map[name]value); 文件格式见下方说明")
 	ahrCSV := flag.String("ahr-csv", "", "导出逐日 AHR999 (Original/Modified/Compressed) 到 CSV")
@@ -63,7 +62,7 @@ func main() {
 
 	if *startStr == "" {
 		if *allData || *reportMD != "" {
-			*startStr = binanceBTCUSDTStart
+			*startStr = client.BTCFullHistoryStart
 		} else {
 			*startStr = time.Now().AddDate(-4, 0, 0).Format("2006-01-02")
 		}
@@ -89,8 +88,8 @@ func main() {
 	// 拉 BTC kline 直到 endT；为算 sma_200w 和 ahr999 长基线，
 	// 从 startT 再往前推 1500 天
 	prelude := startT.AddDate(0, 0, -1500)
-	// When using kline cache with --all-data, use earliest possible date
-	if *klineCache != "" && *allData {
+	// When using full-history data with --all-data, use earliest possible date.
+	if *allData {
 		prelude = time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC) // BTC genesis
 	}
 	var prices []pricePoint
@@ -101,18 +100,24 @@ func main() {
 			log.Fatalf("load kline cache: %v", err)
 		}
 	} else {
-		log.Printf("fetching BTC daily kline %s → %s", prelude.Format("2006-01-02"), endT.Format("2006-01-02"))
-		prices, err = fetchBTCDailyClose(prelude, endT)
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		log.Printf("loading/updating production BTC daily history cache (%s → latest)", client.BTCFullHistoryStart)
+		points, err := client.LoadOrUpdateBTCDailyHistory(ctx, os.Getenv("CACHE_DIR"))
 		if err != nil {
 			log.Fatalf("fetch kline: %v", err)
 		}
+		prices = btcDailyPointsToPrices(points, prelude, endT)
+	}
+	if len(prices) == 0 {
+		log.Fatalf("no BTC daily closes available for %s → %s", prelude.Format("2006-01-02"), endT.Format("2006-01-02"))
 	}
 	log.Printf("got %d daily closes (%s → %s)", len(prices), prices[0].date.Format("2006-01-02"), prices[len(prices)-1].date.Format("2006-01-02"))
 
-	// If --all-data with kline cache, use the actual earliest date in cache
-	if *allData && *klineCache != "" && prices[0].date.Before(startT) {
+	// If --all-data, use the actual earliest date in the full-history source.
+	if *allData && prices[0].date.Before(startT) {
 		startT = prices[0].date
-		log.Printf("--all-data with cache: adjusting start to %s", startT.Format("2006-01-02"))
+		log.Printf("--all-data: adjusting start to %s", startT.Format("2006-01-02"))
 	}
 
 	// 索引：date string -> idx
@@ -217,96 +222,30 @@ func clampClosedDailyEnd(end, now time.Time) (time.Time, bool) {
 
 // loadBTCDailyCloseFromCache 从 JSON 文件 (map[date]close) 加载 kline 数据。
 func loadBTCDailyCloseFromCache(path string, from, to time.Time) ([]pricePoint, error) {
-	data, err := os.ReadFile(path)
+	points, err := client.LoadBTCDailyHistoryCache(path)
 	if err != nil {
-		return nil, fmt.Errorf("read cache: %w", err)
+		return nil, err
 	}
-	var raw map[string]float64
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse cache: %w", err)
-	}
+	return btcDailyPointsToPrices(points, from, to), nil
+}
+
+func btcDailyPointsToPrices(points []client.BTCDailyPoint, from, to time.Time) []pricePoint {
 	var out []pricePoint
-	for dateStr, close := range raw {
-		d, err := time.Parse("2006-01-02", dateStr)
+	for _, p := range points {
+		d, err := time.Parse("2006-01-02", p.Date)
 		if err != nil {
 			continue
 		}
-		if (d.Equal(from) || d.After(from)) && (d.Equal(to) || d.Before(to)) {
+		if d.Before(from) || d.After(to) {
+			continue
+		}
+		close, _ := p.Close.Float64()
+		if close > 0 && !math.IsNaN(close) && !math.IsInf(close, 0) {
 			out = append(out, pricePoint{date: d, close: close})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].date.Before(out[j].date) })
-	return out, nil
-}
-
-func fetchBTCDailyClose(from, to time.Time) ([]pricePoint, error) {
-	const limit = 1000
-	var out []pricePoint
-	cursor := to.UnixMilli()
-	hc := &http.Client{Timeout: 20 * time.Second}
-	startMs := from.UnixMilli()
-	for cursor > startMs {
-		url := fmt.Sprintf("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=%d&endTime=%d", limit, cursor)
-		req, _ := http.NewRequest("GET", url, nil)
-		resp, err := hc.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		var raw [][]interface{}
-		if err := json.Unmarshal(body, &raw); err != nil {
-			return nil, fmt.Errorf("parse: %v body=%s", err, string(body[:min(200, len(body))]))
-		}
-		if len(raw) == 0 {
-			break
-		}
-		batch := make([]pricePoint, 0, len(raw))
-		for _, row := range raw {
-			ts, ok := row[0].(float64)
-			if !ok {
-				continue
-			}
-			closeStr, ok := row[4].(string)
-			if !ok {
-				continue
-			}
-			c, err := strconv.ParseFloat(closeStr, 64)
-			if err != nil {
-				continue
-			}
-			batch = append(batch, pricePoint{date: time.UnixMilli(int64(ts)).UTC().Truncate(24 * time.Hour), close: c})
-		}
-		if len(batch) == 0 {
-			break
-		}
-		out = append(batch, out...)
-		earliest := batch[0].date.UnixMilli()
-		if earliest <= startMs {
-			break
-		}
-		cursor = earliest - 1
-		// guard against pagination loop on small batches
-		if len(batch) < limit {
-			break
-		}
-	}
-	// dedupe + filter
-	seen := map[string]bool{}
-	filtered := out[:0]
-	for _, p := range out {
-		k := p.date.Format("2006-01-02")
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		if p.date.Before(from) || p.date.After(to) {
-			continue
-		}
-		filtered = append(filtered, p)
-	}
-	sort.Slice(filtered, func(i, j int) bool { return filtered[i].date.Before(filtered[j].date) })
-	return filtered, nil
+	return out
 }
 
 func idx2map(idx map[string]int, closes []float64) map[string]float64 {
@@ -352,13 +291,13 @@ func buildBacktestPanel(closes []float64, dates []time.Time, date string, ext ma
 	// SMA 200d (Mayer 用)
 	sma200d := mean(closes[len(closes)-200:])
 	mayer := cur / sma200d
-	p.Cycle["mayer_multiple"] = model.Indicator{Value: mayer, Source: "binance"}
+	p.Cycle["mayer_multiple"] = model.Indicator{Value: mayer, Source: backtestBTCPriceSource}
 
 	// SMA 200w (= 1400d)
 	if len(closes) >= 1400 {
 		sma200w := mean(closes[len(closes)-1400:])
 		dev := cur/sma200w - 1
-		p.Cycle["sma_200w_dev"] = model.Indicator{Value: dev, Source: "binance"}
+		p.Cycle["sma_200w_dev"] = model.Indicator{Value: dev, Source: backtestBTCPriceSource}
 	} else {
 		p.Cycle["sma_200w_dev"] = model.Indicator{Missing: true, Source: "kline 历史不足 1400d"}
 	}
@@ -368,7 +307,7 @@ func buildBacktestPanel(closes []float64, dates []time.Time, date string, ext ma
 		ma111 := mean(closes[len(closes)-111:])
 		ma350 := mean(closes[len(closes)-350:])
 		pi := ma111 / (2 * ma350)
-		p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Value: pi, Source: "binance"}
+		p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Value: pi, Source: backtestBTCPriceSource}
 	} else {
 		p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Missing: true, Source: "kline 历史不足 350d"}
 	}
@@ -387,7 +326,7 @@ func buildBacktestPanel(closes []float64, dates []time.Time, date string, ext ma
 
 	// RSI(14)
 	if len(closes) >= 15 {
-		p.Technical["rsi_14"] = model.Indicator{Value: rsi(closes, 14), Source: "binance"}
+		p.Technical["rsi_14"] = model.Indicator{Value: rsi(closes, 14), Source: backtestBTCPriceSource}
 	} else {
 		p.Technical["rsi_14"] = model.Indicator{Missing: true}
 	}
@@ -396,98 +335,98 @@ func buildBacktestPanel(closes []float64, dates []time.Time, date string, ext ma
 	if len(closes) >= 200 {
 		ma50 := mean(closes[len(closes)-50:])
 		ma200 := mean(closes[len(closes)-200:])
-		p.Technical["ma_alignment"] = model.Indicator{Value: ma50 - ma200, Source: "binance"}
+		p.Technical["ma_alignment"] = model.Indicator{Value: ma50 - ma200, Source: backtestBTCPriceSource}
 	}
 
 	// MACD histogram (12,26,9)
 	if len(closes) >= 35 {
 		hist := macdHistogram(closes, 12, 26, 9)
-		p.Technical["macd_histogram"] = model.Indicator{Value: hist, Source: "binance"}
+		p.Technical["macd_histogram"] = model.Indicator{Value: hist, Source: backtestBTCPriceSource}
 	}
 
-		// 填充外部历史指标（ETF / 资金费率 / 宏观 / MVRV 等）
-		// 通过 --indicators 标志加载 JSON 文件注入。无文件时为 Missing。
-		fillExternalIndicators(p, ext, date)
+	// 填充外部历史指标（ETF / 资金费率 / 宏观 / MVRV 等）
+	// 通过 --indicators 标志加载 JSON 文件注入。无文件时为 Missing。
+	fillExternalIndicators(p, ext, date)
 
-		return p
+	return p
+}
+
+func fillExternalIndicators(p *model.IndicatorPanel, ext map[string]map[string]float64, date string) {
+	type extDef struct {
+		domain string
+		key    string
+	}
+	externals := []extDef{
+		{domain: "positioning", key: "funding_rate_pct"},
+		{domain: "positioning", key: "oi_to_mc"},
+		{domain: "positioning", key: "fear_greed"},
+		{domain: "positioning", key: "skew_25d_pct"},
+		{domain: "positioning", key: "dvol"},
+		{domain: "network", key: "difficulty_change_pct"},
+		{domain: "macro", key: "m2_yoy"},
+		{domain: "macro", key: "real_yield_10y_pct"},
+		{domain: "macro", key: "dxy_60d_trend_pct"},
+		{domain: "flow", key: "etf_net_flow_30d_usd"},
+		{domain: "flow", key: "stablecoin_supply_30d_pct"},
+		{domain: "valuation", key: "mvrv_z_score"},
+		{domain: "valuation", key: "nupl"},
+		{domain: "valuation", key: "price_to_realized_dev_pct"},
+		{domain: "cross_asset", key: "btc_spy_corr_30d"},
+		{domain: "cross_asset", key: "rel_strength_90d_gold"},
 	}
 
-	func fillExternalIndicators(p *model.IndicatorPanel, ext map[string]map[string]float64, date string) {
-		type extDef struct {
-			domain string
-			key    string
+	for _, e := range externals {
+		val, ok := lookupExt(ext, e.key, date)
+		ind := model.Indicator{}
+		if ok {
+			ind = model.Indicator{Value: val, Source: "ext:" + e.key}
+		} else {
+			ind = model.Indicator{Missing: true, Source: "backtest:not_available"}
 		}
-		externals := []extDef{
-			{domain: "positioning", key: "funding_rate_pct"},
-			{domain: "positioning", key: "oi_to_mc"},
-			{domain: "positioning", key: "fear_greed"},
-			{domain: "positioning", key: "skew_25d_pct"},
-			{domain: "positioning", key: "dvol"},
-			{domain: "network", key: "difficulty_change_pct"},
-			{domain: "macro", key: "m2_yoy"},
-			{domain: "macro", key: "real_yield_10y_pct"},
-			{domain: "macro", key: "dxy_60d_trend_pct"},
-			{domain: "flow", key: "etf_net_flow_30d_usd"},
-			{domain: "flow", key: "stablecoin_supply_30d_pct"},
-			{domain: "valuation", key: "mvrv_z_score"},
-			{domain: "valuation", key: "nupl"},
-			{domain: "valuation", key: "price_to_realized_dev_pct"},
-			{domain: "cross_asset", key: "btc_spy_corr_30d"},
-			{domain: "cross_asset", key: "rel_strength_90d_gold"},
-		}
-
-		for _, e := range externals {
-			val, ok := lookupExt(ext, e.key, date)
-			ind := model.Indicator{}
-			if ok {
-				ind = model.Indicator{Value: val, Source: "ext:" + e.key}
-			} else {
-				ind = model.Indicator{Missing: true, Source: "backtest:not_available"}
-			}
-			switch e.domain {
-			case "positioning":
-				p.Positioning[e.key] = ind
-			case "network":
-				p.Network[e.key] = ind
-			case "macro":
-				p.Macro[e.key] = ind
-			case "flow":
-				p.Flow[e.key] = ind
-			case "valuation":
-				p.Valuation[e.key] = ind
-			case "cross_asset":
-				p.CrossAsset[e.key] = ind
-			}
+		switch e.domain {
+		case "positioning":
+			p.Positioning[e.key] = ind
+		case "network":
+			p.Network[e.key] = ind
+		case "macro":
+			p.Macro[e.key] = ind
+		case "flow":
+			p.Flow[e.key] = ind
+		case "valuation":
+			p.Valuation[e.key] = ind
+		case "cross_asset":
+			p.CrossAsset[e.key] = ind
 		}
 	}
+}
 
-	func lookupExt(ext map[string]map[string]float64, key, date string) (float64, bool) {
-		if ext == nil {
-			return 0, false
-		}
-		day, ok := ext[date]
-		if !ok {
-			return 0, false
-		}
-		v, ok := day[key]
-		return v, ok
+func lookupExt(ext map[string]map[string]float64, key, date string) (float64, bool) {
+	if ext == nil {
+		return 0, false
 	}
+	day, ok := ext[date]
+	if !ok {
+		return 0, false
+	}
+	v, ok := day[key]
+	return v, ok
+}
 
-	func loadExternalIndicators(path string) map[string]map[string]float64 {
-		if path == "" {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			log.Fatalf("load --indicators: %v", err)
-		}
-		var raw map[string]map[string]float64
-		if err := json.Unmarshal(data, &raw); err != nil {
-			log.Fatalf("parse --indicators JSON: %v", err)
-		}
-		log.Printf("loaded %d dates of external indicators from %s", len(raw), path)
-		return raw
+func loadExternalIndicators(path string) map[string]map[string]float64 {
+	if path == "" {
+		return nil
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("load --indicators: %v", err)
+	}
+	var raw map[string]map[string]float64
+	if err := json.Unmarshal(data, &raw); err != nil {
+		log.Fatalf("parse --indicators JSON: %v", err)
+	}
+	log.Printf("loaded %d dates of external indicators from %s", len(raw), path)
+	return raw
+}
 
 func markAllMissing(p *model.IndicatorPanel) {
 	for _, k := range []string{"mayer_multiple", "sma_200w_dev", "pi_cycle_top_ratio"} {
@@ -552,13 +491,6 @@ func macdHistogram(closes []float64, fast, slow, signal int) float64 {
 	sig := emaSeries(macd, signal)
 	last := len(closes) - 1
 	return macd[last] - sig[last]
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // --- AHR999 comparison report ---
@@ -1225,10 +1157,10 @@ type d3Stats struct {
 }
 
 type d3Result struct {
-	From  string
-	To    string
-	Days  int
-	Stats []d3Stats
+	From   string
+	To     string
+	Days   int
+	Stats  []d3Stats
 	Latest d3Point
 }
 
@@ -1315,47 +1247,51 @@ func build3DScore(prices []pricePoint, startT, endT time.Time, prov engine.Price
 	}
 
 	// Bucket stats by specific signal combination (8 combos = 2^3)
-		comboLabels := []string{
-			"--- 三项全缺（最贵+不跌+无恐慌）",
-			"V-- 仅估值便宜（便宜+不跌+无恐慌 — 最佳买入！）",
-			"-M- 仅动量（偏贵+跌+无恐慌）",
-			"VM- 估值便宜+跌+无恐慌（熊市中继）",
-			"--P 仅恐慌（估值合理+不跌+恐慌）",
-			"V-P 便宜+不跌+恐慌（恐慌底）",
-			"-MP 偏贵+跌+恐慌（熊市反弹陷阱）",
-			"VMP 三项全满（极端底部）",
-		}
-		for combo := 0; combo <= 7; combo++ {
-			// combo bits: bit0=valuation, bit1=momentum, bit2=panic
-			hasV := combo&1 != 0
-			hasM := combo&2 != 0
-			hasP := combo&4 != 0
-			var fwds []float64
-			n := 0
-			for _, pt := range points {
-				if (pt.Valuation < 0.8) == hasV && (pt.Mayer > 0 && pt.Mayer < 1.0) == hasM && (pt.Drawdown < -0.20) == hasP {
-					n++
-					if pt.HasFwd180 {
-						fwds = append(fwds, pt.Fwd180)
-					}
+	comboLabels := []string{
+		"--- 三项全缺（最贵+不跌+无恐慌）",
+		"V-- 仅估值便宜（便宜+不跌+无恐慌 — 最佳买入！）",
+		"-M- 仅动量（偏贵+跌+无恐慌）",
+		"VM- 估值便宜+跌+无恐慌（熊市中继）",
+		"--P 仅恐慌（估值合理+不跌+恐慌）",
+		"V-P 便宜+不跌+恐慌（恐慌底）",
+		"-MP 偏贵+跌+恐慌（熊市反弹陷阱）",
+		"VMP 三项全满（极端底部）",
+	}
+	for combo := 0; combo <= 7; combo++ {
+		// combo bits: bit0=valuation, bit1=momentum, bit2=panic
+		hasV := combo&1 != 0
+		hasM := combo&2 != 0
+		hasP := combo&4 != 0
+		var fwds []float64
+		n := 0
+		for _, pt := range points {
+			if (pt.Valuation < 0.8) == hasV && (pt.Mayer > 0 && pt.Mayer < 1.0) == hasM && (pt.Drawdown < -0.20) == hasP {
+				n++
+				if pt.HasFwd180 {
+					fwds = append(fwds, pt.Fwd180)
 				}
 			}
-			ds := d3Stats{Bucket: comboLabels[combo], N: n}
-			if len(fwds) > 0 {
-				sum := 0.0
-				pos := 0
-				worst := fwds[0]
-				for _, f := range fwds {
-					sum += f
-					if f > 0 { pos++ }
-					if f < worst { worst = f }
-				}
-				ds.AvgFwd180 = sum / float64(len(fwds))
-				ds.PosRate180 = float64(pos) / float64(len(fwds))
-				ds.Worst180 = worst
-			}
-			result.Stats = append(result.Stats, ds)
 		}
+		ds := d3Stats{Bucket: comboLabels[combo], N: n}
+		if len(fwds) > 0 {
+			sum := 0.0
+			pos := 0
+			worst := fwds[0]
+			for _, f := range fwds {
+				sum += f
+				if f > 0 {
+					pos++
+				}
+				if f < worst {
+					worst = f
+				}
+			}
+			ds.AvgFwd180 = sum / float64(len(fwds))
+			ds.PosRate180 = float64(pos) / float64(len(fwds))
+			ds.Worst180 = worst
+		}
+		result.Stats = append(result.Stats, ds)
+	}
 	return result
 }
 
@@ -1366,7 +1302,7 @@ func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, d3 d3Result
 	b.WriteString(fmt.Sprintf("- Requested range: %s -> %s\n", startT.Format("2006-01-02"), endT.Format("2006-01-02")))
 	b.WriteString(fmt.Sprintf("- Effective BTC daily data: %s -> %s (%d closes)\n", a.From, a.To, a.DataDays))
 	b.WriteString(fmt.Sprintf("- Verdict sample interval: %dd\n", interval))
-	b.WriteString("- Price source: Binance BTCUSDT closed UTC daily candles\n")
+	b.WriteString("- Price source: CoinMetrics PriceUSD full daily history + Binance BTCUSDT latest daily overlay\n")
 	b.WriteString("- Forward returns: close-to-close 30d / 90d / 180d\n\n")
 
 	b.WriteString("## Executive summary\n\n")
@@ -1443,7 +1379,7 @@ func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, d3 d3Result
 
 	b.WriteString("\n## Interpretation\n\n")
 	b.WriteString("- Treat the verdict baseline as a low-coverage sanity check, not a production-grade historical proof. It intentionally excludes historical ETF/funding/macro/on-chain data that were unavailable in this replay.\n")
-	b.WriteString("- The AHR comparison uses every Binance BTCUSDT daily close available in the requested range. Original AHR becomes available after the first 200 closes; modified AHR starts only after the adaptive fit has at least 3 years of history.\n")
+	b.WriteString("- The AHR comparison uses the same BTC daily history chain as production: CoinMetrics PriceUSD from 2010-07-18 plus Binance BTCUSDT latest daily overlay. Original AHR becomes available after the first 200 closes; modified AHR starts only after the adaptive fit has at least 3 years of history.\n")
 	b.WriteString("- For modified AHR, raw value still helps compare with public AHR dashboards, but q percentile is the safer internal regime signal because it is calibrated to the same rolling fit window.\n")
 	b.WriteString("- Compressed sqrt-AHR (pow(raw, 0.75)) is tested as an improvement over the original formula. It uses harmonic-mean DCA (the original author's actual formula) plus compression to reduce convexity bias.\n")
 	b.WriteString("- Public claims should quote sample counts and the exact date range above; do not extrapolate beyond Binance spot history without another data source.\n")

@@ -33,6 +33,8 @@ var halvingDates = []time.Time{
 	time.Date(2028, 4, 20, 0, 0, 0, 0, time.UTC),  // 估计：3.125 → 1.5625
 }
 
+const btcDailyHistorySource = "coinmetrics:PriceUSD + binance:BTCUSDT"
+
 // BuildPanel 构造 v2 指标盘面
 func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPanel {
 	dataDate := snap.Date.Format("2006-01-02")
@@ -90,8 +92,8 @@ func buildSourceHealth(snap *model.MarketSnapshot) []model.SourceHealth {
 		combinedStatus(btcOK, ethOK),
 		latestAsOf(snap.BTCPriceAsOf, snap.ETHPriceAsOf),
 		false,
-		"BTC/ETH spot price, volume and daily history",
-		matchingWarnings(warnings, "binance btc", "binance eth"),
+		"BTC full daily history from CoinMetrics PriceUSD plus Binance latest; ETH spot history from Binance",
+		matchingWarnings(warnings, "binance btc", "coinmetrics priceusd", "binance eth"),
 	))
 
 	futuresOK := snap.FuturesFetched || !snap.BTCFundingRate.IsZero() || !snap.BTCOpenInterest.IsZero()
@@ -439,7 +441,7 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 		dev := (price - maW) / maW
 		p.Cycle["sma_200w"] = model.Indicator{
 			Value:     maW,
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      "200 周（1400 日）SMA — 历史价格地板",
 		}
@@ -447,7 +449,7 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 			Value:     dev,
 			Quantile:  displayQuantile(quantileOfDeviation(snap.BTCPriceHistory, 200*7, dev)),
 			Label:     devLabel(dev),
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      "(price - 200wSMA) / 200wSMA。<0 历史抄底区，>1.5 牛市末期",
 		}
@@ -460,7 +462,7 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 			Value:     mayer,
 			Quantile:  displayQuantile(quantileOfMayer(snap.BTCPriceHistory, 200)),
 			Label:     mayerLabel(mayer),
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      "price / 200d SMA。<1 偏低估，>2.4 历史顶部区",
 		}
@@ -474,7 +476,7 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 		p.Cycle["pi_cycle_top_ratio"] = model.Indicator{
 			Value:     ratio,
 			Label:     piCycleLabel(ratio),
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      "111dMA / (2×350dMA)。>=1 触发 Pi Cycle Top（历史顶部信号）",
 		}
@@ -503,7 +505,7 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 		p.Valuation["ahr999_compressed"] = model.Indicator{
 			Value:     ahrCompressed,
 			Label:     ahrCompressedLabel(ahrCompressed),
-			Source:    "binance + power-law (compressed)",
+			Source:    btcDailyHistorySource + " + power-law (compressed)",
 			UpdatedAt: btcTS,
 			Note:      fmt.Sprintf("sqrt-AHR = (原始 AHR999)^0.75。回测：<0.45→+86.5%%/88%%胜率, 2.0-5.0→-15.4%%/20%%胜率, >=20.0→0%%胜率。原始值: %.3f", ahrOrig),
 		}
@@ -517,7 +519,7 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 			Value:     raw,
 			Quantile:  displayQuantile(ahrQ),
 			Label:     ahrLabel(raw),
-			Source:    "binance + adaptive log-log fit",
+			Source:    btcDailyHistorySource + " + adaptive log-log fit",
 			UpdatedAt: btcTS,
 			Note:      "自适应 AHR（展示用 + 分歧检测）。回测显示极端牛市后 fair value 上移导致分桶失效，决策请用 ahr999_compressed",
 		}
@@ -1091,7 +1093,7 @@ func (c *Calculator) fillFlow(p *model.IndicatorPanel, snap *model.MarketSnapsho
 			Value:     ratio,
 			Quantile:  displayQuantile(ethBtcRatioQuantile(snap)),
 			Label:     ethBtcLabel(ratio),
-			Source:    "binance",
+			Source:    "binance:ETHUSDT + " + btcDailyHistorySource,
 			UpdatedAt: sourceTimestamp(snap.ETHPriceAsOf, sourceTimestamp(snap.BTCPriceAsOf, ts)),
 			Note:      "ETH/BTC 比率。低位 = 资金避险偏 BTC，高位 = 风险偏好 ETH/Alt",
 		}
@@ -1333,7 +1335,7 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 	p.Technical["rsi_14"] = model.Indicator{
 		Value:     f(rsi14),
 		Label:     rsiLabel(f(rsi14)),
-		Source:    "binance",
+		Source:    btcDailyHistorySource,
 		UpdatedAt: btcTS,
 		Note:      "RSI(14)。<30 超卖，>70 超买",
 	}
@@ -1344,7 +1346,7 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 	p.Technical["macd_histogram"] = model.Indicator{
 		Value:     f(macdHist),
 		Label:     macdLabelFunc(f(macdHist), f(macdPrev)),
-		Source:    "binance",
+		Source:    btcDailyHistorySource,
 		UpdatedAt: btcTS,
 		Note:      "MACD 柱 (12,26,9)。>0 多头动能，<0 空头动能；柱收窄 = 趋势减弱/反转",
 	}
@@ -1356,7 +1358,7 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 	p.Technical["ema_cross"] = model.Indicator{
 		Value:     emaCross * 100,
 		Label:     emaCrossLabel(emaCross),
-		Source:    "binance",
+		Source:    btcDailyHistorySource,
 		UpdatedAt: btcTS,
 		Note:      "(EMA12 - EMA26) / EMA26 %。>0 短期均线在上 = 多头排列，<0 = 空头",
 	}
@@ -1367,13 +1369,13 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 	if ok50 && ok200 {
 		p.Technical["ma_50"] = model.Indicator{
 			Value:     ma50,
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      "50 日简单移动均线",
 		}
 		p.Technical["ma_200"] = model.Indicator{
 			Value:     ma200,
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      "200 日简单移动均线 — 牛熊分界",
 		}
@@ -1381,7 +1383,7 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 		p.Technical["ma_alignment"] = model.Indicator{
 			Value:     (ma50 - ma200) / ma200 * 100,
 			Label:     maAlignLabel(ma50, ma200),
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      "(MA50 - MA200) / MA200 %。>0 = 金叉多头，<0 = 死叉空头",
 		}
@@ -1397,7 +1399,7 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 		p.Technical["bb_position"] = model.Indicator{
 			Value:     bbPos,
 			Label:     bbLabel(bbPos),
-			Source:    "binance",
+			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
 			Note:      fmt.Sprintf("Bollinger (20,2) 位置。0=下轨 %.0f, 1=上轨 %.0f", lower, upper),
 		}
@@ -1408,7 +1410,7 @@ func (c *Calculator) fillTechnical(p *model.IndicatorPanel, snap *model.MarketSn
 	p.Technical["volatility_20d"] = model.Indicator{
 		Value:     cv20,
 		Label:     volLabel(cv20),
-		Source:    "binance",
+		Source:    btcDailyHistorySource,
 		UpdatedAt: btcTS,
 		Note:      "20 日波动率 (CV = std/mean %)。<2% 蓄势，>6% 高波动",
 	}

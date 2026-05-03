@@ -16,7 +16,7 @@ func TestUsableCachedSnapshotValidatesSchemaAndFreshness(t *testing.T) {
 		FetchedAt:             time.Now().UTC().Format(time.RFC3339),
 		BTCPrice:              decimal.NewFromInt(100000),
 		BTCPriceAsOf:          "2026-05-02",
-		BTCPriceHistory:       make([]decimal.Decimal, btcHistoryMinFreshDays),
+		BTCPriceHistory:       make([]decimal.Decimal, btcMinFullHistoryDays(time.Now())),
 	}
 
 	if ok, reason := usableCachedSnapshot(valid); !ok {
@@ -36,9 +36,9 @@ func TestUsableCachedSnapshotValidatesSchemaAndFreshness(t *testing.T) {
 	}
 
 	shortHistory := *valid
-	shortHistory.BTCPriceHistory = make([]decimal.Decimal, btcHistoryMinFreshDays-1)
+	shortHistory.BTCPriceHistory = make([]decimal.Decimal, 3000)
 	if ok, _ := usableCachedSnapshot(&shortHistory); ok {
-		t.Fatal("expected cache with short BTC history to be rejected")
+		t.Fatal("expected cache with Binance-era-only BTC history to be rejected")
 	}
 
 	stale := *valid

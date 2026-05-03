@@ -2,7 +2,8 @@
 //
 // 设计原则：
 //   - 不假设所有指标都可回放；缺数据指标自动 Missing → verdict 跳过 → coverage 下降
-//   - 只用已经有完整历史的源：Binance kline（mayer / sma_200w / RSI 等）+ history.db
+//   - 只用已经有完整历史的源：CoinMetrics PriceUSD 2010+ + Binance 最新日线
+//     （mayer / sma_200w / RSI 等）+ history.db
 //     里实际采集过的 15 个指标 + CoinMetrics 全历史 MVRV/NUPL（需调用方传入）
 //   - Lookahead bias 防御：每个采样点只能看到 ≤ 该日期的数据
 //
@@ -246,12 +247,12 @@ func stanceIsBear(s string) bool {
 
 func stanceOrder(s string) int {
 	order := map[string]int{
-		"强积累倾向":      1,
-		"偏积累倾向":      2,
+		"强积累倾向":     1,
+		"偏积累倾向":     2,
 		"持有观察倾向":    3,
-		"等待":              4,
-		"防守倾向":         5,
-		"高防守倾向":      6,
+		"等待":        4,
+		"防守倾向":      5,
+		"高防守倾向":     6,
 		"分配 / 避险风险": 7,
 	}
 	if v, ok := order[s]; ok {
