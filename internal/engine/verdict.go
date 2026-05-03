@@ -178,7 +178,7 @@ func voteValuation(p *model.IndicatorPanel) DomainVote {
 			bear++
 		}
 	}
-	check("ahr999_compressed",
+	check("ahr999",
 		func(v float64) bool { return v < ctComp08 && v > 0 },
 		func(v float64) bool { return v > ctComp50 })
 	check("mvrv_z_score",
@@ -617,7 +617,7 @@ func computeBottomProximity(p *model.IndicatorPanel) float64 {
 	if ind, ok := p.Cycle["sma_200w_dev"]; ok && ind.IsAvailable() {
 		add(2.0, ind.Value < 0)
 	}
-	if ind, ok := p.Valuation["ahr999_compressed"]; ok && ind.IsAvailable() {
+	if ind, ok := p.Valuation["ahr999"]; ok && ind.IsAvailable() {
 		add(2.0, ind.Value < ctComp045 && ind.Value > 0)
 	}
 	if ind, ok := p.Valuation["mvrv_z_score"]; ok && ind.IsAvailable() {

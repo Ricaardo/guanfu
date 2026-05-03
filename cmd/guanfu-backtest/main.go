@@ -7,8 +7,8 @@
 // 数据源：
 //   - BTC daily kline 从 Binance 公开 API 直拉（可缓存到 ./cache/）
 //   - 仅用 kline 衍生的指标做回测：mayer_multiple, sma_200w_dev, pi_cycle_top_ratio,
-//     rsi_14, macd_histogram, ma_alignment, ahr999 简化版
-//   - 其他指标（ETF / 资金费率 / DVOL / 链上）在历史日期上为 Missing → 自动跳过
+//     rsi_14, macd_histogram, ma_alignment, ahr999 (压缩版, 与生产算法一致)
+//   - 外部指标（ETF / 资金费率 / 宏观 / MVRV 等）通过 --indicators JSON 加载；无文件时 Missing → 自动跳过
 //   - 这是诚实的低覆盖率回测；如果想做更高覆盖率，需要补充 CoinMetrics 历史 MVRV/NUPL 拉取
 //
 // 输出：按 stance 分桶的 hit rate + avg fwd return，以及按 top/bottom proximity
@@ -57,6 +57,7 @@ func main() {
 	allData := flag.Bool("all-data", false, "从 Binance BTCUSDT 可用首日开始回测（2017-08-17）")
 	klineCache := flag.String("kline-cache", "", "BTC kline JSON 缓存路径 (date->close map); 优先于 Binance API")
 	reportMD := flag.String("report-md", "", "写入 Markdown baseline 报告到指定路径")
+	indicatorsFile := flag.String("indicators", "", "外部历史指标 JSON (map[date]map[name]value); 文件格式见下方说明")
 	flag.Parse()
 
 	if *startStr == "" {
@@ -105,14 +106,19 @@ func main() {
 
 	// 索引：date string -> idx
 	idx := map[string]int{}
+	timeDates := make([]time.Time, len(prices))
 	dates := make([]string, len(prices))
 	closes := make([]float64, len(prices))
 	for i, p := range prices {
+		timeDates[i] = p.date
 		dates[i] = p.date.Format("2006-01-02")
 		closes[i] = p.close
 		idx[dates[i]] = i
 	}
 	prov := dateMapPrices(idx2map(idx, closes))
+
+	// 加载外部历史指标（ETF流量 / 资金费率 / 宏观 / MVRV 等）
+	externalIndicators := loadExternalIndicators(*indicatorsFile)
 
 	// 采样
 	var samples []engine.SamplePoint
@@ -122,7 +128,7 @@ func main() {
 		if !ok {
 			continue
 		}
-		panel := buildBacktestPanel(closes[:i+1], dateStr)
+		panel := buildBacktestPanel(closes[:i+1], timeDates[:i+1], dateStr, externalIndicators)
 		v := engine.BuildVerdict(panel)
 		sp := engine.SamplePoint{
 			Date:            dateStr,
@@ -298,7 +304,8 @@ func (d dateMapPrices) PriceAt(date string) (float64, bool) {
 
 // buildBacktestPanel — 用 closes[:n+1] 切片（[0..i]，i 是当前日期索引）
 // 重建一个最小 panel：只填 kline 可派生的指标。其他全设 Missing。
-func buildBacktestPanel(closes []float64, date string) *model.IndicatorPanel {
+// dates 参数为对应时间戳，用于 AHR999 幂律公允值计算。
+func buildBacktestPanel(closes []float64, dates []time.Time, date string, ext map[string]map[string]float64) *model.IndicatorPanel {
 	p := &model.IndicatorPanel{
 		Date:        date,
 		Cycle:       map[string]model.Indicator{},
@@ -342,10 +349,17 @@ func buildBacktestPanel(closes []float64, date string) *model.IndicatorPanel {
 		p.Cycle["pi_cycle_top_ratio"] = model.Indicator{Missing: true, Source: "kline 历史不足 350d"}
 	}
 
-	// 简化 AHR999：用 200d 调和均值代替 DCA + 长期拟合
-	// 这只是 backtest 的代理；生产 AHR 用 calculator 完整版
-	ahr := mayer * mayer / 1.5 // crude shape — proxy
-	p.Valuation["ahr999"] = model.Indicator{Value: ahr, Source: "kline:proxy", Note: "回测简化版，非生产 AHR"}
+	// AHR999 压缩版：调和 DCA + 固定幂律公允值 + pow(raw, 0.75)
+	// 与生产版算法一致（同 internal/engine/calculator.calcCompressedAhr999）
+	idx := len(closes) - 1
+	if cahr, ok := calcCompressedAHR(closes, dates, idx); ok {
+		p.Valuation["ahr999"] = model.Indicator{
+			Value:  cahr,
+			Label:  compressedBucket(cahr),
+			Source: "kline:harmonic+powerlaw+pow075",
+			Note:   "压缩版 sqrt-AHR（回测版与生产算法一致：调和DCA+固定幂律+pow075）",
+		}
+	}
 
 	// RSI(14)
 	if len(closes) >= 15 {
@@ -367,28 +381,89 @@ func buildBacktestPanel(closes []float64, date string) *model.IndicatorPanel {
 		p.Technical["macd_histogram"] = model.Indicator{Value: hist, Source: "binance"}
 	}
 
-	// 把 backtest 不可用的指标显式标 Missing，让 coverage 诚实反映
-	for _, k := range []string{"funding_rate_pct", "oi_to_mc", "fear_greed", "skew_25d_pct", "dvol"} {
-		p.Positioning[k] = model.Indicator{Missing: true, Source: "backtest:not_available"}
-	}
-	for _, k := range []string{"hash_ribbons", "difficulty_change_pct"} {
-		p.Network[k] = model.Indicator{Missing: true, Source: "backtest:not_available"}
-	}
-	for _, k := range []string{"m2_yoy", "real_yield_10y_pct", "dxy_60d_trend_pct"} {
-		p.Macro[k] = model.Indicator{Missing: true, Source: "backtest:not_available"}
-	}
-	for _, k := range []string{"etf_net_flow_30d_usd", "stablecoin_supply_30d_pct"} {
-		p.Flow[k] = model.Indicator{Missing: true, Source: "backtest:not_available"}
-	}
-	for _, k := range []string{"mvrv_z_score", "nupl", "price_to_realized_dev_pct"} {
-		p.Valuation[k] = model.Indicator{Missing: true, Source: "backtest:not_available"}
-	}
-	for _, k := range []string{"btc_spy_corr_30d", "rel_strength_90d_gold"} {
-		p.CrossAsset[k] = model.Indicator{Missing: true, Source: "backtest:not_available"}
+		// 填充外部历史指标（ETF / 资金费率 / 宏观 / MVRV 等）
+		// 通过 --indicators 标志加载 JSON 文件注入。无文件时为 Missing。
+		fillExternalIndicators(p, ext, date)
+
+		return p
 	}
 
-	return p
-}
+	func fillExternalIndicators(p *model.IndicatorPanel, ext map[string]map[string]float64, date string) {
+		type extDef struct {
+			domain string
+			key    string
+		}
+		externals := []extDef{
+			{domain: "positioning", key: "funding_rate_pct"},
+			{domain: "positioning", key: "oi_to_mc"},
+			{domain: "positioning", key: "fear_greed"},
+			{domain: "positioning", key: "skew_25d_pct"},
+			{domain: "positioning", key: "dvol"},
+			{domain: "network", key: "difficulty_change_pct"},
+			{domain: "macro", key: "m2_yoy"},
+			{domain: "macro", key: "real_yield_10y_pct"},
+			{domain: "macro", key: "dxy_60d_trend_pct"},
+			{domain: "flow", key: "etf_net_flow_30d_usd"},
+			{domain: "flow", key: "stablecoin_supply_30d_pct"},
+			{domain: "valuation", key: "mvrv_z_score"},
+			{domain: "valuation", key: "nupl"},
+			{domain: "valuation", key: "price_to_realized_dev_pct"},
+			{domain: "cross_asset", key: "btc_spy_corr_30d"},
+			{domain: "cross_asset", key: "rel_strength_90d_gold"},
+		}
+
+		for _, e := range externals {
+			val, ok := lookupExt(ext, e.key, date)
+			ind := model.Indicator{}
+			if ok {
+				ind = model.Indicator{Value: val, Source: "ext:" + e.key}
+			} else {
+				ind = model.Indicator{Missing: true, Source: "backtest:not_available"}
+			}
+			switch e.domain {
+			case "positioning":
+				p.Positioning[e.key] = ind
+			case "network":
+				p.Network[e.key] = ind
+			case "macro":
+				p.Macro[e.key] = ind
+			case "flow":
+				p.Flow[e.key] = ind
+			case "valuation":
+				p.Valuation[e.key] = ind
+			case "cross_asset":
+				p.CrossAsset[e.key] = ind
+			}
+		}
+	}
+
+	func lookupExt(ext map[string]map[string]float64, key, date string) (float64, bool) {
+		if ext == nil {
+			return 0, false
+		}
+		day, ok := ext[date]
+		if !ok {
+			return 0, false
+		}
+		v, ok := day[key]
+		return v, ok
+	}
+
+	func loadExternalIndicators(path string) map[string]map[string]float64 {
+		if path == "" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			log.Fatalf("load --indicators: %v", err)
+		}
+		var raw map[string]map[string]float64
+		if err := json.Unmarshal(data, &raw); err != nil {
+			log.Fatalf("parse --indicators JSON: %v", err)
+		}
+		log.Printf("loaded %d dates of external indicators from %s", len(raw), path)
+		return raw
+	}
 
 func markAllMissing(p *model.IndicatorPanel) {
 	for _, k := range []string{"mayer_multiple", "sma_200w_dev", "pi_cycle_top_ratio"} {
@@ -864,10 +939,7 @@ func calcCompressedAHR(closes []float64, dates []time.Time, idx int) (float64, b
 }
 
 // compressedThresholds 是原始 AHR999 阈值经过 pow(x, 0.75) 压缩后的等价阈值。
-// 使用这些阈值保证压缩版的分档与原始版数学等价：
-//
-//	0.45^0.75 = 0.549, 0.8^0.75 = 0.846, 1.2^0.75 = 1.147,
-//	2.0^0.75 = 1.682, 5.0^0.75 = 3.344, 20.0^0.75 = 9.457
+// 使用这些阈值保证压缩版的分档与原始版数学等价。
 const (
 	ct045 = 0.549
 	ct08  = 0.846
@@ -1217,7 +1289,6 @@ func build3DScore(prices []pricePoint, startT, endT time.Time, prov engine.Price
 	}
 
 	// Bucket stats by specific signal combination (8 combos = 2^3)
-		// V=valuation cheap, M=below 200d SMA, P=panic drawdown
 		comboLabels := []string{
 			"--- 三项全缺（最贵+不跌+无恐慌）",
 			"V-- 仅估值便宜（便宜+不跌+无恐慌 — 最佳买入！）",

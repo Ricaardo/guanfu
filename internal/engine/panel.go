@@ -487,37 +487,38 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 	btcTS := sourceTimestamp(snap.BTCPriceAsOf, ts)
 	onchainTS := sourceTimestamp(snap.OnchainValuationAsOf, ts)
 
-	// ── AHR999 自适应版（辅助信号）──
-	_, ahrRaw, ahrQ, ok := c.calcAhr999Detailed(snap)
-	if ok && !ahrRaw.IsZero() {
-		raw := f(ahrRaw)
+	// ── AHR999 压缩版（sqrt-AHR: pow(raw, 0.75), 主估值信号）──
+	// 回测验证：压缩后 5.0-20.0 桶 fwd180 -15.4%，显著优于原始 AHR999 的分档效果。
+	// 推荐作为唯一主 AHR 指标，自适应版已降级为分歧检测。
+	_, ahrCompressed, ahrOrig, compOK := c.calcCompressedAhr999(snap)
+	if compOK {
 		p.Valuation["ahr999"] = model.Indicator{
+			Value:     ahrCompressed,
+			Label:     ahrCompressedLabel(ahrCompressed),
+			Source:    "binance + power-law (compressed)",
+			UpdatedAt: btcTS,
+			Note:      fmt.Sprintf("sqrt-AHR = (原始 AHR999)^0.75。回测：<0.45→+86.5%%/88%%胜率, 2.0-5.0→-15.4%%/20%%胜率, >=20.0→0%%胜率。原始值: %.3f", ahrOrig),
+		}
+	}
+
+	// ── AHR999 自适应版（分歧检测用，不展示分桶）──
+	_, ahrAdaptiveRaw, ahrQ, adaptiveOK := c.calcAhr999Detailed(snap)
+	if adaptiveOK && !ahrAdaptiveRaw.IsZero() {
+		raw := f(ahrAdaptiveRaw)
+		p.Valuation["ahr999_adaptive"] = model.Indicator{
 			Value:     raw,
 			Quantile:  displayQuantile(ahrQ),
 			Label:     ahrLabel(raw),
 			Source:    "binance + adaptive log-log fit",
 			UpdatedAt: btcTS,
-			Note:      "九神 AHR999（已修正：调和均值 DCA + Huber 抗 outlier + 动态拟合）",
-		}
-	}
-
-	// ── AHR999 压缩版（sqrt-AHR: pow(raw, 0.75), 固定公允值）──
-	// 回测验证：压缩后 5.0-20.0 桶从假阳性 (+47%) 翻转为真实卖出信号 (-35%)
-	_, ahrCompressed, ahrOrig, compOK := c.calcCompressedAhr999(snap)
-	if compOK {
-		p.Valuation["ahr999_compressed"] = model.Indicator{
-			Value:     ahrCompressed,
-			Label:     ahrCompressedLabel(ahrCompressed),
-			Source:    "binance + fixed power-law (compressed)",
-			UpdatedAt: btcTS,
-			Note:      fmt.Sprintf("sqrt-AHR = (原始 AHR999)^0.75。压缩凸性偏差，5.0+ 为真泡沫信号。原始值: %.3f", ahrOrig),
+			Note:      "自适应 AHR（降级为分歧检测）。回测显示极端牛市后 fair value 上移导致分桶失效。仅与压缩版对比时启用分歧检测",
 		}
 	}
 
 	// ── AHR999 Divergence Detector ──
 	// 当自适应版百分位与固定公式方向打架时，是市场转向预警。
 	// 回测：原始贵 + 自适应百分位低 → fwd180 -34%~-53%, 0% 胜率。
-	if ok && compOK && ahrQ >= 0 {
+	if adaptiveOK && compOK && ahrQ >= 0 {
 		divergence := detectAhrDivergence(ahrOrig, ahrQ)
 		if divergence != "" {
 			p.Valuation["ahr999_divergence"] = model.Indicator{
@@ -526,6 +527,38 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 				UpdatedAt: btcTS,
 				Note:      fmt.Sprintf("原始 %.3f vs 自适应 q=%.0f%%。分歧 = 转向预警", ahrOrig, ahrQ*100),
 			}
+		}
+	}
+
+	// ── 三维打分 V/M/P（估值 × 动量 × 恐慌）──
+	if d3score, d3val, d3mayer, d3dd, d3ok := c.calc3DScore(snap); d3ok {
+		p.Valuation["d3_score"] = model.Indicator{
+			Value:     float64(d3score),
+			Label:     d3Label(d3score, d3val, d3mayer, d3dd),
+			Source:    "derived",
+			UpdatedAt: btcTS,
+			Note:      "三维打分 0-3: V(price/fair<0.8) + M(mayer<1.0) + P(90d dd<-20%)",
+		}
+		p.Valuation["d3_val_ratio"] = model.Indicator{
+			Value:     d3val,
+			Label:     d3ValLabel(d3val),
+			Source:    "derived",
+			UpdatedAt: btcTS,
+			Note:      "V 维度: price / power-law fair value。<0.8=估值便宜（+1分）",
+		}
+		p.Valuation["d3_momentum"] = model.Indicator{
+			Value:     d3mayer,
+			Label:     d3MayerLabel(d3mayer),
+			Source:    "derived",
+			UpdatedAt: btcTS,
+			Note:      "M 维度: Mayer Multiple = price / 200d SMA。<1.0=均线下方（+1分）",
+		}
+		p.Valuation["d3_panic"] = model.Indicator{
+			Value:     d3dd * 100,
+			Label:     d3PanicLabel(d3dd),
+			Source:    "derived",
+			UpdatedAt: btcTS,
+			Note:      "P 维度: 90d drawdown %。< -20%=恐慌状态（+1分）",
 		}
 	}
 
@@ -2137,3 +2170,50 @@ func yieldCurveLabel(bps float64) string {
 
 // 防止 mathutil 没用到的编译警告
 var _ = mathutil.CalculateMA
+
+// ── 3D Score 辅助标签 ──
+
+func d3ValLabel(v float64) string {
+	switch {
+	case v < 0.3:
+		return "极端便宜"
+	case v < 0.5:
+		return "很便宜"
+	case v < 0.8:
+		return "偏便宜"
+	case v < 1.5:
+		return "合理偏高"
+	case v < 3.0:
+		return "偏贵"
+	default:
+		return "昂贵"
+	}
+}
+
+func d3MayerLabel(m float64) string {
+	switch {
+	case m < 0.6:
+		return "深度低估（极端超卖）"
+	case m < 1.0:
+		return "均线下方（偏弱）"
+	case m < 1.5:
+		return "均线上方（偏强）"
+	case m < 2.4:
+		return "偏高（超买风险）"
+	default:
+		return "极端高位（顶部风险）"
+	}
+}
+
+func d3PanicLabel(dd float64) string {
+	switch {
+	case dd < -0.40:
+		return "深度恐慌（>40%回撤）"
+	case dd < -0.20:
+		return "恐慌状态（>20%回撤）"
+	case dd < -0.10:
+		return "小幅回调（>10%回撤）"
+	default:
+		return "无恐慌（横盘或上涨）"
+	}
+}

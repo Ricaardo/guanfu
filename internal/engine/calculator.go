@@ -71,12 +71,20 @@ func (c *Calculator) Calculate(snap *model.MarketSnapshot) *model.ScoreResult {
 	rsiScore := c.calcDualRSI(snap)
 	details["rsi_score"] = rsiScore
 
-	// 3.2 Ahr999（连续化）
-	ahr999, ahr999Raw := c.calcAhr999(snap)
-	details["ahr999_score"] = ahr999
-	details["ahr999_raw"] = ahr999Raw
+	// 3.2 Ahr999（压缩版 sqrt-AHR，主用）
+	// 回测验证：压缩版 5.0-20.0 桶 fwd180 -15.4%（原始版 >=2.0 桶 -13.9%）
+	compScore, compRaw, _, compOK := c.calcCompressedAhr999(snap)
+	if compOK {
+		details["ahr999_score"] = compScore
+		details["ahr999_raw"] = decimal.NewFromFloat(compRaw)
+	} else {
+		// 回退到自适应版（数据不足时）
+		ahr999, ahr999Raw := c.calcAhr999(snap)
+		details["ahr999_score"] = ahr999
+		details["ahr999_raw"] = ahr999Raw
+	}
 
-	valuationScore := rsiScore.Add(ahr999).Div(decimal.NewFromInt(2))
+	valuationScore := rsiScore.Add(details["ahr999_score"]).Div(decimal.NewFromInt(2))
 
 	// --- 4. Structure (结构层) - 20% (优化：降低权重) ---
 	// 4.1 ETH/BTC 比率（结合趋势方向）
@@ -618,6 +626,83 @@ func ahrCompressedLabel(v float64) string {
 		return "泡沫（大幅减仓）"
 	default:
 		return "极端泡沫（清仓）"
+	}
+}
+
+// calc3DScore 计算三维打分（估值 × 动量 × 恐慌）。
+// 回测验证：V--（仅估值便宜）fwd180 +100.9%/95%胜率
+// -M-（仅动量/价格低于200d SMA）fwd180 -33.4%/11%胜率 = 接飞刀信号。
+func (c *Calculator) calc3DScore(snap *model.MarketSnapshot) (score int, val float64, mayer float64, dd float64, ok bool) {
+	price, _ := snap.BTCPrice.Float64()
+	if price <= 0 || len(snap.BTCPriceHistory) < 200 {
+		return 0, 0, 0, 0, false
+	}
+
+	genesis := time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC)
+	days := snap.Date.Sub(genesis).Hours() / 24.0
+	if days > 0 {
+		fv := math.Pow(10, ahrLegacyLogSlope*math.Log10(days)+ahrLegacyLogIntercept)
+		if fv > 0 {
+			val = price / fv
+		}
+	}
+
+	sma200 := 0.0
+	for i := len(snap.BTCPriceHistory) - 200; i < len(snap.BTCPriceHistory); i++ {
+		v, _ := snap.BTCPriceHistory[i].Float64()
+		sma200 += v
+	}
+	if sma200 > 0 {
+		mayer = price / (sma200 / 200)
+	}
+
+	if len(snap.BTCPriceHistory) >= 90 {
+		start := len(snap.BTCPriceHistory) - 90
+		max90 := 0.0
+		for i := start; i < len(snap.BTCPriceHistory); i++ {
+			v, _ := snap.BTCPriceHistory[i].Float64()
+			if v > max90 {
+				max90 = v
+			}
+		}
+		if max90 > 0 {
+			dd = (price - max90) / max90
+		}
+	}
+
+	if val > 0 && val < 0.8 {
+		score++
+	}
+	if mayer > 0 && mayer < 1.0 {
+		score++
+	}
+	if dd < -0.20 {
+		score++
+	}
+	return score, val, mayer, dd, true
+}
+
+func d3Label(score int, val, mayer, dd float64) string {
+	hasV := val > 0 && val < 0.8
+	hasM := mayer > 0 && mayer < 1.0
+	hasP := dd < -0.20
+	switch {
+	case hasV && hasM && hasP:
+		return "VMP 三项全满（极端底部）"
+	case hasV && !hasM && hasP:
+		return "V-P 便宜+不跌+恐慌（恐慌底）"
+	case !hasV && hasM && hasP:
+		return "-MP 偏贵+跌+恐慌（熊市反弹陷阱）"
+	case hasV && hasM && !hasP:
+		return "VM- 估值便宜+动量弱（熊市中继）"
+	case hasV && !hasM && !hasP:
+		return "V-- 仅估值便宜（最佳买入时机）"
+	case !hasV && hasM && !hasP:
+		return "-M- 仅动量（偏贵+跌，接飞刀信号）"
+	case !hasV && !hasM && hasP:
+		return "--P 仅恐慌（估值合理+恐慌，假底信号）"
+	default:
+		return "--- 三项全缺（估值偏高+不跌+无恐慌）"
 	}
 }
 
