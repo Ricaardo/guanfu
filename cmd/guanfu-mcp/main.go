@@ -4,13 +4,15 @@
 // 直接调用 guanfu 引擎获取 BTC 盘面数据，无需 Bash 权限。
 //
 // 提供的 Tools:
-//   get_btc_panel     — 完整 8 域盘面 (JSON)
-//   get_domain        — 单个域 (cycle/valuation/network/...)
-//   get_indicator     — 单个指标 (ahr999, hash_ribbons, ...)
+//   get_btc_panel       — 完整 8 域盘面 (JSON)
+//   get_btc_verdict     — 结构化多域读盘 (JSON)
+//   get_domain          — 单个域 (cycle/valuation/network/...)
+//   get_indicator       — 单个指标 (ahr999, hash_ribbons, ...)
 //
 // 提供的 Resources:
 //   guanfu://knowledge/skill.md — SKILL.md 知识库
 //   guanfu://panel/latest       — 缓存的最新盘面
+//   guanfu://verdict/latest     — 缓存盘面的结构化读盘
 //
 // 部署: 在 claude_desktop_config.json 中添加:
 //
@@ -80,11 +82,22 @@ var tools = json.RawMessage(`
 [
   {
     "name": "get_btc_panel",
-    "description": "获取 BTC 完整 8 域盘面（42 个指标）。包含周期/估值/网络/杠杆/宏观/资金流/技术/跨资产。每个指标含原始值、历史分位(q)、解读标签、数据源。",
+    "description": "获取 BTC 完整 8 域 40+ 指标盘面。包含周期/估值/网络/杠杆/宏观/资金流/技术/跨资产。每个指标含原始值、历史分位(q)、解读标签、数据源。",
     "inputSchema": {
       "type": "object",
       "properties": {
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
+      }
+    }
+  },
+  {
+    "name": "get_btc_verdict",
+    "description": "获取 BTC 结构化多域读盘。基于完整盘面输出域级一致性、覆盖率、风险状态、顶/底接近度、证据和失效条件；不输出交易指令或仓位指令。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
+        "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
     }
   },
@@ -193,7 +206,8 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 	case "resources/list":
 		return ok(req.ID, map[string]any{"resources": json.RawMessage(`[
 			{"uri":"guanfu://knowledge/skill.md","name":"SKILL.md","mimeType":"text/markdown","description":"观复 BTC 投资盘面解读知识库"},
-			{"uri":"guanfu://panel/latest","name":"最新盘面","mimeType":"application/json","description":"缓存的最新完整盘面 JSON"}
+			{"uri":"guanfu://panel/latest","name":"最新盘面","mimeType":"application/json","description":"缓存的最新完整盘面 JSON"},
+			{"uri":"guanfu://verdict/latest","name":"最新结构化读盘","mimeType":"application/json","description":"缓存盘面的 verdict JSON"}
 		]`)})
 
 	case "resources/read":
@@ -207,7 +221,11 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 		if rpcErr != nil {
 			return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: rpcErr}
 		}
-		return ok(req.ID, map[string]any{"contents": []map[string]any{{"uri": params.URI, "mimeType": "text/plain", "text": content}}})
+		return ok(req.ID, map[string]any{"contents": []map[string]any{{
+			"uri":      params.URI,
+			"mimeType": resourceMimeType(params.URI),
+			"text":     content,
+		}}})
 
 	default:
 		return errResp(req.ID, -32601, "unknown method: "+req.Method)
@@ -223,6 +241,22 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		}
 		panel := getOrFetchPanel(timeout)
 		b, _ := json.MarshalIndent(panel, "", "  ")
+		return string(b), nil
+
+	case "get_btc_verdict":
+		var p struct {
+			TimeoutSeconds int  `json:"timeout_seconds,omitempty"`
+			IncludePanel   bool `json:"include_panel,omitempty"`
+		}
+		if rpcErr := decodeArgs(args, &p); rpcErr != nil {
+			return "", rpcErr
+		}
+		timeout, rpcErr := timeoutFromSeconds(p.TimeoutSeconds)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		panel := getOrFetchPanel(timeout)
+		b, _ := json.MarshalIndent(buildVerdictPayload(panel, p.IncludePanel), "", "  ")
 		return string(b), nil
 
 	case "get_domain":
@@ -285,8 +319,37 @@ func handleResourceRead(uri string) (string, *rpcError) {
 		panel := getOrFetchPanel(defaultPanelTimeout)
 		b, _ := json.MarshalIndent(panel, "", "  ")
 		return string(b), nil
+	case "guanfu://verdict/latest":
+		panel := getOrFetchPanel(defaultPanelTimeout)
+		b, _ := json.MarshalIndent(buildVerdictPayload(panel, false), "", "  ")
+		return string(b), nil
 	default:
 		return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
+	}
+}
+
+func resourceMimeType(uri string) string {
+	switch uri {
+	case "guanfu://knowledge/skill.md":
+		return "text/markdown"
+	case "guanfu://panel/latest", "guanfu://verdict/latest":
+		return "application/json"
+	default:
+		return "text/plain"
+	}
+}
+
+func buildVerdictPayload(panel *model.IndicatorPanel, includePanel bool) any {
+	verdict := engine.BuildVerdict(panel)
+	if !includePanel {
+		return verdict
+	}
+	return struct {
+		Verdict *engine.Verdict       `json:"verdict"`
+		Panel   *model.IndicatorPanel `json:"panel"`
+	}{
+		Verdict: verdict,
+		Panel:   panel,
 	}
 }
 
