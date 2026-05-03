@@ -91,6 +91,18 @@ type MarketSnapshot struct {
 	AltcoinSeasonIndex decimal.Decimal // 山寨季指数 (0-100)
 	FearGreedAsOf      string
 
+	// Deribit 期权 (v4 新增) — DVOL + 25-delta skew
+	DVOL                 decimal.Decimal // 当前 BTC IV 指数
+	DVOL60dTrendPct      decimal.Decimal // (now / 60d 前 - 1) × 100
+	DVOLAvailable        bool
+	DVOLAsOf             string
+	DVOLHistory          []decimal.Decimal // 用于历史分位
+
+	Skew25dNearTermPct   decimal.Decimal // IV(25Δ put) - IV(25Δ call)，pp
+	SkewAvailable        bool
+	SkewAsOf             string
+	SkewExpiry           string
+
 	// Cross-asset prices (v3 新增)
 	GoldPriceUSD  decimal.Decimal // 黄金现货 USD/oz (Binance PAXG)
 	QQQPrice      decimal.Decimal // QQQ ETF
@@ -140,6 +152,14 @@ type CoinSnapshot struct {
 //   - cross_asset: 黄金 / QQQ / SPY / UUP / VIXY 相对强弱
 
 // Indicator 单个指标项
+//
+// Missing=true 时该指标视为"缺数据 / placeholder"——verdict 引擎、域级一致性
+// 计票、簇级去重必须自动跳过，不影响其他指标。回测同理：缺数据点不计入命中率。
+//
+// 默认 Missing=false（即 available）。这样既有指标构造无需改动；只在数据源失败
+// 或值是哨兵时显式设 Missing=true。
+//
+// IsAvailable() 是首选的查询接口（额外做 NaN/Inf 健全性检查）。
 type Indicator struct {
 	Value     float64 `json:"value"`                // 原始数值（无 sigmoid / scaling）
 	Quantile  float64 `json:"q,omitempty"`          // 历史分位 [0,1]，越高表示当前值在历史上越高
@@ -147,6 +167,22 @@ type Indicator struct {
 	Source    string  `json:"source,omitempty"`     // 数据源（"binance", "coinmetrics", "mempool.space", ...）
 	UpdatedAt string  `json:"updated_at,omitempty"` // 数据更新时间（RFC3339）
 	Note      string  `json:"note,omitempty"`       // 计算备注（如 "200d MA 历史不足，使用 100d"）
+	Missing   bool    `json:"missing,omitempty"`    // true = 数据缺失 / placeholder，verdict / 回测应跳过
+}
+
+// IsAvailable 判断指标是否可参与 verdict / 回测。
+// false 表示：被显式标注 missing，或值是 NaN/Inf。零值不视为缺失（可能是真值）。
+func (i Indicator) IsAvailable() bool {
+	if i.Missing {
+		return false
+	}
+	if i.Value != i.Value { // NaN
+		return false
+	}
+	if i.Value > 1e308 || i.Value < -1e308 { // Inf
+		return false
+	}
+	return true
 }
 
 // SnapshotData 当前快照基础数据

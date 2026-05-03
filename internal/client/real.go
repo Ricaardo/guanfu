@@ -265,6 +265,33 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 		}
 	}()
 
+	// 12.5 Deribit 期权 (DVOL + 25Δ skew). Best-effort, never errors.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		opt := FetchBTCDeribitOptions(ctx)
+		snap.DVOLAvailable = opt.DVOLAvailable
+		if opt.DVOLAvailable {
+			snap.DVOL = decimal.NewFromFloat(opt.DVOL)
+			snap.DVOL60dTrendPct = decimal.NewFromFloat(opt.DVOL60dTrendPct)
+			snap.DVOLAsOf = opt.DVOLAsOf.Format("2006-01-02")
+			snap.DVOLHistory = make([]decimal.Decimal, len(opt.DVOLHistory))
+			for i, v := range opt.DVOLHistory {
+				snap.DVOLHistory[i] = decimal.NewFromFloat(v)
+			}
+		}
+		snap.SkewAvailable = opt.SkewAvailable
+		if opt.SkewAvailable {
+			snap.Skew25dNearTermPct = decimal.NewFromFloat(opt.Skew25dNearTermPct)
+			snap.SkewAsOf = opt.SkewAsOf.Format("2006-01-02")
+			snap.SkewExpiry = opt.SkewExpiry
+		}
+		for _, w := range opt.Warnings {
+			log.Printf("Deribit warning: %s", w)
+			addWarning("deribit warning: %s", w)
+		}
+	}()
+
 	// 12. CoinMetrics on-chain valuation (MVRV / NUPL / MVRV Z)
 	wg.Add(1)
 	go func() {

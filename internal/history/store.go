@@ -213,6 +213,54 @@ func (s *Store) SampleCountAsOf(key string, lookbackDays int, asOfDate string) (
 	return n, err
 }
 
+// DistinctDates 返回 [from, to] 区间内有任何采集记录的日期升序列表。用于回测。
+// from / to 都是 "YYYY-MM-DD" 格式（包含端点）。
+func (s *Store) DistinctDates(from, to string) ([]string, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT DISTINCT date FROM daily_metrics
+		WHERE date >= date(?) AND date <= date(?)
+		ORDER BY date ASC
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// AllValuesAt returns all (key, value) pairs recorded on the given date.
+func (s *Store) AllValuesAt(date string) (map[string]float64, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT key, value FROM daily_metrics WHERE date = date(?)`, date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]float64{}
+	for rows.Next() {
+		var k string
+		var v float64
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
 func normalizeAsOfDate(asOfDate string) string {
 	if asOfDate == "" {
 		return time.Now().UTC().Format("2006-01-02")

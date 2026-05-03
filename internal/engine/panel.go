@@ -330,17 +330,52 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 			UpdatedAt: onchainTS,
 			Note:      "NUPL = (market cap - realized cap) / market cap = 1 - 1/MVRV",
 		}
+
+		// realized_price + price/realized 偏离 — 链上持币者平均成本基础
+		// realized_price = realized_cap / supply，等价于 btc_price / mvrv（数学恒等）
+		btc := f(snap.BTCPrice)
+		if mvrv > 0 && btc > 0 {
+			rp := btc / mvrv
+			p.Valuation["realized_price"] = model.Indicator{
+				Value:     rp,
+				Source:    "coinmetrics:derived",
+				UpdatedAt: onchainTS,
+				Note:      "realized_price = realized_cap / supply = btc_price / mvrv。链上持币者平均成本",
+			}
+			devPct := (btc/rp - 1.0) * 100
+			p.Valuation["price_to_realized_dev_pct"] = model.Indicator{
+				Value:     devPct,
+				Label:     priceToRealizedLabel(devPct),
+				Source:    "coinmetrics:derived",
+				UpdatedAt: onchainTS,
+				Note:      "(price - realized_price) / realized_price × 100。<0 = 持币者整体亏损 = 历史级抄底区（仅 2015/2018-12/2020-03/2022-11 出现）",
+			}
+		}
 	} else {
-		addStaleWarning(p, "coinmetrics valuation unavailable: MVRV/NUPL/MVRV Z shown as placeholders")
+		addStaleWarning(p, "coinmetrics valuation unavailable: MVRV/NUPL/MVRV Z/realized_price shown as placeholders")
 		p.Valuation["mvrv_z_score"] = model.Indicator{
+			Missing:   true,
 			Source:    "coinmetrics (待接入)",
 			UpdatedAt: ts,
 			Note:      "需要 CoinMetrics CapMVRVCur + CapMrktCurUSD；若有 COINMETRICS_API_KEY 可尝试直接 CapRealUSD",
 		}
 		p.Valuation["nupl"] = model.Indicator{
+			Missing:   true,
 			Source:    "coinmetrics (待接入)",
 			UpdatedAt: ts,
 			Note:      "NUPL = (market cap - realized cap) / market cap；无数据时不估算",
+		}
+		p.Valuation["realized_price"] = model.Indicator{
+			Missing:   true,
+			Source:    "coinmetrics (待接入)",
+			UpdatedAt: ts,
+			Note:      "realized_price = realized_cap / supply；需 CoinMetrics 数据",
+		}
+		p.Valuation["price_to_realized_dev_pct"] = model.Indicator{
+			Missing:   true,
+			Source:    "coinmetrics (待接入)",
+			UpdatedAt: ts,
+			Note:      "需 realized_price 数据",
 		}
 	}
 }
@@ -451,6 +486,66 @@ func (c *Calculator) fillPositioning(p *model.IndicatorPanel, snap *model.Market
 			Source:    "computed:Binance Top50 vs BTC 90d",
 			UpdatedAt: ts,
 			Note:      "Top 50 中 90 日跑赢 BTC 的占比 (0-100)。>75=山寨季, <25=BTC 季。基于实时 Binance kline 计算",
+		}
+	}
+
+	// Deribit DVOL — 前瞻性 IV 指数（BTC 版 VIX）
+	if snap.DVOLAvailable {
+		dvol := f(snap.DVOL)
+		dvolTS := sourceTimestamp(snap.DVOLAsOf, ts)
+		// 历史分位（直接从 history 切片算）
+		var q float64
+		if n := len(snap.DVOLHistory); n >= 30 {
+			vals := make([]float64, 0, n)
+			for _, v := range snap.DVOLHistory {
+				vals = append(vals, f(v))
+			}
+			q = quantileRank(vals, dvol)
+		}
+		p.Positioning["dvol"] = model.Indicator{
+			Value:     dvol,
+			Quantile:  displayQuantile(q),
+			Label:     dvolLabel(dvol),
+			Source:    "deribit:DVOL",
+			UpdatedAt: dvolTS,
+			Note:      "Deribit BTC IV 指数（30 日年化预期波动率）。BTC 版 VIX。<40 平静、>80 高度恐慌",
+		}
+		p.Positioning["dvol_60d_trend_pct"] = model.Indicator{
+			Value:     f(snap.DVOL60dTrendPct),
+			Source:    "deribit:DVOL",
+			UpdatedAt: dvolTS,
+			Note:      "DVOL 60 日变化 %。短期内大幅升 = 行情前波动率重定价",
+		}
+	} else {
+		p.Positioning["dvol"] = model.Indicator{
+			Missing:   true,
+			Source:    "deribit (未拉到)",
+			UpdatedAt: ts,
+			Note:      "Deribit DVOL 拉取失败，本次 verdict 引擎跳过此指标",
+		}
+		p.Positioning["dvol_60d_trend_pct"] = model.Indicator{
+			Missing:   true,
+			Source:    "deribit (未拉到)",
+			UpdatedAt: ts,
+		}
+	}
+
+	// Deribit 25-delta skew — IV(25Δ put) - IV(25Δ call)
+	if snap.SkewAvailable {
+		skew := f(snap.Skew25dNearTermPct)
+		p.Positioning["skew_25d_pct"] = model.Indicator{
+			Value:     skew,
+			Label:     skew25Label(skew),
+			Source:    "deribit:options",
+			UpdatedAt: sourceTimestamp(snap.SkewAsOf, ts),
+			Note:      fmt.Sprintf("到期 %s。IV(25Δ put) - IV(25Δ call) (pp)。>0 = 下行对冲需求 / 恐慌；<0 = 上行追价 / 贪婪", snap.SkewExpiry),
+		}
+	} else {
+		p.Positioning["skew_25d_pct"] = model.Indicator{
+			Missing:   true,
+			Source:    "deribit (未拉到)",
+			UpdatedAt: ts,
+			Note:      "Deribit 期权 skew 拉取失败，本次 verdict 引擎跳过此指标",
 		}
 	}
 }
@@ -1047,16 +1142,7 @@ func (c *Calculator) fillCrossAsset(p *model.IndicatorPanel, snap *model.MarketS
 			Note:      "BTC vs Gold 30 日对数收益率 Pearson 相关系数",
 		}
 	}
-	if len(snap.QQQHistory) >= lookback && len(snap.BTCPriceHistory) >= lookback {
-		corr := rollingCorrelation(snap.BTCPriceHistory, snap.QQQHistory, lookback)
-		p.CrossAsset["btc_qqq_corr_30d"] = model.Indicator{
-			Value:     corr,
-			Label:     corrLabel(corr),
-			Source:    "computed",
-			UpdatedAt: ts,
-			Note:      "BTC vs QQQ 30 日对数收益率 Pearson 相关系数",
-		}
-	}
+	// btc_qqq_corr_30d 已去重：SPY 与 QQQ 日收益相关 ~0.85-0.90，留 SPY 作为唯一股市相关性代理
 	if len(snap.SPYHistory) >= lookback && len(snap.BTCPriceHistory) >= lookback {
 		corr := rollingCorrelation(snap.BTCPriceHistory, snap.SPYHistory, lookback)
 		p.CrossAsset["btc_spy_corr_30d"] = model.Indicator{
@@ -1082,16 +1168,7 @@ func (c *Calculator) fillCrossAsset(p *model.IndicatorPanel, snap *model.MarketS
 				Note:      fmt.Sprintf("BTC 90d %.1f%% vs Gold 90d %.1f%%", btcRet, goldRet),
 			}
 		}
-		if len(snap.QQQHistory) > period && !snap.QQQPrice.IsZero() {
-			qqqRet := (f(snap.QQQPrice) - f(snap.QQQHistory[period])) / f(snap.QQQHistory[period]) * 100
-			p.CrossAsset["rel_strength_90d_qqq"] = model.Indicator{
-				Value:     btcRet - qqqRet,
-				Label:     relStrengthLabel(btcRet - qqqRet),
-				Source:    "computed",
-				UpdatedAt: ts,
-				Note:      fmt.Sprintf("BTC 90d %.1f%% vs QQQ 90d %.1f%%", btcRet, qqqRet),
-			}
-		}
+		// rel_strength_90d_qqq 已去重：与 SPY 信号几乎等同，留 gold 作为唯一跨资产相对强弱
 	}
 }
 
@@ -1236,6 +1313,55 @@ func nuplLabel(v float64) string {
 		return "belief"
 	default:
 		return "euphoria"
+	}
+}
+
+// dvolLabel — DVOL 是 BTC IV 指数，年化 %
+func dvolLabel(d float64) string {
+	switch {
+	case d < 30:
+		return "极平静（市场自满 / 警惕黑天鹅）"
+	case d < 45:
+		return "平静"
+	case d < 60:
+		return "正常"
+	case d < 80:
+		return "偏高（紧张）"
+	default:
+		return "高度恐慌"
+	}
+}
+
+// skew25Label — 25-delta skew (pp)。>0 = put 比 call 贵 = 下行对冲贵 = 恐慌
+func skew25Label(s float64) string {
+	switch {
+	case s < -3:
+		return "极度看涨偏 (call 贵 — 顶部区典型)"
+	case s < 0:
+		return "偏看涨"
+	case s < 3:
+		return "中性"
+	case s < 8:
+		return "偏看跌（防守需求）"
+	default:
+		return "极度看跌偏 (put 贵 — 底部前夕典型)"
+	}
+}
+
+// priceToRealizedLabel — 价格相对持币者平均成本的偏离
+// <0 历史抄底；0-50 低估；50-150 中性；>150 顶部区
+func priceToRealizedLabel(devPct float64) string {
+	switch {
+	case devPct < 0:
+		return "持币者整体亏损（历史级抄底）"
+	case devPct < 50:
+		return "低估"
+	case devPct < 150:
+		return "中性"
+	case devPct < 300:
+		return "高估"
+	default:
+		return "极端高估（顶部区）"
 	}
 }
 

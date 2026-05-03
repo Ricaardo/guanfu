@@ -53,6 +53,8 @@ var domainNames = []struct {
 func main() {
 	jsonOut := flag.Bool("json", false, "JSON 输出")
 	pretty := flag.Bool("pretty", false, "pretty JSON 输出")
+	verdict := flag.Bool("verdict", false, "输出综合判断（牛熊/顶底/读盘标签）")
+	verdictOnly := flag.Bool("verdict-only", false, "仅输出 verdict（隐藏指标盘）")
 	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow/technical/cross_asset")
 	timeout := flag.Duration("timeout", 90*time.Second, "拉数据超时")
 	halfLife := flag.Int("halflife", 0, "AHR 拟合半衰期（天，默认 1460）")
@@ -100,11 +102,24 @@ func main() {
 	}
 	panel := calc.BuildPanel(snap)
 
+	var v *engine.Verdict
+	if *verdict || *verdictOnly {
+		v = engine.BuildVerdict(panel)
+	}
+
 	// JSON 输出
 	if *jsonOut || *pretty {
-		out := panel
+		var out interface{} = panel
 		if *domainFilter != "" {
 			out = filterDomain(panel, *domainFilter)
+		}
+		if *verdictOnly {
+			out = v
+		} else if *verdict {
+			out = struct {
+				Panel   *model.IndicatorPanel `json:"panel"`
+				Verdict *engine.Verdict       `json:"verdict"`
+			}{Panel: panel, Verdict: v}
 		}
 		var b []byte
 		if *pretty {
@@ -117,7 +132,73 @@ func main() {
 	}
 
 	// 人类盘面
-	printHumanPanel(panel, *domainFilter, *plain || *noEmoji)
+	if !*verdictOnly {
+		printHumanPanel(panel, *domainFilter, *plain || *noEmoji)
+	}
+	if v != nil {
+		printHumanVerdict(v, *plain || *noEmoji)
+	}
+}
+
+func printHumanVerdict(v *engine.Verdict, plain bool) {
+	bar := "═══════════════════════════════════════════════════════════"
+	if plain {
+		bar = "==========================================================="
+	}
+	fmt.Println()
+	fmt.Println(bar)
+	if plain {
+		fmt.Printf("VERDICT  %s\n", v.Date)
+	} else {
+		fmt.Printf("⚖  读盘结论  %s\n", v.Date)
+	}
+	fmt.Println(bar)
+	fmt.Printf("  Stance       : %s\n", v.Stance)
+	fmt.Printf("  Regime       : %s\n", v.Regime)
+	fmt.Printf("  净方向       : %+d / 8\n", v.NetDirection)
+	fmt.Printf("  覆盖率       : %.0f%%   置信度：%s\n", v.Coverage*100, v.Confidence)
+	fmt.Printf("  顶部接近度   : %.0f%%\n", v.TopProximity*100)
+	fmt.Printf("  底部接近度   : %.0f%%\n", v.BottomProximity*100)
+	fmt.Println()
+	fmt.Println("  域级一致性：")
+	for _, d := range v.Domains {
+		fmt.Printf("    %-12s %+d  bull=%d bear=%d skip=%d  cov=%.0f%%\n",
+			d.Domain, d.Vote, len(d.Bullish), len(d.Bearish), len(d.Skipped), d.Coverage*100)
+	}
+	if len(v.ClusterNotes) > 0 {
+		fmt.Println()
+		fmt.Println("  簇级去重：")
+		for _, n := range v.ClusterNotes {
+			fmt.Printf("    · %s\n", n)
+		}
+	}
+	if len(v.Reasons) > 0 {
+		fmt.Println()
+		fmt.Println("  支持当前结论 TOP 3：")
+		for _, r := range v.Reasons {
+			fmt.Printf("    + %s\n", r)
+		}
+	}
+	if len(v.CounterEvidence) > 0 {
+		fmt.Println()
+		fmt.Println("  反证 TOP 2：")
+		for _, c := range v.CounterEvidence {
+			fmt.Printf("    - %s\n", c)
+		}
+	}
+	if len(v.KillCriteria) > 0 {
+		fmt.Println()
+		fmt.Println("  失效条件：")
+		for _, k := range v.KillCriteria {
+			fmt.Printf("    ⚠ %s\n", k)
+		}
+	}
+	if v.MissingNote != "" {
+		fmt.Println()
+		fmt.Printf("  数据缺失提示：%s\n", v.MissingNote)
+	}
+	fmt.Println(bar)
+	fmt.Println()
 }
 
 func printHumanPanel(p *model.IndicatorPanel, filter string, plain bool) {
