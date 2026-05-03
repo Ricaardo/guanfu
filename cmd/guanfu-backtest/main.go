@@ -12,7 +12,7 @@
 //   - 这是诚实的低覆盖率回测；如果想做更高覆盖率，需要补充 CoinMetrics 历史 MVRV/NUPL 拉取
 //
 // 输出：按 stance 分桶的 hit rate + avg fwd return，以及按 top/bottom proximity
-// 分桶的预测力验证。
+// 分桶的预测力验证。--report-md 会额外输出原版 / 修改版 AHR999 的全量数据对比。
 
 package main
 
@@ -27,10 +27,24 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Ricaardo/guanfu/internal/engine"
 	"github.com/Ricaardo/guanfu/internal/model"
+)
+
+const (
+	binanceBTCUSDTStart     = "2017-08-17"
+	ahrDCAWindowDays        = 200
+	ahrFitWindowDays        = 365 * 8
+	ahrMinFitWindowDays     = 365 * 3
+	ahrRecentHalfLifeDays   = 365 * 4
+	ahrLegacyLogSlope       = 5.84
+	ahrLegacyLogIntercept   = -17.01
+	ahrReportForward30Days  = 30
+	ahrReportForward90Days  = 90
+	ahrReportForward180Days = 180
 )
 
 func main() {
@@ -39,10 +53,16 @@ func main() {
 	interval := flag.Int("interval", 7, "采样间隔天数（1=daily, 7=weekly）")
 	jsonOut := flag.Bool("json", false, "JSON 输出（默认人类报告）")
 	includeRaw := flag.Bool("samples", false, "JSON 输出包含每个采样点（量大）")
+	allData := flag.Bool("all-data", false, "从 Binance BTCUSDT 可用首日开始回测（2017-08-17）")
+	reportMD := flag.String("report-md", "", "写入 Markdown baseline 报告到指定路径")
 	flag.Parse()
 
 	if *startStr == "" {
-		*startStr = time.Now().AddDate(-4, 0, 0).Format("2006-01-02")
+		if *allData || *reportMD != "" {
+			*startStr = binanceBTCUSDTStart
+		} else {
+			*startStr = time.Now().AddDate(-4, 0, 0).Format("2006-01-02")
+		}
 	}
 
 	startT, err := time.Parse("2006-01-02", *startStr)
@@ -52,6 +72,11 @@ func main() {
 	endT, err := time.Parse("2006-01-02", *endStr)
 	if err != nil {
 		log.Fatalf("invalid --end: %v", err)
+	}
+	if closedEnd, adjusted := clampClosedDailyEnd(endT, time.Now()); adjusted {
+		log.Printf("end date %s is not a closed Binance UTC daily candle; using %s", endT.Format("2006-01-02"), closedEnd.Format("2006-01-02"))
+		endT = closedEnd
+		*endStr = closedEnd.Format("2006-01-02")
 	}
 	if !endT.After(startT) {
 		log.Fatalf("--end must be after --start")
@@ -116,6 +141,16 @@ func main() {
 
 	report := engine.AggregateBacktest(samples, *includeRaw)
 
+	if *reportMD != "" {
+		ahr := buildAHRComparison(prices, startT, endT, prov)
+		md := renderMarkdownReport(report, ahr, startT, endT, *interval)
+		if err := os.WriteFile(*reportMD, []byte(md), 0o644); err != nil {
+			log.Fatalf("write report: %v", err)
+		}
+		log.Printf("wrote Markdown report: %s", *reportMD)
+		return
+	}
+
 	if *jsonOut {
 		b, _ := json.MarshalIndent(report, "", "  ")
 		fmt.Println(string(b))
@@ -129,6 +164,14 @@ func main() {
 type pricePoint struct {
 	date  time.Time
 	close float64
+}
+
+func clampClosedDailyEnd(end, now time.Time) (time.Time, bool) {
+	todayUTC := now.UTC().Truncate(24 * time.Hour)
+	if end.Before(todayUTC) {
+		return end, false
+	}
+	return todayUTC.AddDate(0, 0, -1), true
 }
 
 func fetchBTCDailyClose(from, to time.Time) ([]pricePoint, error) {
@@ -248,7 +291,7 @@ func buildBacktestPanel(closes []float64, date string) *model.IndicatorPanel {
 	// SMA 200w (= 1400d)
 	if len(closes) >= 1400 {
 		sma200w := mean(closes[len(closes)-1400:])
-		dev := (cur/sma200w - 1) * 100
+		dev := cur/sma200w - 1
 		p.Cycle["sma_200w_dev"] = model.Indicator{Value: dev, Source: "binance"}
 	} else {
 		p.Cycle["sma_200w_dev"] = model.Indicator{Missing: true, Source: "kline 历史不足 1400d"}
@@ -382,6 +425,697 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// --- AHR999 comparison report ---
+
+type ahrPoint struct {
+	Date              string
+	Price             float64
+	Original          float64
+	Modified          float64
+	ModifiedQ         float64
+	HasOriginal       bool
+	HasModified       bool
+	OriginalBucket    string
+	ModifiedRawBucket string
+	ModifiedQBucket   string
+	Fwd30dPct         float64
+	Fwd90dPct         float64
+	Fwd180dPct        float64
+	HasFwd30          bool
+	HasFwd90          bool
+	HasFwd180         bool
+}
+
+type ahrBucketStats struct {
+	Bucket     string
+	N          int
+	N30        int
+	N90        int
+	N180       int
+	AvgFwd30   float64
+	AvgFwd90   float64
+	AvgFwd180  float64
+	PosRate30  float64
+	PosRate90  float64
+	PosRate180 float64
+	Worst180   float64
+}
+
+type ahrPairCount struct {
+	Original string
+	Modified string
+	N        int
+}
+
+type ahrComparison struct {
+	From              string
+	To                string
+	DataDays          int
+	OriginalN         int
+	ModifiedN         int
+	CommonN           int
+	Latest            ahrPoint
+	MeanRelDiffPct    float64
+	MedianAbsDiffPct  float64
+	LogCorrelation    float64
+	RawDisagreementN  int
+	OriginalRawStats  []ahrBucketStats
+	ModifiedRawStats  []ahrBucketStats
+	ModifiedQStats    []ahrBucketStats
+	RawConfusionPairs []ahrPairCount
+}
+
+func buildAHRComparison(prices []pricePoint, startT, endT time.Time, prov engine.PriceProvider) ahrComparison {
+	if len(prices) == 0 {
+		return ahrComparison{}
+	}
+	dates := make([]time.Time, len(prices))
+	closes := make([]float64, len(prices))
+	for i, p := range prices {
+		dates[i] = p.date
+		closes[i] = p.close
+	}
+
+	points := make([]ahrPoint, 0, len(prices))
+	relDiffs := []float64{}
+	absDiffs := []float64{}
+	logOriginal := []float64{}
+	logModified := []float64{}
+	confusion := map[string]int{}
+	out := ahrComparison{}
+
+	for i, p := range prices {
+		if p.date.Before(startT) || p.date.After(endT) {
+			continue
+		}
+		if out.DataDays == 0 {
+			out.From = p.date.Format("2006-01-02")
+		}
+		out.To = p.date.Format("2006-01-02")
+		out.DataDays++
+		pt := ahrPoint{Date: p.date.Format("2006-01-02"), Price: p.close}
+		if v, ok := calcOriginalAHR(closes, dates, i); ok {
+			pt.Original = v
+			pt.HasOriginal = true
+			pt.OriginalBucket = rawAHRBucket(v)
+			out.OriginalN++
+		}
+		if v, q, ok := calcModifiedAHR(closes, dates, i); ok {
+			pt.Modified = v
+			pt.ModifiedQ = q
+			pt.HasModified = true
+			pt.ModifiedRawBucket = rawAHRBucket(v)
+			pt.ModifiedQBucket = qAHRBucket(q)
+			out.ModifiedN++
+		}
+		if r, ok := engine.ForwardReturn(prov, pt.Date, ahrReportForward30Days); ok {
+			pt.Fwd30dPct = r
+			pt.HasFwd30 = true
+		}
+		if r, ok := engine.ForwardReturn(prov, pt.Date, ahrReportForward90Days); ok {
+			pt.Fwd90dPct = r
+			pt.HasFwd90 = true
+		}
+		if r, ok := engine.ForwardReturn(prov, pt.Date, ahrReportForward180Days); ok {
+			pt.Fwd180dPct = r
+			pt.HasFwd180 = true
+		}
+		if pt.HasOriginal || pt.HasModified {
+			points = append(points, pt)
+		}
+		if pt.HasOriginal && pt.HasModified {
+			out.CommonN++
+			if pt.Original > 0 {
+				diff := (pt.Modified/pt.Original - 1) * 100
+				relDiffs = append(relDiffs, diff)
+				absDiffs = append(absDiffs, math.Abs(diff))
+			}
+			if pt.Original > 0 && pt.Modified > 0 {
+				logOriginal = append(logOriginal, math.Log(pt.Original))
+				logModified = append(logModified, math.Log(pt.Modified))
+			}
+			if pt.OriginalBucket != pt.ModifiedRawBucket {
+				out.RawDisagreementN++
+			}
+			confusion[pt.OriginalBucket+" → "+pt.ModifiedRawBucket]++
+			out.Latest = pt
+		}
+	}
+
+	out.MeanRelDiffPct = average(relDiffs)
+	out.MedianAbsDiffPct = median(absDiffs)
+	out.LogCorrelation = correlation(logOriginal, logModified)
+	out.OriginalRawStats = statsByAHRBucket(points, func(p ahrPoint) (string, bool) {
+		return p.OriginalBucket, p.HasOriginal
+	}, rawBucketOrder())
+	out.ModifiedRawStats = statsByAHRBucket(points, func(p ahrPoint) (string, bool) {
+		return p.ModifiedRawBucket, p.HasModified
+	}, rawBucketOrder())
+	out.ModifiedQStats = statsByAHRBucket(points, func(p ahrPoint) (string, bool) {
+		return p.ModifiedQBucket, p.HasModified
+	}, qBucketOrder())
+	out.RawConfusionPairs = topAHRPairs(confusion, 12)
+	return out
+}
+
+func calcOriginalAHR(closes []float64, dates []time.Time, idx int) (float64, bool) {
+	if idx < ahrDCAWindowDays-1 || idx >= len(closes) {
+		return 0, false
+	}
+	price := closes[idx]
+	if price <= 0 {
+		return 0, false
+	}
+	dca := arithmeticWindow(closes, idx-ahrDCAWindowDays+1, idx)
+	fair := legacyFairValue(dates[idx])
+	if !usablePositive(dca) || !usablePositive(fair) {
+		return 0, false
+	}
+	return (price / dca) * (price / fair), true
+}
+
+func calcModifiedAHR(closes []float64, dates []time.Time, idx int) (float64, float64, bool) {
+	if idx < ahrDCAWindowDays-1 || idx >= len(closes) {
+		return 0, 0, false
+	}
+	fit, start, ok := fitAdaptiveAHR(closes, dates, idx, ahrRecentHalfLifeDays)
+	if !ok {
+		return 0, 0, false
+	}
+	price := closes[idx]
+	dca, ok := harmonicWindow(closes, idx-ahrDCAWindowDays+1, idx)
+	if !ok {
+		return 0, 0, false
+	}
+	fair := fit.fairValue(dates[idx])
+	if !usablePositive(price) || !usablePositive(dca) || !usablePositive(fair) {
+		return 0, 0, false
+	}
+	raw := (price / dca) * (price / fair)
+	logSamples := buildAdaptiveAHRLogSamples(closes, dates, fit, start, idx)
+	if len(logSamples) < ahrMinFitWindowDays-ahrDCAWindowDays {
+		return 0, 0, false
+	}
+	q := quantileRankFloat(logSamples, math.Log(raw))
+	return raw, q, usablePositive(raw) && q >= 0
+}
+
+type adaptiveAHRFit struct {
+	alpha float64
+	beta  float64
+}
+
+func fitAdaptiveAHR(closes []float64, dates []time.Time, idx, halfLifeDays int) (adaptiveAHRFit, int, bool) {
+	if halfLifeDays <= 0 {
+		halfLifeDays = ahrRecentHalfLifeDays
+	}
+	start := idx - ahrFitWindowDays + 1
+	if start < 0 {
+		start = 0
+	}
+	if idx-start+1 < ahrMinFitWindowDays {
+		return adaptiveAHRFit{}, start, false
+	}
+	samples := make([]ahrFitSample, 0, idx-start+1)
+	for j := start; j <= idx; j++ {
+		price := closes[j]
+		age := bitcoinAgeDays(dates[j])
+		if price <= 0 || age <= 0 {
+			continue
+		}
+		recency := idx - j
+		samples = append(samples, ahrFitSample{
+			x: math.Log(age),
+			y: math.Log(price),
+			w: math.Pow(0.5, float64(recency)/float64(halfLifeDays)),
+		})
+	}
+	if len(samples) < ahrMinFitWindowDays {
+		return adaptiveAHRFit{}, start, false
+	}
+	alpha, beta, ok := weightedFit(samples)
+	if !ok {
+		return adaptiveAHRFit{}, start, false
+	}
+	residuals := make([]float64, len(samples))
+	for i, s := range samples {
+		residuals[i] = s.y - (alpha + beta*s.x)
+	}
+	mad := medianAbsDeviationFloat(residuals)
+	if mad > 1e-9 {
+		threshold := 2.0 * mad
+		for i := range samples {
+			r := math.Abs(residuals[i])
+			if r > threshold {
+				samples[i].w *= threshold / r
+			}
+		}
+		if alpha2, beta2, ok2 := weightedFit(samples); ok2 {
+			alpha, beta = alpha2, beta2
+		}
+	}
+	if !usableFinite(alpha) || !usableFinite(beta) {
+		return adaptiveAHRFit{}, start, false
+	}
+	return adaptiveAHRFit{alpha: alpha, beta: beta}, start, true
+}
+
+type ahrFitSample struct {
+	x float64
+	y float64
+	w float64
+}
+
+func weightedFit(samples []ahrFitSample) (float64, float64, bool) {
+	var sw, sx, sy, sxx, sxy float64
+	for _, s := range samples {
+		sw += s.w
+		sx += s.w * s.x
+		sy += s.w * s.y
+		sxx += s.w * s.x * s.x
+		sxy += s.w * s.x * s.y
+	}
+	den := sw*sxx - sx*sx
+	if sw <= 0 || math.Abs(den) < 1e-12 {
+		return 0, 0, false
+	}
+	beta := (sw*sxy - sx*sy) / den
+	alpha := (sy - beta*sx) / sw
+	return alpha, beta, true
+}
+
+func (f adaptiveAHRFit) fairValue(date time.Time) float64 {
+	age := bitcoinAgeDays(date)
+	if age <= 0 {
+		return 0
+	}
+	return math.Exp(f.alpha + f.beta*math.Log(age))
+}
+
+func buildAdaptiveAHRLogSamples(closes []float64, dates []time.Time, fit adaptiveAHRFit, start, idx int) []float64 {
+	first := start + ahrDCAWindowDays - 1
+	if first < ahrDCAWindowDays-1 {
+		first = ahrDCAWindowDays - 1
+	}
+	out := make([]float64, 0, idx-first+1)
+	for j := first; j <= idx; j++ {
+		price := closes[j]
+		dca, ok := harmonicWindow(closes, j-ahrDCAWindowDays+1, j)
+		if !ok {
+			continue
+		}
+		fair := fit.fairValue(dates[j])
+		if !usablePositive(price) || !usablePositive(dca) || !usablePositive(fair) {
+			continue
+		}
+		raw := (price / dca) * (price / fair)
+		if usablePositive(raw) {
+			out = append(out, math.Log(raw))
+		}
+	}
+	return out
+}
+
+func legacyFairValue(date time.Time) float64 {
+	age := bitcoinAgeDays(date)
+	if age <= 0 {
+		return 0
+	}
+	val := ahrLegacyLogSlope*math.Log10(age) + ahrLegacyLogIntercept
+	return math.Pow(10, val)
+}
+
+func bitcoinAgeDays(date time.Time) float64 {
+	genesis := time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC)
+	return date.Sub(genesis).Hours() / 24.0
+}
+
+func arithmeticWindow(xs []float64, start, end int) float64 {
+	if start < 0 || end >= len(xs) || start > end {
+		return 0
+	}
+	sum := 0.0
+	n := 0
+	for i := start; i <= end; i++ {
+		if xs[i] <= 0 {
+			continue
+		}
+		sum += xs[i]
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
+}
+
+func harmonicWindow(xs []float64, start, end int) (float64, bool) {
+	if start < 0 || end >= len(xs) || start > end {
+		return 0, false
+	}
+	inv := 0.0
+	n := 0
+	for i := start; i <= end; i++ {
+		if xs[i] <= 0 {
+			continue
+		}
+		inv += 1 / xs[i]
+		n++
+	}
+	if n == 0 || inv <= 0 {
+		return 0, false
+	}
+	return float64(n) / inv, true
+}
+
+func rawAHRBucket(v float64) string {
+	switch {
+	case v < 0.45:
+		return "<0.45 极端低估"
+	case v < 0.8:
+		return "0.45-0.8 低估"
+	case v < 1.2:
+		return "0.8-1.2 合理"
+	case v < 2.0:
+		return "1.2-2.0 高估"
+	default:
+		return ">=2.0 泡沫"
+	}
+}
+
+func qAHRBucket(q float64) string {
+	switch {
+	case q < 0.10:
+		return "q<10% 极低分位"
+	case q < 0.35:
+		return "q10-35% 偏低"
+	case q < 0.55:
+		return "q35-55% 中性"
+	case q < 0.75:
+		return "q55-75% 偏高"
+	case q < 0.90:
+		return "q75-90% 高位"
+	default:
+		return "q>=90% 极高"
+	}
+}
+
+func rawBucketOrder() []string {
+	return []string{"<0.45 极端低估", "0.45-0.8 低估", "0.8-1.2 合理", "1.2-2.0 高估", ">=2.0 泡沫"}
+}
+
+func qBucketOrder() []string {
+	return []string{"q<10% 极低分位", "q10-35% 偏低", "q35-55% 中性", "q55-75% 偏高", "q75-90% 高位", "q>=90% 极高"}
+}
+
+func statsByAHRBucket(points []ahrPoint, bucket func(ahrPoint) (string, bool), order []string) []ahrBucketStats {
+	grouped := map[string][]ahrPoint{}
+	for _, p := range points {
+		b, ok := bucket(p)
+		if !ok || b == "" {
+			continue
+		}
+		grouped[b] = append(grouped[b], p)
+	}
+	out := []ahrBucketStats{}
+	for _, b := range order {
+		if pts := grouped[b]; len(pts) > 0 {
+			out = append(out, statsForAHRBucket(b, pts))
+		}
+	}
+	return out
+}
+
+func statsForAHRBucket(bucket string, pts []ahrPoint) ahrBucketStats {
+	s := ahrBucketStats{Bucket: bucket, N: len(pts), Worst180: math.NaN()}
+	var sum30, sum90, sum180 float64
+	var pos30, pos90, pos180 int
+	for _, p := range pts {
+		if p.HasFwd30 {
+			sum30 += p.Fwd30dPct
+			s.N30++
+			if p.Fwd30dPct > 0 {
+				pos30++
+			}
+		}
+		if p.HasFwd90 {
+			sum90 += p.Fwd90dPct
+			s.N90++
+			if p.Fwd90dPct > 0 {
+				pos90++
+			}
+		}
+		if p.HasFwd180 {
+			sum180 += p.Fwd180dPct
+			s.N180++
+			if p.Fwd180dPct > 0 {
+				pos180++
+			}
+			if math.IsNaN(s.Worst180) || p.Fwd180dPct < s.Worst180 {
+				s.Worst180 = p.Fwd180dPct
+			}
+		}
+	}
+	if s.N30 > 0 {
+		s.AvgFwd30 = sum30 / float64(s.N30)
+		s.PosRate30 = float64(pos30) / float64(s.N30)
+	}
+	if s.N90 > 0 {
+		s.AvgFwd90 = sum90 / float64(s.N90)
+		s.PosRate90 = float64(pos90) / float64(s.N90)
+	}
+	if s.N180 > 0 {
+		s.AvgFwd180 = sum180 / float64(s.N180)
+		s.PosRate180 = float64(pos180) / float64(s.N180)
+	}
+	return s
+}
+
+func topAHRPairs(m map[string]int, limit int) []ahrPairCount {
+	out := make([]ahrPairCount, 0, len(m))
+	for k, n := range m {
+		parts := strings.Split(k, " → ")
+		if len(parts) != 2 {
+			continue
+		}
+		out = append(out, ahrPairCount{Original: parts[0], Modified: parts[1], N: n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].N > out[j].N })
+	if len(out) > limit {
+		return out[:limit]
+	}
+	return out
+}
+
+func quantileRankFloat(samples []float64, v float64) float64 {
+	if len(samples) == 0 || !usableFinite(v) {
+		return -1
+	}
+	sorted := make([]float64, 0, len(samples))
+	for _, s := range samples {
+		if usableFinite(s) {
+			sorted = append(sorted, s)
+		}
+	}
+	if len(sorted) == 0 {
+		return -1
+	}
+	sort.Float64s(sorted)
+	n := sort.Search(len(sorted), func(i int) bool { return sorted[i] > v })
+	return float64(n) / float64(len(sorted))
+}
+
+func medianAbsDeviationFloat(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	cp := append([]float64(nil), xs...)
+	sort.Float64s(cp)
+	med := cp[len(cp)/2]
+	for i := range cp {
+		cp[i] = math.Abs(cp[i] - med)
+	}
+	sort.Float64s(cp)
+	return cp[len(cp)/2]
+}
+
+func median(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	cp := append([]float64(nil), xs...)
+	sort.Float64s(cp)
+	mid := len(cp) / 2
+	if len(cp)%2 == 0 {
+		return (cp[mid-1] + cp[mid]) / 2
+	}
+	return cp[mid]
+}
+
+func average(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, x := range xs {
+		sum += x
+	}
+	return sum / float64(len(xs))
+}
+
+func correlation(xs, ys []float64) float64 {
+	if len(xs) == 0 || len(xs) != len(ys) {
+		return 0
+	}
+	avgX := average(xs)
+	avgY := average(ys)
+	var num, denX, denY float64
+	for i := range xs {
+		dx := xs[i] - avgX
+		dy := ys[i] - avgY
+		num += dx * dy
+		denX += dx * dx
+		denY += dy * dy
+	}
+	if denX == 0 || denY == 0 {
+		return 0
+	}
+	return num / math.Sqrt(denX*denY)
+}
+
+func usablePositive(v float64) bool {
+	return v > 0 && usableFinite(v)
+}
+
+func usableFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, startT, endT time.Time, interval int) string {
+	var b strings.Builder
+	b.WriteString("# guanfu backtest baseline + AHR999 comparison\n\n")
+	b.WriteString(fmt.Sprintf("- Generated: %s\n", time.Now().UTC().Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("- Requested range: %s -> %s\n", startT.Format("2006-01-02"), endT.Format("2006-01-02")))
+	b.WriteString(fmt.Sprintf("- Effective BTC daily data: %s -> %s (%d closes)\n", a.From, a.To, a.DataDays))
+	b.WriteString(fmt.Sprintf("- Verdict sample interval: %dd\n", interval))
+	b.WriteString("- Price source: Binance BTCUSDT closed UTC daily candles\n")
+	b.WriteString("- Forward returns: close-to-close 30d / 90d / 180d\n\n")
+
+	b.WriteString("## Executive summary\n\n")
+	b.WriteString(fmt.Sprintf("- Verdict baseline samples: %d; average coverage %.1f%%. Coverage is low by design because this historical replay only uses kline-derived indicators and marks ETF/funding/macro/on-chain fields missing.\n", r.NumSamples, r.AvgCoverage*100))
+	b.WriteString(fmt.Sprintf("- AHR original samples: %d; modified adaptive samples: %d; overlapping samples: %d.\n", a.OriginalN, a.ModifiedN, a.CommonN))
+	b.WriteString(fmt.Sprintf("- On overlapping days, modified/raw AHR is on average %+0.1f%% vs original; median absolute relative gap is %.1f%%; log-value correlation is %.3f.\n", a.MeanRelDiffPct, a.MedianAbsDiffPct, a.LogCorrelation))
+	if a.CommonN > 0 {
+		b.WriteString(fmt.Sprintf("- Raw threshold bucket changed on %d / %d overlapping days (%.1f%%).\n", a.RawDisagreementN, a.CommonN, float64(a.RawDisagreementN)/float64(a.CommonN)*100))
+		b.WriteString(fmt.Sprintf("- Latest overlapping day %s: original %.3f (%s), modified %.3f / q%.0f%% (%s; %s), BTC $%.0f.\n",
+			a.Latest.Date, a.Latest.Original, a.Latest.OriginalBucket, a.Latest.Modified, a.Latest.ModifiedQ*100, a.Latest.ModifiedRawBucket, a.Latest.ModifiedQBucket, a.Latest.Price))
+	}
+	b.WriteString("\n")
+
+	b.WriteString("## Verdict baseline\n\n")
+	b.WriteString("### Stance buckets\n\n")
+	b.WriteString("| stance | n | avg fwd30 | avg fwd90 | avg fwd180 | hit30 | hit90 | hit180 |\n")
+	b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|\n")
+	for _, s := range r.StanceStats {
+		b.WriteString(fmt.Sprintf("| %s | %d | %s | %s | %s | %s | %s | %s |\n",
+			s.Stance, s.N, pct(s.AvgFwd30), pct(s.AvgFwd90), pct(s.AvgFwd180), stanceHit(s.Stance, s.HitRate30), stanceHit(s.Stance, s.HitRate90), stanceHit(s.Stance, s.HitRate180)))
+	}
+	b.WriteString("\n### Bottom proximity buckets\n\n")
+	writeProximityTable(&b, r.BottomProximity)
+	b.WriteString("\n### Top proximity buckets\n\n")
+	writeProximityTable(&b, r.TopProximity)
+
+	b.WriteString("\n## AHR999 formula comparison\n\n")
+	b.WriteString("| dimension | original AHR999 | guanfu modified AHR999 |\n")
+	b.WriteString("|---|---|---|\n")
+	b.WriteString("| DCA cost | 200d arithmetic SMA | 200d harmonic fixed-amount DCA cost |\n")
+	b.WriteString("| fair value | fixed `10^(5.84*log10(days)-17.01)` curve | rolling log-log fit, 8y max window, 4y half-life, one-step Huber reweighting |\n")
+	b.WriteString("| classification | fixed raw thresholds 0.45 / 0.8 / 1.2 / 2.0 | raw value plus dynamic percentile q from same adaptive window |\n")
+	b.WriteString("| structural risk | fixed coefficients can stale after new market regimes | adapts to recent 8y data but has fewer early samples and can re-center after extreme cycles |\n\n")
+
+	b.WriteString("### Original raw AHR buckets\n\n")
+	writeAHRStatsTable(&b, a.OriginalRawStats)
+	b.WriteString("\n### Modified raw AHR buckets\n\n")
+	writeAHRStatsTable(&b, a.ModifiedRawStats)
+	b.WriteString("\n### Modified dynamic percentile buckets\n\n")
+	writeAHRStatsTable(&b, a.ModifiedQStats)
+
+	b.WriteString("\n### Raw bucket transition counts\n\n")
+	b.WriteString("| original bucket | modified raw bucket | n |\n")
+	b.WriteString("|---|---|---:|\n")
+	for _, p := range a.RawConfusionPairs {
+		b.WriteString(fmt.Sprintf("| %s | %s | %d |\n", p.Original, p.Modified, p.N))
+	}
+
+	b.WriteString("\n## Interpretation\n\n")
+	b.WriteString("- Treat the verdict baseline as a low-coverage sanity check, not a production-grade historical proof. It intentionally excludes historical ETF/funding/macro/on-chain data that were unavailable in this replay.\n")
+	b.WriteString("- The AHR comparison uses every Binance BTCUSDT daily close available in the requested range. Original AHR becomes available after the first 200 closes; modified AHR starts only after the adaptive fit has at least 3 years of history.\n")
+	b.WriteString("- For modified AHR, raw value still helps compare with public AHR dashboards, but q percentile is the safer internal regime signal because it is calibrated to the same rolling fit window.\n")
+	b.WriteString("- Public claims should quote sample counts and the exact date range above; do not extrapolate beyond Binance spot history without another data source.\n")
+	return b.String()
+}
+
+func writeProximityTable(b *strings.Builder, stats []engine.ProximityStats) {
+	b.WriteString("| bucket | n | avg fwd30 | avg fwd90 | avg fwd180 |\n")
+	b.WriteString("|---|---:|---:|---:|---:|\n")
+	for _, s := range stats {
+		b.WriteString(fmt.Sprintf("| %s | %d | %s | %s | %s |\n", s.Bucket, s.N, pct(s.AvgFwd30), pct(s.AvgFwd90), pct(s.AvgFwd180)))
+	}
+}
+
+func writeAHRStatsTable(b *strings.Builder, stats []ahrBucketStats) {
+	b.WriteString("| bucket | n | n180 | avg fwd30 | pos30 | avg fwd90 | pos90 | avg fwd180 | pos180 | worst180 |\n")
+	b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	for _, s := range stats {
+		b.WriteString(fmt.Sprintf("| %s | %d | %d | %s | %s | %s | %s | %s | %s | %s |\n",
+			s.Bucket, s.N, s.N180, pctN(s.AvgFwd30, s.N30), rateN(s.PosRate30, s.N30), pctN(s.AvgFwd90, s.N90), rateN(s.PosRate90, s.N90), pctN(s.AvgFwd180, s.N180), rateN(s.PosRate180, s.N180), pctN(s.Worst180, s.N180)))
+	}
+}
+
+func pct(v float64) string {
+	if math.IsNaN(v) {
+		return "n/a"
+	}
+	return fmt.Sprintf("%+.1f%%", v)
+}
+
+func hit(v float64) string {
+	if v == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.0f%%", v*100)
+}
+
+func pctN(v float64, n int) string {
+	if n == 0 || math.IsNaN(v) {
+		return "n/a"
+	}
+	return fmt.Sprintf("%+.1f%%", v)
+}
+
+func rateN(v float64, n int) string {
+	if n == 0 || math.IsNaN(v) {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.0f%%", v*100)
+}
+
+func stanceHit(stance string, v float64) string {
+	if !isDirectionalStance(stance) {
+		return "n/a"
+	}
+	return rateN(v, 1)
+}
+
+func isDirectionalStance(stance string) bool {
+	switch stance {
+	case "强积累倾向", "偏积累倾向", "持有观察倾向", "防守倾向", "高防守倾向", "分配 / 避险风险":
+		return true
+	default:
+		return false
+	}
 }
 
 // --- 报告打印 ---
