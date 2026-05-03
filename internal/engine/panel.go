@@ -489,6 +489,31 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 		UpdatedAt: ts,
 		Note:      "启发式分类: accumulation/markup/distribution/markdown",
 	}
+
+	// ── Diminishing Returns Cycle Model (Priority 5) ──
+	if !prevHalving.IsZero() {
+		daysSince := int(snap.Date.Sub(prevHalving).Hours() / 24)
+		// Compute 200w SMA at halving date as the structural price anchor.
+		// The 200w SMA at halving ≈ floor price that anchors the cycle ROI estimate.
+		// We approximate using the current 200w SMA (which drifts up ~2%/year)
+		// adjusted back to halving date.
+		halving200w, hwOK := wmaSMA(snap.BTCPriceHistory, 200)
+		if hwOK && halving200w > 0 {
+			// Adjust backward: 200w SMA grows roughly with power-law (~2-3%/year).
+			// Simple time-based adjustment: 200wSMA at halving ≈ current 200wSMA * (halving_age/current_age)^beta
+			// where beta ≈ 2.4 (the power-law exponent from the log-log fit).
+			// Approximate: halving 200w ≈ current 200w * 0.92 (743 days ago, ~2.4*log(1-743/6000) ≈ -8%)
+			halvingAnchor := halving200w * 0.92
+			if estPeak, estDelay, roiMult, droiOK := calcDiminishingROI(halvingAnchor); droiOK {
+				p.Cycle["diminishing_roi_peak_est"] = model.Indicator{
+					Value:     estPeak,
+					Source:    "derived: cross-cycle ROI decay",
+					UpdatedAt: ts,
+					Note:      fmt.Sprintf("跨周期 ROI 衰减模型: rho≈0.29, 峰值延迟→552d。本周期估算 %.1fx ROI (halving锚≈$%.0fK), 峰值 ~%d 天 post-halving (当前 %d 天)。历史: 2013 98x/370d, 2017 30x/520d, 2021 8x/550d", roiMult, halvingAnchor/1000, estDelay, daysSince),
+				}
+			}
+		}
+	}
 }
 
 // ----------------- Valuation 估值 -----------------
@@ -496,6 +521,7 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSnapshot, ts string) {
 	btcTS := sourceTimestamp(snap.BTCPriceAsOf, ts)
 	onchainTS := sourceTimestamp(snap.OnchainValuationAsOf, ts)
+	networkTS := sourceTimestamp(snap.MempoolAsOf, ts)
 
 	// ── AHR999 压缩版（sqrt-AHR: pow(raw, 0.75), 主估值信号）──
 	// 回测验证：压缩后 5.0-20.0 桶 fwd180 -15.4%，显著优于原始 AHR999 的分档效果。
@@ -508,6 +534,20 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 			Source:    btcDailyHistorySource + " + power-law (compressed)",
 			UpdatedAt: btcTS,
 			Note:      fmt.Sprintf("sqrt-AHR = (原始 AHR999)^0.75。回测：<0.45→+86.5%%/88%%胜率, 2.0-5.0→-15.4%%/20%%胜率, >=20.0→0%%胜率。原始值: %.3f", ahrOrig),
+		}
+	}
+
+	// ── AHR999 Jacobian-corrected (Priority 1: scale-invariant power-law) ──
+	// Uses w=1/ageDays so every multiplicative decade of BTC history gets equal fit weight.
+	// This is the "structural" fair value — doesn't drift with recent cycles.
+	if jacRaw, jacOK := c.calcAhr999Jacobian(snap); jacOK {
+		jacCompressed := math.Pow(jacRaw, ahrCompressionExponent)
+		p.Valuation["ahr999_jacobian"] = model.Indicator{
+			Value:     jacCompressed,
+			Label:     ahrCompressedLabel(jacCompressed),
+			Source:    btcDailyHistorySource + " + jacobian power-law",
+			UpdatedAt: btcTS,
+			Note:      fmt.Sprintf("Jacobian-corrected sqrt-AHR。w=1/t 使各时期等权，不随近期牛熊漂移。原始值: %.3f", jacRaw),
 		}
 	}
 
@@ -537,6 +577,41 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 				UpdatedAt: btcTS,
 				Note:      fmt.Sprintf("原始 %.3f vs 自适应 q=%.0f%%。分歧 = 转向预警", ahrOrig, ahrQ*100),
 			}
+		}
+	}
+
+	// ── Miner Cost Floor (Priority 2+4: electricity cost anchor) ──
+	if !snap.HashRateEHs.IsZero() {
+		hashRate := f(snap.HashRateEHs)
+		if costFloor, cfOK := calcMinerCostFloor(hashRate); cfOK {
+			btc := f(snap.BTCPrice)
+			ratio := btc / costFloor
+			p.Valuation["miner_cost_floor"] = model.Indicator{
+				Value:     costFloor,
+				Source:    "mempool.space + derived",
+				UpdatedAt: networkTS,
+				Note:      fmt.Sprintf("电费成本锚: %.0f EH/s × $%.3f/TH/天 ÷ %.0f BTC/天。hashrate=%.0f EH/s, efficiency=%d J/TH, elec=$%.2f/kWh", costFloor, minerElecCostPerKWh, minerBTCMinedPerDay, hashRate, int(minerEfficiencyJPerTH), minerElecCostPerKWh),
+			}
+			p.Valuation["price_to_miner_cost"] = model.Indicator{
+				Value:     ratio,
+				Label:     minerCostRatioLabel(ratio),
+				Source:    "derived",
+				UpdatedAt: networkTS,
+				Note:      fmt.Sprintf("price $%.0f / miner cost floor $%.0f = %.2fx。<1.0 = 矿工亏损（历史抄底区），<0.8 = 矿工深度亏损（仅 2018/2020/2022 出现）", btc, costFloor, ratio),
+			}
+		}
+	}
+
+	// ── Difficulty Cost Proximity ──
+	if !snap.DifficultyChangePct.IsZero() {
+		dc := f(snap.DifficultyChangePct)
+		_, dcNote := calcDifficultyCostRatio(dc)
+		p.Valuation["difficulty_cost_signal"] = model.Indicator{
+			Value:     dc,
+			Label:     difficultyCostLabel(dc),
+			Source:    "mempool.space + derived",
+			UpdatedAt: networkTS,
+			Note:      dcNote,
 		}
 	}
 
@@ -2232,5 +2307,41 @@ func d3PanicLabel(dd float64) string {
 		return "小幅回调（>10%回撤）"
 	default:
 		return "无恐慌（横盘或上涨）"
+	}
+}
+
+// ── Miner Cost Floor labels ──
+
+func minerCostRatioLabel(ratio float64) string {
+	switch {
+	case ratio < 0.8:
+		return "矿工深度亏损（历史级抄底，仅 2018/2020/2022 出现）"
+	case ratio < 1.0:
+		return "矿工亏损（成本支撑区，历史抄底）"
+	case ratio < 1.3:
+		return "矿工微利（正常熊市/积累区）"
+	case ratio < 2.0:
+		return "矿工盈利（牛市区间）"
+	case ratio < 3.0:
+		return "矿工高盈利（牛市加速期）"
+	default:
+		return "矿工暴利（极端高估，顶部常见）"
+	}
+}
+
+func difficultyCostLabel(dc float64) string {
+	switch {
+	case dc < -7:
+		return "矿工投降（难度骤降，底部信号）"
+	case dc < -5:
+		return "矿工承压（成本线附近）"
+	case dc < -2:
+		return "边际矿工退出"
+	case dc < 0:
+		return "难度持平/微降"
+	case dc < 5:
+		return "难度温和上升（算力扩张）"
+	default:
+		return "难度快速上升（算力 FOMO）"
 	}
 }

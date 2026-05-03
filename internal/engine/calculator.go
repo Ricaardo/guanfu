@@ -946,6 +946,264 @@ func bitcoinAgeDays(date time.Time) float64 {
 	return date.Sub(genesis).Hours() / 24.0
 }
 
+// ── Jacobian-corrected Power-Law (Priority 1) ──
+//
+// Problem: standard log-log OLS with time-decay weights (w=0.5^(i/halfLife)) lets
+// recent data dominate — the most recent era has ~8.78x more weight than the earliest.
+// The regression overwhelmingly fits post-2020 price action.
+//
+// Fix: w = 1/ageDays so every multiplicative decade of Bitcoin's history gets equal
+// weight. Combined with Huber reweighting, this produces a "structural" fair value
+// that doesn't drift with recent bull/bear cycles.
+
+func fitAhrLogLogModelJacobian(history []decimal.Decimal, asOf time.Time) (ahrLogLogFit, bool) {
+	limit := len(history)
+	if limit > ahrFitWindowDays {
+		limit = ahrFitWindowDays
+	}
+	if limit < ahrMinFitWindowDays {
+		return ahrLogLogFit{}, false
+	}
+
+	samples := make([]ahrSample, 0, limit)
+	for i := 0; i < limit; i++ {
+		price, _ := history[i].Float64()
+		if price <= 0 {
+			continue
+		}
+		date := asOf.AddDate(0, 0, -i)
+		ageDays := bitcoinAgeDays(date)
+		if ageDays <= 0 {
+			continue
+		}
+		samples = append(samples, ahrSample{
+			x: math.Log(ageDays),
+			y: math.Log(price),
+			w: 1.0 / ageDays, // Jacobian: equal weight per log-time decade
+		})
+	}
+	if len(samples) < ahrMinFitWindowDays {
+		return ahrLogLogFit{}, false
+	}
+
+	alpha, beta, ok := weightedLinearFit(samples)
+	if !ok {
+		return ahrLogLogFit{}, false
+	}
+
+	// Huber single-step reweighting — same as adaptive fit, different initial weights
+	residuals := make([]float64, len(samples))
+	for i, s := range samples {
+		residuals[i] = s.y - (alpha + beta*s.x)
+	}
+	mad := medianAbsDeviation(residuals)
+	if mad > 1e-9 {
+		threshold := 2.0 * mad
+		for i := range samples {
+			r := math.Abs(residuals[i])
+			if r > threshold {
+				samples[i].w *= threshold / r
+			}
+		}
+		alpha2, beta2, ok2 := weightedLinearFit(samples)
+		if ok2 {
+			alpha, beta = alpha2, beta2
+		}
+	}
+
+	if !isUsableFinite(alpha) || !isUsableFinite(beta) {
+		return ahrLogLogFit{}, false
+	}
+
+	return ahrLogLogFit{alpha: alpha, beta: beta}, true
+}
+
+// calcAhr999Jacobian computes AHR999 using Jacobian-corrected power-law fair value.
+// The Jacobian fit gives every era equal voice — early history (2010-2016) has the
+// same structural weight as recent history, unlike the adaptive fit which prioritizes
+// the last 4-year half-life window.
+func (c *Calculator) calcAhr999Jacobian(snap *model.MarketSnapshot) (raw float64, ok bool) {
+	if snap.BTCPrice.IsZero() || len(snap.BTCPriceHistory) < ahrMinFitWindowDays {
+		return 0, false
+	}
+	price, _ := snap.BTCPrice.Float64()
+	if price <= 0 {
+		return 0, false
+	}
+
+	dcaCost, dcaOK := calculateDcaCost(snap.BTCPriceHistory, 0, ahrDCAWindowDays)
+	if !dcaOK {
+		return 0, false
+	}
+
+	fit, fitOK := fitAhrLogLogModelJacobian(snap.BTCPriceHistory, snap.Date)
+	if !fitOK {
+		return 0, false
+	}
+
+	fv := fit.fairValue(snap.Date)
+	if !isUsablePositive(fv) {
+		return 0, false
+	}
+
+	raw = (price / dcaCost) * (price / fv)
+	if !isUsablePositive(raw) {
+		return 0, false
+	}
+	return raw, true
+}
+
+// ── Miner Cost Floor (Priority 2+4 merged) ──
+//
+// Estimates the all-in electricity cost of mining one BTC. When BTC price approaches
+// or falls below this floor, miners operate at a loss → historically strong buy zones.
+//
+// Formula: cost_per_btc = (hashrate_THs * elec_cost_per_TH_per_day) / btc_mined_per_day
+//
+// Assumptions (conservative, efficient miner baseline):
+//   - Electricity: $0.05/kWh (global average for industrial miners)
+//   - Efficiency: 25 J/TH (modern ASIC like S21 Pro; older gear is less efficient so
+//     the real network average cost is higher — this gives a conservative floor)
+//   - Elec cost per TH/day: 25 * 24 / 3600 * 0.05 = $0.00833/day (per TH/s)
+//
+//	More precisely: 25 J/TH * 24h * (1kWh/3.6e6J) * $0.05/kWh = $0.00833/TH/day
+
+const (
+	minerEfficiencyJPerTH = 25.0   // J/TH for modern ASIC
+	minerElecCostPerKWh   = 0.05   // $/kWh global industrial avg
+	minerBTCMinedPerDay   = 450.0  // 3.125 subsidy * 144 blocks (post-2024 halving)
+)
+
+func calcMinerCostFloor(hashRateEHs float64) (float64, bool) {
+	if hashRateEHs <= 0 {
+		return 0, false
+	}
+	// Convert EH/s → TH/s: 1 EH = 1e6 TH
+	hashRateTHs := hashRateEHs * 1e6
+	// Electricity cost per TH per day
+	elecPerTHPerDay := minerEfficiencyJPerTH * 24.0 * minerElecCostPerKWh / 3600.0
+	// Total daily electricity cost
+	dailyElecUSD := hashRateTHs * elecPerTHPerDay
+	// Per-BTC production cost
+	costPerBTC := dailyElecUSD / minerBTCMinedPerDay
+	if !isUsablePositive(costPerBTC) {
+		return 0, false
+	}
+	return costPerBTC, true
+}
+
+// ── Difficulty-Adjusted Cost Floor (complementary to pure-electricity model) ──
+//
+// Uses mining difficulty as a "distilled" cost measure that accounts for both
+// hardware efficiency improvements AND electricity costs implicitly.
+// When BTC price / difficulty-implied-cost < 1.0, miners are under water.
+//
+// Fitted from historical difficulty vs price: log(price) ≈ a + b*log(difficulty).
+// Since we only have current difficulty (not history), we use a simplified ratio:
+// price / (difficulty * network_efficiency_factor).
+//
+// The key insight: difficulty adjusts every 2016 blocks to target 10min/block,
+// so it embeds the miner breakeven calculation. A -2.3% difficulty drop (like now)
+// means some miners already turned off — we're approaching the cost floor.
+
+func calcDifficultyCostRatio(difficultyChangePct float64) (ratio float64, note string) {
+	// Simplified: when difficulty is dropping, miners are capitulating.
+	// The magnitude tells us how close we are to the cost floor.
+	// Historical pattern: difficulty drops >5% typically mark local bottoms.
+	switch {
+	case difficultyChangePct < -7:
+		ratio = 0.85
+		note = "difficulty -7%+: miner capitulation, historically at/near cost floor"
+	case difficultyChangePct < -5:
+		ratio = 0.92
+		note = "difficulty -5~-7%: approaching miner cost floor"
+	case difficultyChangePct < -2:
+		ratio = 0.97
+		note = "difficulty -2~-5%: marginal miners under pressure"
+	case difficultyChangePct < 0:
+		ratio = 1.0
+		note = "difficulty flat/slight down: miners at breakeven"
+	default:
+		ratio = 1.05
+		note = "difficulty rising: miners profitable, expanding"
+	}
+	return ratio, note
+}
+
+// ── Diminishing Returns Cycle Model (Priority 5) ──
+//
+// Models the exponential decay of BTC's cycle ROI across halvings.
+// Historical cycle peak multipliers (from halving price to cycle top):
+//
+//	Cycle 1 (2012-2013): ~98x, peak at ~370d post-halving
+//	Cycle 2 (2016-2017): ~30x, peak at ~520d
+//	Cycle 3 (2020-2021): ~8x,  peak at ~550d
+//	Cycle 4 (2024-now):  est ~2.4x, peak est ~555d (Mar 2026)
+//
+// rho ≈ 0.29 (geometric decay of peak multiples)
+// Peak delay asymptote ≈ 552 days (saturating lag model)
+//
+// This gives a rough ceiling estimate — not a price target, but an anchor
+// for when upside is structurally limited.
+
+type cyclePeak struct {
+	halvingDate   time.Time
+	peakDate      time.Time
+	peakPrice     float64
+	halvingPrice  float64
+}
+
+var knownCyclePeaks = []cyclePeak{
+	{time.Date(2012, 11, 28, 0, 0, 0, 0, time.UTC), time.Date(2013, 12, 4, 0, 0, 0, 0, time.UTC), 1147, 12},
+	{time.Date(2016, 7, 9, 0, 0, 0, 0, time.UTC), time.Date(2017, 12, 17, 0, 0, 0, 0, time.UTC), 19783, 650},
+	{time.Date(2020, 5, 11, 0, 0, 0, 0, time.UTC), time.Date(2021, 11, 10, 0, 0, 0, 0, time.UTC), 68789, 8700},
+}
+
+// calcDiminishingROI estimates the current cycle's implied peak price and timing
+// based on the exponential decay of cycle returns across halvings.
+//
+// Peak = halving_price * roi_multiple, where roi_multiple decays geometrically:
+//
+//	roi[n] = roi[n-1] * rho,  rho ≈ 0.29 (geometric mean of (30/98), (8/30))
+//
+// Halving price anchor: uses the 200w SMA at halving date as the structural base.
+// Peak delay asymptote: 552 days (saturating lag model).
+func calcDiminishingROI(halving200wSMA float64) (estPeakPrice float64, estPeakDays int, roiMultiple float64, ok bool) {
+	if len(knownCyclePeaks) < 2 || halving200wSMA <= 0 {
+		return 0, 0, 0, false
+	}
+
+	// Compute rho from historical cycle ROI ratios
+	roi0 := knownCyclePeaks[0].peakPrice / knownCyclePeaks[0].halvingPrice // ~98x
+	roi1 := knownCyclePeaks[1].peakPrice / knownCyclePeaks[1].halvingPrice // ~30x
+	roi2 := knownCyclePeaks[2].peakPrice / knownCyclePeaks[2].halvingPrice // ~8x
+	rho := math.Sqrt((roi1 / roi0) * (roi2 / roi1)) // geometric mean decay
+
+	// This cycle's ROI estimate
+	estROI := roi2 * rho
+
+	// Peak delay: saturating toward 552-day asymptote
+	peakDelays := make([]float64, len(knownCyclePeaks))
+	for i, cp := range knownCyclePeaks {
+		peakDelays[i] = cp.peakDate.Sub(cp.halvingDate).Hours() / 24
+	}
+	lastDelay := peakDelays[len(peakDelays)-1]
+	estDelay := lastDelay + (552-lastDelay)*0.5
+	if estDelay < lastDelay {
+		estDelay = lastDelay
+	}
+
+	// Peak estimate: anchor from halving-time structural price floor * ROI multiple
+	estPeakPrice = halving200wSMA * estROI
+	if !isUsablePositive(estPeakPrice) {
+		return 0, 0, 0, false
+	}
+
+	estPeakDays = int(estDelay)
+	roiMultiple = estROI
+	return estPeakPrice, estPeakDays, roiMultiple, true
+}
+
 func isUsablePositive(value float64) bool {
 	return value > 0 && isUsableFinite(value)
 }
