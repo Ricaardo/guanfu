@@ -646,6 +646,32 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 		}
 	}
 
+	// WTI 原油价格（Futu USO > Yahoo CL=F）
+	if !snap.WTIPrice.IsZero() {
+		wtiPrice := f(snap.WTIPrice)
+		p.Macro["wti_crude"] = model.Indicator{
+			Value:     wtiPrice,
+			Label:     wtiLabel(wtiPrice),
+			Source:    "futu:USO / yahoo:CL=F",
+			UpdatedAt: sourceTimestamp(snap.WTIPriceAsOf, ts),
+			Note:      "WTI 原油期货价格 ($/桶)。>100 成本推动型通胀 → Fed 困境 → BTC 不确定性",
+		}
+		// 60d 趋势
+		if len(snap.WTIHistory) > 60 {
+			wti60dAgo := f(snap.WTIHistory[60])
+			if wti60dAgo > 0 {
+				wti60dTrend := (wtiPrice - wti60dAgo) / wti60dAgo * 100
+				p.Macro["wti_60d_trend_pct"] = model.Indicator{
+					Value:     wti60dTrend,
+					Label:     wtiTrendLabel(wti60dTrend),
+					Source:    "futu:USO / yahoo:CL=F",
+					UpdatedAt: sourceTimestamp(snap.WTIPriceAsOf, ts),
+					Note:      "WTI 60 日变化 %。>20% = 供给冲击风险；<-20% = 需求崩溃",
+				}
+			}
+		}
+	}
+
 	// BTC vs SPX 30d 相关
 	if !snap.SPXCorrelation30d.IsZero() {
 		corr := f(snap.SPXCorrelation30d)
@@ -1135,6 +1161,19 @@ func (c *Calculator) fillCrossAsset(p *model.IndicatorPanel, snap *model.MarketS
 			Source:    "yahoo",
 			UpdatedAt: sourceTimestamp(snap.GoldPriceAsOf, btcTS),
 			Note:      fmt.Sprintf("BTC / 黄金。BTC $%.0f / Gold $%.0f/oz。1 BTC = %.2f oz 黄金", btc, gold, ratio),
+		}
+		// BTC / WTI 原油
+		if !snap.WTIPrice.IsZero() {
+			oil := f(snap.WTIPrice)
+			if oil > 0 {
+				oilRatio := btc / oil
+				p.CrossAsset["btc_oil_ratio"] = model.Indicator{
+					Value:     oilRatio,
+					Source:    "futu:USO / yahoo:CL=F",
+					UpdatedAt: sourceTimestamp(snap.WTIPriceAsOf, btcTS),
+					Note:      fmt.Sprintf("BTC / WTI。BTC $%.0f / WTI $%.0f。1 BTC = %.0f 桶 WTI 原油", btc, oil, oilRatio),
+				}
+			}
 		}
 	}
 
@@ -1690,6 +1729,40 @@ func relStrengthLabel(diff float64) string {
 		return "BTC 跑输"
 	default:
 		return "BTC 大幅跑输"
+	}
+}
+
+// --- WTI crude oil labels ---
+
+func wtiLabel(price float64) string {
+	switch {
+	case price < 50:
+		return "极低（通缩压力 / 需求崩溃）"
+	case price < 65:
+		return "偏低"
+	case price < 80:
+		return "正常"
+	case price < 95:
+		return "偏高（通胀压力上升）"
+	case price < 110:
+		return "高位（成本推动型通胀 → BTC 不确定）"
+	default:
+		return "极端高位（供给冲击 → Fed 困境 → BTC 严重逆风）"
+	}
+}
+
+func wtiTrendLabel(pct float64) string {
+	switch {
+	case pct < -20:
+		return "暴跌（需求崩塌）"
+	case pct < -5:
+		return "下行"
+	case pct < 5:
+		return "横盘"
+	case pct < 20:
+		return "上行（通胀压力↑）"
+	default:
+		return "飙升（供给冲击风险）"
 	}
 }
 

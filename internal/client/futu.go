@@ -515,6 +515,9 @@ type CrossAssetFutuPrices struct {
 	TLTHistory    []float64
 	TLTPriceAsOf  string
 	VIXYPrice     float64 // VIX 波动率 ETF
+	WTIPrice      float64 // WTI 原油 ETF (USO)
+	WTIHistory    []float64
+	WTIPriceAsOf  string
 	VIXYHistory   []float64
 	VIXYPriceAsOf string
 	Warnings      []string
@@ -549,7 +552,7 @@ func FetchCrossAssetFromFutu(days int) (*CrossAssetFutuPrices, error) {
 	if err != nil {
 		// Go direct failed (OpenD requires RSA+AES encryption handshake).
 		// Fall back to Python bridge which uses the official SDK.
-		symbols := []string{"US.QQQ", "US.SPY", "US.GLD", "US.UUP", "US.TLT", "US.VIXY"}
+		symbols := []string{"US.QQQ", "US.SPY", "US.GLD", "US.UUP", "US.TLT", "US.VIXY", "US.USO"}
 		out, bridgeErr := futuBridgeSymbols(symbols, days)
 		if bridgeErr != nil {
 			return nil, fmt.Errorf("futu: %w; bridge: %w", err, bridgeErr)
@@ -566,6 +569,7 @@ func FetchCrossAssetFromFutu(days int) (*CrossAssetFutuPrices, error) {
 	out.UUPPrice, out.UUPHistory, out.UUPPriceAsOf = c.futuFetchOne("US.UUP", days, &out.Warnings)
 	out.TLTPrice, out.TLTHistory, out.TLTPriceAsOf = c.futuFetchOne("US.TLT", days, &out.Warnings)
 	out.VIXYPrice, out.VIXYHistory, out.VIXYPriceAsOf = c.futuFetchOne("US.VIXY", days, &out.Warnings)
+	out.WTIPrice, out.WTIHistory, out.WTIPriceAsOf = c.futuFetchOne("US.USO", days, &out.Warnings)
 
 	return out, nil
 }

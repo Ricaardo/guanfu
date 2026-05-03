@@ -8,7 +8,7 @@ import (
 
 // CurrentMarketSnapshotSchemaVersion guards the on-disk market cache contract.
 // Bump this when MarketSnapshot gains fields that materially change panel output.
-const CurrentMarketSnapshotSchemaVersion = 2
+const CurrentMarketSnapshotSchemaVersion = 3
 
 // MarketSnapshot 包含了计算宏观评分所需的所有市场数据
 type MarketSnapshot struct {
@@ -117,6 +117,9 @@ type MarketSnapshot struct {
 	GoldETFPriceUSD   decimal.Decimal // GLD 实物黄金 ETF
 	GoldETFHistory    []decimal.Decimal
 	GoldETFAsOf       string
+	WTIPrice          decimal.Decimal // WTI 原油价格 (Futu USO > Yahoo CL=F)
+	WTIHistory        []decimal.Decimal
+	WTIPriceAsOf      string
 	UUPPrice          decimal.Decimal // 做多美元 ETF (DXY proxy)
 	UUPHistory        []decimal.Decimal
 	UUPPriceAsOf      string

@@ -365,6 +365,9 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 		snap.GoldETFPriceUSD = decimal.NewFromFloat(ca.GLDPrice)
 		snap.GoldETFHistory = toDecimalSlice(ca.GLDHistory)
 		snap.GoldETFAsOf = ca.GLDPriceAsOf
+		snap.WTIPrice = decimal.NewFromFloat(ca.WTIPrice)
+		snap.WTIHistory = toDecimalSlice(ca.WTIHistory)
+		snap.WTIPriceAsOf = ca.WTIPriceAsOf
 		snap.UUPPrice = decimal.NewFromFloat(ca.UUPPrice)
 		snap.UUPHistory = toDecimalSlice(ca.UUPHistory)
 		snap.UUPPriceAsOf = ca.UUPPriceAsOf

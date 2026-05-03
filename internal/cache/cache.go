@@ -73,6 +73,10 @@ func (c *Cache) Get(date time.Time) (*model.MarketSnapshot, bool) {
 		return nil, false
 	}
 
+	// 版本检查：schema 过期则视为未命中，触发重新拉取
+	if snapshot.SnapshotSchemaVersion < model.CurrentMarketSnapshotSchemaVersion {
+		return nil, false
+	}
 	// 返回副本以避免外部修改
 	return c.copySnapshot(snapshot), true
 }

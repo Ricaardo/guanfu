@@ -25,6 +25,9 @@ import (
 type yahooChartResp struct {
 	Chart struct {
 		Result []struct {
+			Meta struct {
+				RegularMarketPrice float64 `json:"regularMarketPrice"`
+			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {
 				Quote []struct {
@@ -87,8 +90,8 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 		}
 	}
 
+	// Yahoo Finance fallback (QQQ, SPY only — WTI fetched below)
 	if !futuOK {
-		// Yahoo Finance fallback
 		type result struct {
 			symbol  string
 			price   float64
@@ -119,6 +122,17 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 				out.SPYHistory = r.history
 				out.SPYPriceAsOf = r.asOf
 			}
+		}
+	}
+
+	// WTI 原油：Futu US.USO 优先，失败时用 Yahoo CL=F 降级
+	if out.WTIPrice <= 0 {
+		if p, h, a, e := fetchYahooChart(ctx, hc, "CL=F", targetDays); e != nil {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("WTI fetch failed: %v", e))
+		} else if p > 0 {
+			out.WTIPrice = p
+			out.WTIHistory = h
+			out.WTIPriceAsOf = a
 		}
 	}
 
@@ -202,13 +216,13 @@ func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, target
 	from := now - int64(targetDays*86400)
 
 	params := url.Values{}
-	params.Set("symbol", symbol)
+	// symbol is in the path, not needed in query params
 	params.Set("period1", fmt.Sprintf("%d", from))
 	params.Set("period2", fmt.Sprintf("%d", now))
 	params.Set("interval", "1d")
 	params.Set("includePrePost", "false")
 
-	apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?%s", symbol, params.Encode())
+	apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?%s", url.PathEscape(symbol), params.Encode())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -244,13 +258,23 @@ func fetchYahooChart(ctx context.Context, hc *http.Client, symbol string, target
 		}
 	}
 
-	for i := len(history) - 1; i >= 0; i-- {
-		if history[i] > 0 {
-			price = history[i]
-			if i < len(result.Timestamp) {
-				asOf = time.Unix(result.Timestamp[i], 0).UTC().Format("2006-01-02")
+	// Prefer meta.regularMarketPrice for the latest price (more reliable than iterating closes)
+	if meta := result.Meta; meta.RegularMarketPrice > 0 {
+		price = meta.RegularMarketPrice
+		if len(result.Timestamp) > 0 {
+			asOf = time.Unix(result.Timestamp[len(result.Timestamp)-1], 0).UTC().Format("2006-01-02")
+		}
+	}
+	// Fallback: iterate closes
+	if price == 0 {
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i] > 0 {
+				price = history[i]
+				if i < len(result.Timestamp) {
+					asOf = time.Unix(result.Timestamp[i], 0).UTC().Format("2006-01-02")
+				}
+				break
 			}
-			break
 		}
 	}
 
@@ -286,5 +310,9 @@ type CrossAssetPrices struct {
 	VIXYPrice     float64
 	VIXYHistory   []float64
 	VIXYPriceAsOf string
-	Warnings      []string
+	// Crude Oil (Yahoo Finance CL=F — WTI futures)
+	WTIPrice     float64
+	WTIHistory   []float64
+	WTIPriceAsOf string
+	Warnings     []string
 }
