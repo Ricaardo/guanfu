@@ -489,10 +489,10 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 
 	// ── AHR999 压缩版（sqrt-AHR: pow(raw, 0.75), 主估值信号）──
 	// 回测验证：压缩后 5.0-20.0 桶 fwd180 -15.4%，显著优于原始 AHR999 的分档效果。
-	// 推荐作为唯一主 AHR 指标，自适应版已降级为分歧检测。
+	// 推荐作为唯一主 AHR 信号源，自适应版降级为分歧检测的诊断量。
 	_, ahrCompressed, ahrOrig, compOK := c.calcCompressedAhr999(snap)
 	if compOK {
-		p.Valuation["ahr999"] = model.Indicator{
+		p.Valuation["ahr999_compressed"] = model.Indicator{
 			Value:     ahrCompressed,
 			Label:     ahrCompressedLabel(ahrCompressed),
 			Source:    "binance + power-law (compressed)",
@@ -501,17 +501,17 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 		}
 	}
 
-	// ── AHR999 自适应版（分歧检测用，不展示分桶）──
+	// ── AHR999 自适应版（展示用 + 分歧检测诊断量）──
 	_, ahrAdaptiveRaw, ahrQ, adaptiveOK := c.calcAhr999Detailed(snap)
 	if adaptiveOK && !ahrAdaptiveRaw.IsZero() {
 		raw := f(ahrAdaptiveRaw)
-		p.Valuation["ahr999_adaptive"] = model.Indicator{
+		p.Valuation["ahr999"] = model.Indicator{
 			Value:     raw,
 			Quantile:  displayQuantile(ahrQ),
 			Label:     ahrLabel(raw),
 			Source:    "binance + adaptive log-log fit",
 			UpdatedAt: btcTS,
-			Note:      "自适应 AHR（降级为分歧检测）。回测显示极端牛市后 fair value 上移导致分桶失效。仅与压缩版对比时启用分歧检测",
+			Note:      "自适应 AHR（展示用 + 分歧检测）。回测显示极端牛市后 fair value 上移导致分桶失效，决策请用 ahr999_compressed",
 		}
 	}
 

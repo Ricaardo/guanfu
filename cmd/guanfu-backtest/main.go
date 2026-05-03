@@ -377,7 +377,7 @@ func buildBacktestPanel(closes []float64, dates []time.Time, date string, ext ma
 	// 与生产版算法一致（同 internal/engine/calculator.calcCompressedAhr999）
 	idx := len(closes) - 1
 	if cahr, ok := calcCompressedAHR(closes, dates, idx); ok {
-		p.Valuation["ahr999"] = model.Indicator{
+		p.Valuation["ahr999_compressed"] = model.Indicator{
 			Value:  cahr,
 			Label:  compressedBucket(cahr),
 			Source: "kline:harmonic+powerlaw+pow075",
