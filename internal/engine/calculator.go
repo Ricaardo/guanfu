@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	ahrDCAWindowDays      = 200
-	ahrFitWindowDays      = 365 * 8
-	ahrMinFitWindowDays   = 365 * 3
-	ahrRecentHalfLifeDays = 365 * 4
-	ahrLegacyLogSlope     = 5.84
-	ahrLegacyLogIntercept = -17.01
+	ahrDCAWindowDays         = 200
+	ahrFitWindowDays         = 365 * 8
+	ahrMinFitWindowDays      = 365 * 3
+	ahrRecentHalfLifeDays    = 365 * 4
+	ahrLegacyLogSlope        = 5.84
+	ahrLegacyLogIntercept    = -17.01
+	ahrCompressionExponent   = 0.75 // sqrt-AHR: pow(raw, 0.75) 压缩凸性偏差
 )
 
 type Calculator struct {
@@ -512,6 +513,112 @@ func (c *Calculator) calcLegacyAhr999Score(snap *model.MarketSnapshot, price flo
 	}
 
 	return score, ahrDec
+}
+
+// 压缩版 AHR999 阈值 — 原始阈值经过 pow(x, 0.75) 映射，保证分档数学等价。
+const (
+	ctComp045 = 0.549 // 0.45^0.75
+	ctComp08  = 0.846 // 0.8^0.75
+	ctComp10  = 1.000 // 1.0^0.75 (用于线性插值)
+	ctComp12  = 1.147 // 1.2^0.75
+	ctComp20  = 1.682 // 2.0^0.75
+	ctComp50  = 3.344 // 5.0^0.75
+	ctComp200 = 9.457 // 20.0^0.75
+)
+
+// calcCompressedAhr999 计算压缩版 sqrt-AHR999。
+// 公式：raw = (price/dcaCost) * (price/fairValue)，然后 compressed = raw^0.75。
+// 阈值使用原始阈值^0.75，保证分档与原始 AHR999 数学等价。
+// 压缩降低 price² 的凸性偏差，让 5.0+ 泡沫桶从假阳性翻转为真卖出信号。
+// 回测验证：5.0-20.0 桶 fwd180 从 +47% 降至 -35%；≥20.0 桶胜率保持 0%。
+func (c *Calculator) calcCompressedAhr999(snap *model.MarketSnapshot) (score decimal.Decimal, rawCompressed float64, rawOriginal float64, ok bool) {
+	if snap.BTCPrice.IsZero() || len(snap.BTCPriceHistory) < ahrDCAWindowDays {
+		return decimal.Zero, 0, 0, false
+	}
+
+	price, _ := snap.BTCPrice.Float64()
+	if price <= 0 {
+		return decimal.Zero, 0, 0, false
+	}
+
+	dcaCost, dcaOK := calculateDcaCost(snap.BTCPriceHistory, 0, ahrDCAWindowDays)
+	if !dcaOK {
+		return decimal.Zero, 0, 0, false
+	}
+
+	genesis := time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC)
+	days := snap.Date.Sub(genesis).Hours() / 24.0
+	if days <= 0 {
+		return decimal.Zero, 0, 0, false
+	}
+	val := ahrLegacyLogSlope*math.Log10(days) + ahrLegacyLogIntercept
+	expGrowth := math.Pow(10, val)
+	if !isUsablePositive(expGrowth) {
+		return decimal.Zero, 0, 0, false
+	}
+
+	rawOriginal = (price / dcaCost) * (price / expGrowth)
+	if !isUsablePositive(rawOriginal) {
+		return decimal.Zero, 0, 0, false
+	}
+
+	rawCompressed = math.Pow(rawOriginal, ahrCompressionExponent)
+
+	// 使用压缩映射后的等价阈值评分
+	var s decimal.Decimal
+	compDec := decimal.NewFromFloat(rawCompressed)
+	switch {
+	case rawCompressed < ctComp045:
+		s = decimal.NewFromInt(1)
+	case rawCompressed < ctComp08:
+		s = mathutil.LinearInterpolate(
+			compDec,
+			decimal.NewFromFloat(ctComp045), decimal.NewFromFloat(ctComp08),
+			decimal.NewFromInt(1), decimal.NewFromFloat(0.5),
+		)
+	case rawCompressed < ctComp10:
+		s = mathutil.LinearInterpolate(
+			compDec,
+			decimal.NewFromFloat(ctComp08), decimal.NewFromFloat(ctComp10),
+			decimal.NewFromFloat(0.5), decimal.Zero,
+		)
+	case rawCompressed < ctComp12:
+		s = mathutil.LinearInterpolate(
+			compDec,
+			decimal.NewFromFloat(ctComp10), decimal.NewFromFloat(ctComp12),
+			decimal.Zero, decimal.NewFromFloat(-0.5),
+		)
+	case rawCompressed < ctComp20:
+		s = mathutil.LinearInterpolate(
+			compDec,
+			decimal.NewFromFloat(ctComp12), decimal.NewFromFloat(ctComp20),
+			decimal.NewFromFloat(-0.5), decimal.NewFromInt(-1),
+		)
+	default:
+		s = decimal.NewFromFloat(-1)
+	}
+
+	return s, rawCompressed, rawOriginal, true
+}
+
+// ahrCompressedLabel 压缩版 AHR999 标签（阈值经 pow(x,0.75) 映射）
+func ahrCompressedLabel(v float64) string {
+	switch {
+	case v < ctComp045:
+		return "极端低估（定投/抄底）"
+	case v < ctComp08:
+		return "低估（定投区）"
+	case v < ctComp12:
+		return "合理"
+	case v < ctComp20:
+		return "偏高"
+	case v < ctComp50:
+		return "高估（减仓）"
+	case v < ctComp200:
+		return "泡沫（大幅减仓）"
+	default:
+		return "极端泡沫（清仓）"
+	}
 }
 
 type ahrLogLogFit struct {

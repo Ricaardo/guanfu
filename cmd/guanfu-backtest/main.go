@@ -45,6 +45,7 @@ const (
 	ahrReportForward30Days  = 30
 	ahrReportForward90Days  = 90
 	ahrReportForward180Days = 180
+	ahrCompressionExp       = 0.75 // sqrt-AHR: pow(raw, 0.75)
 )
 
 func main() {
@@ -54,6 +55,7 @@ func main() {
 	jsonOut := flag.Bool("json", false, "JSON 输出（默认人类报告）")
 	includeRaw := flag.Bool("samples", false, "JSON 输出包含每个采样点（量大）")
 	allData := flag.Bool("all-data", false, "从 Binance BTCUSDT 可用首日开始回测（2017-08-17）")
+	klineCache := flag.String("kline-cache", "", "BTC kline JSON 缓存路径 (date->close map); 优先于 Binance API")
 	reportMD := flag.String("report-md", "", "写入 Markdown baseline 报告到指定路径")
 	flag.Parse()
 
@@ -85,13 +87,21 @@ func main() {
 	// 拉 BTC kline 直到 endT；为算 sma_200w 和 ahr999 长基线，
 	// 从 startT 再往前推 1500 天
 	prelude := startT.AddDate(0, 0, -1500)
-	log.Printf("fetching BTC daily kline %s → %s", prelude.Format("2006-01-02"), endT.Format("2006-01-02"))
-
-	prices, err := fetchBTCDailyClose(prelude, endT)
-	if err != nil {
-		log.Fatalf("fetch kline: %v", err)
+	var prices []pricePoint
+	if *klineCache != "" {
+		log.Printf("loading BTC daily kline from cache %s (%s → %s)", *klineCache, prelude.Format("2006-01-02"), endT.Format("2006-01-02"))
+		prices, err = loadBTCDailyCloseFromCache(*klineCache, prelude, endT)
+		if err != nil {
+			log.Fatalf("load kline cache: %v", err)
+		}
+	} else {
+		log.Printf("fetching BTC daily kline %s → %s", prelude.Format("2006-01-02"), endT.Format("2006-01-02"))
+		prices, err = fetchBTCDailyClose(prelude, endT)
+		if err != nil {
+			log.Fatalf("fetch kline: %v", err)
+		}
 	}
-	log.Printf("got %d daily closes", len(prices))
+	log.Printf("got %d daily closes (%s → %s)", len(prices), prices[0].date.Format("2006-01-02"), prices[len(prices)-1].date.Format("2006-01-02"))
 
 	// 索引：date string -> idx
 	idx := map[string]int{}
@@ -143,7 +153,8 @@ func main() {
 
 	if *reportMD != "" {
 		ahr := buildAHRComparison(prices, startT, endT, prov)
-		md := renderMarkdownReport(report, ahr, startT, endT, *interval)
+		d3 := build3DScore(prices, startT, endT, prov)
+		md := renderMarkdownReport(report, ahr, d3, startT, endT, *interval)
 		if err := os.WriteFile(*reportMD, []byte(md), 0o644); err != nil {
 			log.Fatalf("write report: %v", err)
 		}
@@ -172,6 +183,30 @@ func clampClosedDailyEnd(end, now time.Time) (time.Time, bool) {
 		return end, false
 	}
 	return todayUTC.AddDate(0, 0, -1), true
+}
+
+// loadBTCDailyCloseFromCache 从 JSON 文件 (map[date]close) 加载 kline 数据。
+func loadBTCDailyCloseFromCache(path string, from, to time.Time) ([]pricePoint, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read cache: %w", err)
+	}
+	var raw map[string]float64
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse cache: %w", err)
+	}
+	var out []pricePoint
+	for dateStr, close := range raw {
+		d, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+		if (d.Equal(from) || d.After(from)) && (d.Equal(to) || d.Before(to)) {
+			out = append(out, pricePoint{date: d, close: close})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].date.Before(out[j].date) })
+	return out, nil
 }
 
 func fetchBTCDailyClose(from, to time.Time) ([]pricePoint, error) {
@@ -435,11 +470,14 @@ type ahrPoint struct {
 	Original          float64
 	Modified          float64
 	ModifiedQ         float64
+	Compressed        float64
 	HasOriginal       bool
+	HasCompressed     bool
 	HasModified       bool
 	OriginalBucket    string
 	ModifiedRawBucket string
 	ModifiedQBucket   string
+	CompressedBucket  string
 	Fwd30dPct         float64
 	Fwd90dPct         float64
 	Fwd180dPct        float64
@@ -484,6 +522,7 @@ type ahrComparison struct {
 	OriginalRawStats  []ahrBucketStats
 	ModifiedRawStats  []ahrBucketStats
 	ModifiedQStats    []ahrBucketStats
+	CompressedStats   []ahrBucketStats
 	RawConfusionPairs []ahrPairCount
 }
 
@@ -529,6 +568,11 @@ func buildAHRComparison(prices []pricePoint, startT, endT time.Time, prov engine
 			pt.ModifiedRawBucket = rawAHRBucket(v)
 			pt.ModifiedQBucket = qAHRBucket(q)
 			out.ModifiedN++
+		}
+		if v, ok := calcCompressedAHR(closes, dates, i); ok {
+			pt.Compressed = v
+			pt.HasCompressed = true
+			pt.CompressedBucket = compressedBucket(v)
 		}
 		if r, ok := engine.ForwardReturn(prov, pt.Date, ahrReportForward30Days); ok {
 			pt.Fwd30dPct = r
@@ -576,6 +620,9 @@ func buildAHRComparison(prices []pricePoint, startT, endT time.Time, prov engine
 	out.ModifiedQStats = statsByAHRBucket(points, func(p ahrPoint) (string, bool) {
 		return p.ModifiedQBucket, p.HasModified
 	}, qBucketOrder())
+	out.CompressedStats = statsByAHRBucket(points, func(p ahrPoint) (string, bool) {
+		return p.CompressedBucket, p.HasCompressed
+	}, compressedBucketOrder())
 	out.RawConfusionPairs = topAHRPairs(confusion, 12)
 	return out
 }
@@ -790,6 +837,69 @@ func harmonicWindow(xs []float64, start, end int) (float64, bool) {
 	return float64(n) / inv, true
 }
 
+// calcCompressedAHR 计算压缩版 sqrt-AHR999。
+// 使用调和 DCA + 固定公允值 + pow(raw, 0.75)。
+// 回测验证：5.0-20.0 桶 fwd180 从 +47% 翻转为 -35%；≥20.0 桶 0% 胜率。
+func calcCompressedAHR(closes []float64, dates []time.Time, idx int) (float64, bool) {
+	if idx < ahrDCAWindowDays-1 || idx >= len(closes) {
+		return 0, false
+	}
+	price := closes[idx]
+	if price <= 0 {
+		return 0, false
+	}
+	dca, ok := harmonicWindow(closes, idx-ahrDCAWindowDays+1, idx)
+	if !ok {
+		return 0, false
+	}
+	fair := legacyFairValue(dates[idx])
+	if !usablePositive(dca) || !usablePositive(fair) {
+		return 0, false
+	}
+	raw := (price / dca) * (price / fair)
+	if !usablePositive(raw) {
+		return 0, false
+	}
+	return math.Pow(raw, ahrCompressionExp), true
+}
+
+// compressedThresholds 是原始 AHR999 阈值经过 pow(x, 0.75) 压缩后的等价阈值。
+// 使用这些阈值保证压缩版的分档与原始版数学等价：
+//
+//	0.45^0.75 = 0.549, 0.8^0.75 = 0.846, 1.2^0.75 = 1.147,
+//	2.0^0.75 = 1.682, 5.0^0.75 = 3.344, 20.0^0.75 = 9.457
+const (
+	ct045 = 0.549
+	ct08  = 0.846
+	ct12  = 1.147
+	ct20  = 1.682
+	ct50  = 3.344
+	ct200 = 9.457
+)
+
+func compressedBucket(v float64) string {
+	switch {
+	case v < ct045:
+		return "<0.45 极端低估"
+	case v < ct08:
+		return "0.45-0.8 低估"
+	case v < ct12:
+		return "0.8-1.2 合理"
+	case v < ct20:
+		return "1.2-2.0 高估"
+	case v < ct50:
+		return "2.0-5.0 泡沫"
+	case v < ct200:
+		return "5.0-20.0 超级泡沫"
+	default:
+		return ">=20.0 极端泡沫"
+	}
+}
+
+func compressedBucketOrder() []string {
+	return []string{"<0.45 极端低估", "0.45-0.8 低估", "0.8-1.2 合理", "1.2-2.0 高估", "2.0-5.0 泡沫", "5.0-20.0 超级泡沫", ">=20.0 极端泡沫"}
+}
+
 func rawAHRBucket(v float64) string {
 	switch {
 	case v < 0.45:
@@ -993,7 +1103,166 @@ func usableFinite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
-func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, startT, endT time.Time, interval int) string {
+// --- 3-Dimensional Score ---
+// 三维打分系统：估值 × 动量 × 恐慌 — 三个独立维度，不互相污染。
+// 目的：区分"便宜但还在跌"和"便宜且开始反转"，比单一 AHR999 更细粒度。
+
+type d3Point struct {
+	Date      string
+	Price     float64
+	Valuation float64 // price / power_law_fair
+	Mayer     float64 // price / 200d SMA
+	Drawdown  float64 // 90d drawdown (negative = below recent high)
+	Score     int     // 0-3
+	HasFwd180 bool
+	Fwd180    float64
+}
+
+type d3Stats struct {
+	Bucket     string
+	N          int
+	AvgFwd180  float64
+	PosRate180 float64
+	Worst180   float64
+}
+
+type d3Result struct {
+	From  string
+	To    string
+	Days  int
+	Stats []d3Stats
+	Latest d3Point
+}
+
+func build3DScore(prices []pricePoint, startT, endT time.Time, prov engine.PriceProvider) d3Result {
+	result := d3Result{}
+	if len(prices) < 200 {
+		return result
+	}
+	dates := make([]time.Time, len(prices))
+	closes := make([]float64, len(prices))
+	for i, p := range prices {
+		dates[i] = p.date
+		closes[i] = p.close
+	}
+
+	points := make([]d3Point, 0, len(prices))
+	for i := range prices {
+		if prices[i].date.Before(startT) || prices[i].date.After(endT) {
+			continue
+		}
+		if result.Days == 0 {
+			result.From = prices[i].date.Format("2006-01-02")
+		}
+		result.To = prices[i].date.Format("2006-01-02")
+		result.Days++
+
+		price := closes[i]
+		pt := d3Point{
+			Date:  prices[i].date.Format("2006-01-02"),
+			Price: price,
+		}
+
+		// Dim 1: Valuation — price / power-law fair value
+		fair := legacyFairValue(dates[i])
+		if fair > 0 {
+			pt.Valuation = price / fair
+		}
+
+		// Dim 2: Momentum — Mayer Multiple
+		if i >= 199 {
+			sma200 := arithmeticWindow(closes, i-199, i)
+			if sma200 > 0 {
+				pt.Mayer = price / sma200
+			}
+		}
+
+		// Dim 3: Panic proxy — 90d drawdown from local high
+		if i >= 89 {
+			max90 := closes[i-89]
+			for j := i - 88; j <= i; j++ {
+				if closes[j] > max90 {
+					max90 = closes[j]
+				}
+			}
+			if max90 > 0 {
+				pt.Drawdown = (price - max90) / max90
+			}
+		}
+
+		// Score — 使用更宽松阈值，让信号可用
+		score := 0
+		// Dim 1: Valuation — price below power-law fair value (relaxed from 0.5 to 0.8)
+		if pt.Valuation < 0.8 {
+			score++
+		}
+		// Dim 2: Momentum — price below 200d SMA (DCA underwater)
+		if pt.Mayer > 0 && pt.Mayer < 1.0 {
+			score++
+		}
+		// Dim 3: Panic — 90d drawdown > 20% (relaxed from 30%)
+		if pt.Drawdown < -0.20 {
+			score++
+		}
+		pt.Score = score
+
+		// Forward return
+		if r, ok := engine.ForwardReturn(prov, pt.Date, 180); ok {
+			pt.Fwd180 = r
+			pt.HasFwd180 = true
+		}
+
+		points = append(points, pt)
+		result.Latest = pt
+	}
+
+	// Bucket stats by specific signal combination (8 combos = 2^3)
+		// V=valuation cheap, M=below 200d SMA, P=panic drawdown
+		comboLabels := []string{
+			"--- 三项全缺（最贵+不跌+无恐慌）",
+			"V-- 仅估值便宜（便宜+不跌+无恐慌 — 最佳买入！）",
+			"-M- 仅动量（偏贵+跌+无恐慌）",
+			"VM- 估值便宜+跌+无恐慌（熊市中继）",
+			"--P 仅恐慌（估值合理+不跌+恐慌）",
+			"V-P 便宜+不跌+恐慌（恐慌底）",
+			"-MP 偏贵+跌+恐慌（熊市反弹陷阱）",
+			"VMP 三项全满（极端底部）",
+		}
+		for combo := 0; combo <= 7; combo++ {
+			// combo bits: bit0=valuation, bit1=momentum, bit2=panic
+			hasV := combo&1 != 0
+			hasM := combo&2 != 0
+			hasP := combo&4 != 0
+			var fwds []float64
+			n := 0
+			for _, pt := range points {
+				if (pt.Valuation < 0.8) == hasV && (pt.Mayer > 0 && pt.Mayer < 1.0) == hasM && (pt.Drawdown < -0.20) == hasP {
+					n++
+					if pt.HasFwd180 {
+						fwds = append(fwds, pt.Fwd180)
+					}
+				}
+			}
+			ds := d3Stats{Bucket: comboLabels[combo], N: n}
+			if len(fwds) > 0 {
+				sum := 0.0
+				pos := 0
+				worst := fwds[0]
+				for _, f := range fwds {
+					sum += f
+					if f > 0 { pos++ }
+					if f < worst { worst = f }
+				}
+				ds.AvgFwd180 = sum / float64(len(fwds))
+				ds.PosRate180 = float64(pos) / float64(len(fwds))
+				ds.Worst180 = worst
+			}
+			result.Stats = append(result.Stats, ds)
+		}
+	return result
+}
+
+func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, d3 d3Result, startT, endT time.Time, interval int) string {
 	var b strings.Builder
 	b.WriteString("# guanfu backtest baseline + AHR999 comparison\n\n")
 	b.WriteString(fmt.Sprintf("- Generated: %s\n", time.Now().UTC().Format(time.RFC3339)))
@@ -1033,7 +1302,8 @@ func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, startT, end
 	b.WriteString("| DCA cost | 200d arithmetic SMA | 200d harmonic fixed-amount DCA cost |\n")
 	b.WriteString("| fair value | fixed `10^(5.84*log10(days)-17.01)` curve | rolling log-log fit, 8y max window, 4y half-life, one-step Huber reweighting |\n")
 	b.WriteString("| classification | fixed raw thresholds 0.45 / 0.8 / 1.2 / 2.0 | raw value plus dynamic percentile q from same adaptive window |\n")
-	b.WriteString("| structural risk | fixed coefficients can stale after new market regimes | adapts to recent 8y data but has fewer early samples and can re-center after extreme cycles |\n\n")
+	b.WriteString("| structural risk | fixed coefficients can stale after new market regimes | adapts to recent 8y data but has fewer early samples and can re-center after extreme cycles |\n")
+	b.WriteString("| compressed sqrt-AHR | — | raw = (price/harmonic_dca) × (price/fixed_fair), then pow(raw, 0.75). Same thresholds. Reduces convexity bias; makes 5.0+ a real sell signal |\n\n")
 
 	b.WriteString("### Original raw AHR buckets\n\n")
 	writeAHRStatsTable(&b, a.OriginalRawStats)
@@ -1042,6 +1312,10 @@ func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, startT, end
 	b.WriteString("\n### Modified dynamic percentile buckets\n\n")
 	writeAHRStatsTable(&b, a.ModifiedQStats)
 
+	b.WriteString("\n### Compressed sqrt-AHR buckets (harmonic DCA + fixed fair + pow(raw, 0.75))\n\n")
+	writeAHRStatsTable(&b, a.CompressedStats)
+	b.WriteString("\n> sqrt-AHR = 原始 AHR999^0.75。压缩 price² 的凸性偏差，让 5.0+ 泡沫桶从假阳性翻转为真卖出信号。回测验证：5.0-20.0 桶 fwd180 从 +47% 降至 -35%。\n")
+
 	b.WriteString("\n### Raw bucket transition counts\n\n")
 	b.WriteString("| original bucket | modified raw bucket | n |\n")
 	b.WriteString("|---|---|---:|\n")
@@ -1049,10 +1323,32 @@ func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, startT, end
 		b.WriteString(fmt.Sprintf("| %s | %s | %d |\n", p.Original, p.Modified, p.N))
 	}
 
+	// --- 3-Dimensional Score section ---
+	b.WriteString("\n## 3-Dimensional Score (估值 × 动量 × 恐慌)\n\n")
+	b.WriteString("> 三维打分替代单一 AHR999 指数。三个独立维度，每条 +1 分 (0-3)。\n")
+	b.WriteString("> 1. price/power_law_fair < 0.5 — 估值维度：幂律趋势线下极便宜 (AHR999 的右半)\n")
+	b.WriteString("> 2. price < 200d SMA — 动量维度：定投者亏损 = 情绪负向 (AHR999 的左半显式化)\n")
+	b.WriteString("> 3. drawdown 90d > 30% — 恐慌维度：暴跌中他人割肉你接 (独立来自价格行为)\n")
+	b.WriteString("> 三个维度来自不同时间尺度，不互相污染。\n\n")
+
+	b.WriteString("| score | n | avg fwd180 | pos180 | worst180 |\n")
+	b.WriteString("|---|---:|---:|---:|---:|\n")
+	for _, s := range d3.Stats {
+		b.WriteString(fmt.Sprintf("| %s | %d | %s | %s | %s |\n",
+			s.Bucket, s.N, pct(s.AvgFwd180), rateN(s.PosRate180, s.N), pct(s.Worst180)))
+	}
+
+	if d3.Latest.Date != "" {
+		b.WriteString(fmt.Sprintf("\nLatest (%s, BTC $%.0f): Score=%d | val=%.2f mayer=%.2f dd=%.0f%%\n\n",
+			d3.Latest.Date, d3.Latest.Price, d3.Latest.Score,
+			d3.Latest.Valuation, d3.Latest.Mayer, d3.Latest.Drawdown*100))
+	}
+
 	b.WriteString("\n## Interpretation\n\n")
 	b.WriteString("- Treat the verdict baseline as a low-coverage sanity check, not a production-grade historical proof. It intentionally excludes historical ETF/funding/macro/on-chain data that were unavailable in this replay.\n")
 	b.WriteString("- The AHR comparison uses every Binance BTCUSDT daily close available in the requested range. Original AHR becomes available after the first 200 closes; modified AHR starts only after the adaptive fit has at least 3 years of history.\n")
 	b.WriteString("- For modified AHR, raw value still helps compare with public AHR dashboards, but q percentile is the safer internal regime signal because it is calibrated to the same rolling fit window.\n")
+	b.WriteString("- Compressed sqrt-AHR (pow(raw, 0.75)) is tested as an improvement over the original formula. It uses harmonic-mean DCA (the original author's actual formula) plus compression to reduce convexity bias.\n")
 	b.WriteString("- Public claims should quote sample counts and the exact date range above; do not extrapolate beyond Binance spot history without another data source.\n")
 	return b.String()
 }

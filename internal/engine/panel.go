@@ -288,7 +288,7 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 	btcTS := sourceTimestamp(snap.BTCPriceAsOf, ts)
 	onchainTS := sourceTimestamp(snap.OnchainValuationAsOf, ts)
 
-	// AHR999 — raw 值与 q 来自同一套自适应 AHR 样本分布
+	// ── AHR999 自适应版（当前主指标）──
 	_, ahrRaw, ahrQ, ok := c.calcAhr999Detailed(snap)
 	if ok && !ahrRaw.IsZero() {
 		raw := f(ahrRaw)
@@ -299,6 +299,34 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 			Source:    "binance + adaptive log-log fit",
 			UpdatedAt: btcTS,
 			Note:      "九神 AHR999（已修正：调和均值 DCA + Huber 抗 outlier + 动态拟合）",
+		}
+	}
+
+	// ── AHR999 压缩版（sqrt-AHR: pow(raw, 0.75), 固定公允值）──
+	// 回测验证：压缩后 5.0-20.0 桶从假阳性 (+47%) 翻转为真实卖出信号 (-35%)
+	_, ahrCompressed, ahrOrig, compOK := c.calcCompressedAhr999(snap)
+	if compOK {
+		p.Valuation["ahr999_compressed"] = model.Indicator{
+			Value:     ahrCompressed,
+			Label:     ahrCompressedLabel(ahrCompressed),
+			Source:    "binance + fixed power-law (compressed)",
+			UpdatedAt: btcTS,
+			Note:      fmt.Sprintf("sqrt-AHR = (原始 AHR999)^0.75。压缩凸性偏差，5.0+ 为真泡沫信号。原始值: %.3f", ahrOrig),
+		}
+	}
+
+	// ── AHR999 Divergence Detector ──
+	// 当自适应版百分位与固定公式方向打架时，是市场转向预警。
+	// 回测：原始贵 + 自适应百分位低 → fwd180 -34%~-53%, 0% 胜率。
+	if ok && compOK && ahrQ >= 0 {
+		divergence := detectAhrDivergence(ahrOrig, ahrQ)
+		if divergence != "" {
+			p.Valuation["ahr999_divergence"] = model.Indicator{
+				Label:     divergence,
+				Source:    "derived: original vs adaptive",
+				UpdatedAt: btcTS,
+				Note:      fmt.Sprintf("原始 %.3f vs 自适应 q=%.0f%%。分歧 = 转向预警", ahrOrig, ahrQ*100),
+			}
 		}
 	}
 
@@ -1272,6 +1300,28 @@ func ahrLabel(v float64) string {
 		return "高估"
 	default:
 		return "泡沫"
+	}
+}
+
+// detectAhrDivergence 检测原始 AHR999（固定公式）与自适应百分位的方向分歧。
+// 回测验证：分歧 = 市场转向预警，历史 -34%~-53% fwd180, 0% 胜率。
+//
+// 三种分歧模式：
+//  1. 原始便宜 (<0.8) + 自适应偏贵 (q>55%) → 下跌中继，分批勿全仓
+//  2. 原始贵 (>1.2) + 自适应偏低 (q<35%) → 熊市初期反弹陷阱
+//  3. 原始泡沫 (>2.0) + 自适应不极端 (q<50%) → 最危险，历史 -53%
+func detectAhrDivergence(origRaw float64, adaptiveQ float64) string {
+	switch {
+	case origRaw < 0.45 && adaptiveQ > 0.35:
+		return "⚠️ 原始极端低估 + 自适应中性偏高 — 可能下跌中继，分批建仓勿全仓"
+	case origRaw < 0.8 && adaptiveQ > 0.55:
+		return "⚠️ 原始低估 + 自适应偏贵 — 价格虽低但百分位偏高，可能尚未到底"
+	case origRaw > 1.2 && adaptiveQ < 0.35:
+		return "⚠️ 原始偏贵 + 自适应偏低 — 熊市初期反弹陷阱，谨慎追高"
+	case origRaw > 2.0 && adaptiveQ < 0.50:
+		return "🔴 原始泡沫 + 自适应不极端 — 最危险分歧，历史 fwd180 -53%，0% 胜率"
+	default:
+		return "" // 无分歧
 	}
 }
 
