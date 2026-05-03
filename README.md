@@ -148,7 +148,7 @@ Network 网络
 | 域 | 核心指标 |
 |----|----------|
 | 🌊 Cycle 周期 | halving 天数、200wSMA 偏离、Mayer Multiple、Pi Cycle Top |
-| 💰 Valuation 估值 | AHR999（改进版）、MVRV、MVRV Z-Score、NUPL |
+| 💰 Valuation 估值 | **ahr999_compressed**（推荐）、ahr999（自适应）、ahr999_divergence、MVRV、NUPL |
 | ⛏️ Network 网络 | 哈希率、Hash Ribbons、难度调整、Mempool 拥堵 |
 | 📊 Positioning 杠杆 | 资金费率、OI/MC、恐慌贪婪、山寨季指数（自算） |
 | 🌍 Macro 宏观 | DXY 60d 趋势、10Y TIPS、M2 同比、SPX 相关性 |
@@ -208,15 +208,21 @@ guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
 
 ## 关键算法
 
-### AHR999（改进版）
+### AHR999（三个版本）
 
-```
-ahr999 = (price / DCA_200d) × (price / fair_value)
-DCA_200d = 200 / Σ(1/price_i)         ← 调和均值（非算术）
-fair_value = exp(α + β × log(age))    ← Huber IRLS 动态拟合
-```
+| 版本 | 面板指标 | 公式 | 用途 |
+|---|---|---|---|
+| 自适应版 | `ahr999` | 调和DCA + Huber IRLS 动态拟合 + 动态分位数 | 辅助确认 |
+| **压缩版** | **`ahr999_compressed`** | pow(固定公式 AHR, 0.75)，阈值 pow(x,0.75) 映射 | **推荐主用** |
+| 分歧检测 | `ahr999_divergence` | 固定公式 vs 自适应百分位方向不一致 | 转向预警 |
 
-评分使用动态分位数（q10/q35/q55/q75/q90），不固定 0.45/1.2 阈值。
+压缩版回测验证（2010-2026, 5767天）：
+- `<0.549`（映射 <0.45）：n=544, fwd180 +79.6%, 胜率 91%
+- `0.549-0.846`（映射 0.45-0.8）：n=1389, fwd180 +72.3%, 胜率 89%  
+- `3.344-9.457`（映射 5.0-20.0）：n=226, fwd180 **-14.7%** ← 真卖出信号
+- `>9.457`（映射 ≥20.0）：n=49, fwd180 **-40.5%**, 胜率 0%
+
+详见 `docs/backtest-baseline-ahr999-*-*.md`。
 
 ### 山寨季指数（自算）
 
@@ -230,6 +236,38 @@ fair_value = exp(α + β × log(age))    ← Huber IRLS 动态拟合
 
 30d MA vs 60d MA（180 天窗口），下行 = 矿工投降 = 历史抄底前兆。
 
+## 回测
+
+```bash
+# AHR999 全历史对比报告（含原版/改良版/压缩版/3D评分）
+guanfu-backtest --start 2014-01-01 --kline-cache cache/btc_kline.json \
+  --interval 7 --report-md report.md
+```
+
+支持 `--kline-cache` 从 JSON 文件加载全量历史 K 线（默认仅从 Binance API 拉取，起始于 2017-08-17）。缓存生成：
+
+```bash
+# 从 CSV 导入（2010-2024）并合并 yfinance 近期数据
+python3 bin/import_csv_kline.py /path/to/BTC_history.csv
+```
+
+回测报告结构：Verdict 基线 → AHR999 三版对比（原始/改良/压缩）→ 3D 评分（V/M/P 8 组合）→ 分桶过渡矩阵。
+
+## AI 知识库
+
+`~/.claude/skills/btc-guanfu/kb/` 包含 8 个因果推理文件（~1700 行），覆盖：
+
+| 文件 | 内容 |
+|---|---|
+| `01-macro-transmission.md` | 利率/通胀/美元/财政 传导链 |
+| `02-liquidity-plumbing.md` | 稳定币/ETF/杠杆 流动性管道 |
+| `03-crypto-mechanics.md` | 减半/矿工/LTH/MVRV 结构性因子 |
+| `04-cross-asset.md` | BTC vs Gold/SPX/Bonds 联动规则 |
+| `05-geopolitical.md` | 5 类地缘冲击 × BTC 反应时间线 |
+| `06-regime-taxonomy.md` | 6 种宏观测算 + 转换信号 |
+| `07-historical-analogues.md` | 历史相似组合 + 类比库 |
+| `08-decision-matrix.md` | 不同测算下的权重 + 不做什么 |
+
 ## 项目结构
 
 ```
@@ -237,17 +275,24 @@ guanfu/
 ├── cmd/guanfu/          # CLI 入口
 ├── cmd/guanfu-mcp/      # MCP Server 入口
 ├── cmd/guanfu-similar/  # 历史 JSON 盘面相似度工具
+├── cmd/guanfu-backtest/ # 回测工具（verdict + AHR999 对比）
 ├── .github/workflows/   # CI / release
 ├── internal/
 │   ├── client/          # 多数据源并发拉取
-│   ├── engine/          # 指标计算 + 8 域盘面构建
+│   ├── engine/          # 指标计算 + 8 域盘面构建 + verdict 引擎
 │   ├── history/         # SQLite 历史分位
 │   ├── model/           # 数据类型
 │   ├── mathutil/        # 技术指标 (MA/EMA/MACD/RSI/BB)
+│   ├── version/         # 构建版本信息
 │   └── cache/           # 磁盘缓存
-├── docs/                # 文档 + SKILL.md 知识库
+├── bin/                 # 编译输出 + Python 辅助脚本
+│   ├── import_csv_kline.py  # CSV → kline cache JSON
+│   └── futu_bridge.py       # 富途 OpenD Python bridge
+├── cache/               # 运行时缓存
+│   └── btc_kline.json   # 全量 K 线缓存 (2010-2026, 可选)
+├── docs/                # 回测报告 + 知识库
 ├── Makefile
-└── bin/                 # 编译输出
+└── README.md
 ```
 
 ## License
