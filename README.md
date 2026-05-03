@@ -98,7 +98,7 @@ GUANFU_NO_HISTORY=1 guanfu   # 跳过 history.db
 
 # Claude API / ChatGPT: 将 JSON + SKILL.md 附加到 prompt
 guanfu --json > panel.json
-cat panel.json | your-ai-client --system "$(cat docs/SKILL.md)"
+cat panel.json | your-ai-client --system "$(cat skill/SKILL.md)"
 ```
 
 **历史相似度（推广/复盘用）**：
@@ -141,7 +141,7 @@ Network 网络
   ...
 ```
 
-完整 8 域 40+ 指标见 [`docs/SKILL.md`](docs/SKILL.md)。
+完整 8 域 40+ 指标见 [`skill/SKILL.md`](skill/SKILL.md)。
 
 ## 8 域指标体系
 
@@ -255,10 +255,11 @@ python3 bin/import_csv_kline.py /path/to/BTC_history.csv
 
 ## AI 知识库
 
-`~/.claude/skills/btc-guanfu/kb/` 包含 8 个因果推理文件（~1700 行），覆盖：
+`skill/` 是一个 self-contained 的 Claude Code skill 包：`SKILL.md`（数据契约 + 指标手册）+ `kb/`（10 个因果推理文件，~1500 行）。安装见 [`skill/README.md`](skill/README.md)。
 
 | 文件 | 内容 |
 |---|---|
+| `00-data-contract.md` | 盘面 JSON schema + 域/指标语义 |
 | `01-macro-transmission.md` | 利率/通胀/美元/财政 传导链 |
 | `02-liquidity-plumbing.md` | 稳定币/ETF/杠杆 流动性管道 |
 | `03-crypto-mechanics.md` | 减半/矿工/LTH/MVRV 结构性因子 |
@@ -291,7 +292,8 @@ guanfu/
 │   └── futu_bridge.py       # 富途 OpenD Python bridge
 ├── cache/               # 运行时缓存
 │   └── btc_kline.json   # 全量 K 线缓存 (2010-2026, 可选)
-├── docs/                # 回测报告 + 知识库
+├── docs/                # 项目文档（数据源、回测方法、MCP 配置）
+├── skill/               # Claude Code skill 包（SKILL.md + kb/）
 ├── Makefile
 └── README.md
 ```

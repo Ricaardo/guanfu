@@ -98,7 +98,7 @@ engine/calculator.go    engine/panel.go
 | `internal/mathutil/ma.go` | 技术指标：MA、EMA、MACD、RSI、Sigmoid、局部极值 |
 | `internal/model/types.go` | 数据模型：MarketSnapshot、IndicatorPanel、Indicator |
 | `internal/cache/cache.go` | 磁盘缓存：当日快照序列化，避免重复拉取 |
-| `docs/SKILL.md` | 知识库：指标语义、历史阈值、pattern 库、失效情形 |
+| `skill/SKILL.md` + `skill/kb/` | Claude Code skill 包：指标语义、历史阈值、因果推理 |
 
 ---
 

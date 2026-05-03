@@ -12,7 +12,7 @@
       "env": {
         "FRED_API_KEY": "your_fred_key",
         "GUANFU_HISTORY_DB": "/Users/x/.guanfu/history.db",
-        "GUANFU_SKILL_PATH": "/Users/x/guanfu/docs/SKILL.md",
+        "GUANFU_SKILL_PATH": "/Users/x/guanfu/skill/SKILL.md",
         "FUTU_GATEWAY": "127.0.0.1:11111"
       }
     }

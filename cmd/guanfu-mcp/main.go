@@ -22,7 +22,7 @@
 //	      "command": "/path/to/guanfu-mcp",
 //	      "env": {
 //	        "GUANFU_HISTORY_DB": "/path/to/history.db",
-//	        "GUANFU_SKILL_PATH": "/path/to/docs/SKILL.md",
+//	        "GUANFU_SKILL_PATH": "/path/to/skill/SKILL.md",
 //	        "FUTU_GATEWAY": "127.0.0.1:11111"
 //	      }
 //	    }
@@ -440,7 +440,7 @@ func skillPath() string {
 	if p := os.Getenv("GUANFU_SKILL_PATH"); p != "" {
 		return p
 	}
-	return "docs/SKILL.md"
+	return "skill/SKILL.md"
 }
 
 // ─── RPC helpers ──────────────────────────────────────

@@ -77,7 +77,9 @@ archives:
     files:
       - README.md
       - LICENSE*
-      - docs/SKILL.md
+      - skill/SKILL.md
+      - skill/kb/*.md
+      - skill/README.md
       - docs/mcp-setup.md
       - docs/backtest-methodology.md
       - src: internal/client/futu_bridge.py
