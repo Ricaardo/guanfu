@@ -1,0 +1,718 @@
+---
+name: btc-guanfu
+description: |
+  观复 / 观察万物之周期回归 — BTC 投资盘面 + 解读知识库。输出 8 个域（cycle / valuation / network / positioning / macro / flow / technical / cross_asset）的纯指标盘，每个指标含原始值、历史分位、解读标签、数据源。**不输出单一评分或无上下文交易指令** — 而是基于多维指标一致性，输出概率加权的读盘结论，每条结论附完整证据链、反证和失效条件。
+  当用户问「BTC 该不该买/卖」、「比特币现在估值如何」、「加密底/顶在哪」、「定投区吗」、「AHR999/MVRV/哈希率/ETF 流入多少」、「BTC 周期位置」、「观复」、「BTC 技术指标」「BTC vs 黄金/美股/VIX」时触发。
+  NOT for: 仅查 BTC 实时价格 → cmc-mcp；altcoin/memecoin → cmc-mcp / okx-dex；K 线图形态分析 → technical-analysis；链上钱包 → okx-wallet。
+license: MIT
+user-invocable: true
+required_tools:
+  - guanfu        # https://github.com/Ricaardo/guanfu — `go install github.com/Ricaardo/guanfu/cmd/guanfu@latest`
+optional_tools:
+  - jq            # 解析 --json 输出
+  - guanfu-similar  # 历史相似度复盘
+---
+
+# 观复 (btc-guanfu): BTC 投资盘面 + 解读手册
+
+> 致虚极，守静笃。**万物并作，吾以观复。**
+> ——《道德经》第十六章
+
+## 核心哲学
+
+**这个 skill 是观象台，不是观象者。** 老子言「万物并作，吾以观复」—— 万物纷纭起作，我守在静处看它们的往复回归。本工具做的就是这件事：
+
+- **万物并作** ↔ 8 个 domain × 40+ 个指标（周期 / 估值 / 网络 / 杠杆 / 宏观 / 资金流 / 技术 / 跨资产）同时呈现
+- **观复** ↔ 在历史分位中观察其往复 —— halving 周期回环、估值高低反覆、流入流出来去
+- **致虚守静** ↔ 不输出单一数字评分或无上下文交易指令，只输出**概率加权读盘结论**
+
+具体分工：
+
+- 二进制（`guanfu`，或源码构建出的 `bin/guanfu`）= 数据采集 + 指标计算 + 历史分位定位 = **盘**
+- 本 SKILL.md = 每个指标的语义、历史阈值、组合 pattern、失效情形 + **读盘框架** = **解读 + 风险倾向**
+- Claude 读完盘面 → 按 8 步读盘法 → 套用读盘框架 → 输出概率加权读盘结论
+
+**v1 的错**（前身名 `coinman`）：用 1 个 0-100 总分 + 硬编码阈值输出 BUY/SELL。把多维结构压成 1 维丢失信息。**v2 更名「观复」**：不再产出单一评分，输出 8 域原始指标。**v3**：在指标盘基础上，由 Claude 依据 SKILL.md 读盘框架输出概率加权结论——每条结论附完整证据链、反证和失效条件。
+
+---
+
+## 用法
+
+```bash
+# 完整盘面（人类可读）
+guanfu
+
+# JSON（喂 Claude / 程序）
+guanfu --json | jq
+
+# 仅看一个 domain
+guanfu --domain cycle
+guanfu --domain technical
+guanfu --domain cross_asset
+# ... valuation / network / positioning / macro / flow
+
+# 纯文本输出（适合复制到无 emoji / box drawing 的环境）
+guanfu --plain
+
+# AHR999 拟合半衰期（默认 1460 = 4 年）
+guanfu --halflife 730   # 2 年，对快牛快熊敏感
+```
+
+冷启动通常 60-90s（需要拉 Binance 历史 K 线、Top50、mempool、SoSoValue、FRED/Futu/Yahoo 等），缓存命中 <1s。
+
+**富途 OpenD 集成**：
+- 默认自动连接 `127.0.0.1:11111`
+- `FUTU_GATEWAY` 环境变量覆盖地址
+- `FUTU_ENABLED=0` 禁用富途，走 Yahoo 降级
+- 数据：QQQ / SPY / GLD / UUP (DXY proxy) / TLT / VIXY / USO (oil proxy)
+
+**Futu Bridge 部署**（OpenD 默认需要加密握手，Go 端未实现）：
+1. `pip install futu-api`（安装官方 Python SDK）
+2. 将 `futu_bridge.py` 放到 `bin/` 同目录
+3. guanfu 自动检测：Go 直连失败 → 调 Python bridge → Yahoo 降级
+4. 如 bridge 脚本在其他位置，设 `FUTU_BRIDGE=/path/to/futu_bridge.py`
+
+**重建二进制**：`go build -o bin/guanfu ./cmd/guanfu`
+
+---
+
+## 历史分位 (history.db)
+
+ETF / mempool / 资金费率 / 宏观这类指标没有公开历史 API，观复 通过 **SQLite 历史表** 自己每天采集一行，攒够样本后才能回填 `q` 字段。
+
+**默认路径**：`~/.guanfu/history.db`（兼容老路径 `~/.coinman/history.db` 可手动 mv 过来），自动创建。可用 `--history-db /path/to/db` 指定，或 `GUANFU_NO_HISTORY=1` 禁用。
+
+**采集的 15 个指标**：
+- Flow: `etf_net_flow_7d_usd`, `etf_net_flow_30d_usd`, `etf_total_assets_usd`, `stablecoin_market_cap_usd`, `stablecoin_supply_30d_pct`
+- Network: `mempool_mb`, `hash_rate_ehs`, `difficulty_change_pct`
+- Positioning: `funding_rate_pct`, `oi_to_mc`, `fear_greed`
+- Macro: `dxy_60d_trend_pct`, `real_yield_10y_pct`, `m2_yoy`, `spx_correlation_30d`
+
+**何时显示 `q` 分位**：
+- 累积 ≥ 30 天 → 开始显示，note 字段会注明"历史分位基于 N 天采集"
+- 0-30 天 → 仅显示 value + label，不显示 q（数据不足）
+- 回看窗口：730 天（2 年）
+
+**首次部署后**：
+- 第 1 天：15 个指标全部入库，但还没有 q 显示
+- 第 30 天：开始有 q
+- 第 365 天：q 完全有意义（覆盖全年节奏）
+- 第 730 天：达到设计上限，老数据滚动淘汰
+
+**直接查询历史**：
+```bash
+sqlite3 ~/.guanfu/history.db "SELECT date, value FROM daily_metrics WHERE key='etf_net_flow_30d_usd' ORDER BY date DESC LIMIT 30"
+```
+
+BTC 价格相关指标（`sma_200w_dev`, `mayer_multiple`, `eth_btc_ratio` 等）的 q 由 Binance kline 历史直接计算，不进 history.db。
+
+---
+
+## 盘面字段说明
+
+每个指标返回：
+- **`value`** 原始数值（无 sigmoid，无 scaling）
+- **`q`** 历史分位 [0, 1]（当前值在历史分布的位置；q05 = 历史最低 5%，q95 = 历史最高 5%）
+- **`label`** 简短解读标签（仅人类速览用，**Claude 不应直接信赖此 label 做决策**，应自己读 value + q）
+- **`source`** 数据源
+- **`updated_at`** 数据时间
+- **`note`** 计算备注 / 数据时效性
+
+盘面顶层还会返回：
+- **`stale_warnings`** 非致命数据缺失 / 过期提示。
+- **`source_health`** 数据源健康表：`source`、`status`（ok / partial / stale / missing / warning）、`as_of`、`fallback_used`、`note`、`warnings`。读盘前先检查这里，避免用断源或 fallback 数据做强结论。
+
+---
+
+## 指标手册（每个含定义、历史阈值、失效情形）
+
+### 🌊 Cycle — 周期定位
+
+#### `days_since_halving` / `days_to_halving`
+- **定义**：距上次/下次 BTC 减半的天数。减半固定每 ~1458 天发生。
+- **历史阶段（粗略）**：
+  - 0-180d 减半后早期 — 价格通常温和反弹
+  - 180-540d 牛市主升期 — 历史顶部基本都在 18 个月内
+  - 540-900d 顶部 / 分配期 — 警惕分布
+  - 900-1260d 熊市 / 积累期 — 历史积累观察期
+  - 1260-1458d halving 前期 — 反弹起步
+- **失效**：2024 ETF 通过后周期可能被宏观流动性主导，时间相位仅作粗参考。
+
+#### `sma_200w` / `sma_200w_dev`
+- **定义**：200 周（1400 日）简单均线（"BTC 长期价格地板"）+ 当前价偏离。JSON raw `value` 是比例值（`1.5` = `+150%`），展示层可格式化成百分比。
+- **历史阈值**：
+  - dev < 0 → BTC 跌破 200 周线，**罕见** — 仅 2015、2018 末、2020 3 月、2022 LUNA 危机等阶段出现，通常代表深度压力区
+  - dev 0~1.0（0~+100%）→ 正常区
+  - dev > 1.5（+150%）→ 牛市末期（2017 12月、2021 4月、2021 11月）
+- **可信度**：较高，是 BTC 常用长期估值锚，但仍需结合宏观和危机状态。
+- **失效**：算法本身不会失效。但 200wSMA 会随每日推进上移，"低估"标准在变。
+
+#### `mayer_multiple` (price / 200d SMA)
+- **历史阈值**：
+  - < 0.6 → 历史深度低估区（2015、2018、2020、2022）
+  - 0.6-1.0 → 偏低估
+  - 1.0-2.4 → 中性区间
+  - > 2.4 → 高估 / 顶部风险区（2013、2017、2021 一波二波）
+- **失效**：2024 后波动率压缩，2.4 顶可能不再触发（ETF 改变波动结构）。
+
+#### `pi_cycle_top_ratio` (111dMA / 2×350dMA)
+- **定义**：111 日均线 / (2 × 350 日均线)。≥1 触发 = 历史多次临近顶部风险区。
+- **历史命中**：2013-12, 2017-12, 2021-04 附近曾给出高风险信号。
+- **失效情形**：2024+ 减半周期开始压缩，可能给假信号或滞后。
+- **关键**：触发 ≥1 时严肃看待，"接近触发"（0.85-1.0）要警惕但非执行信号。
+
+#### `phase` (cycle phase 启发式分类)
+- **取值**：`accumulation` / `early_post_halving` / `markup` / `late_markup_or_top` / `distribution_risk` / `transition`
+- **逻辑**：基于 `days_since_halving` + `sma_200w_dev` 简单组合。
+- **可信度**：低，仅作粗略地图。**真正决策看具体指标**。
+
+---
+
+### 💰 Valuation — 估值
+
+#### `ahr999_compressed`（sqrt-AHR — 默认主用估值指标）
+
+> **重要**: 自适应 AHR999 已降级为分歧检测信号（详见下方 divergence）。盘面中的 `ahr999` 现指向**压缩版 sqrt-AHR**，而非旧的自适应版。自适应版的原始值可通过 `ahr999_adaptive` 查看。
+
+- **定义**：pow(固定公式 AHR999, 0.75)。使用调和 DCA（九神原始公式本意）+ 固定幂律公允值 + pow(raw,0.75) 凸性压缩。
+- **目的**：降低 price²/(DCA×fair) 的凸性偏差。回测验证：5.0-20.0 桶 fwd180 从假阳性 +47% 翻转为 -15% 后续回报转弱信号；≥20.0 桶 0% 胜率保持。
+- **阈值（经 pow(x,0.75) 映射保证与原始 AHR999 分档等价）**：
+  - < 0.549 → 极端低估
+  - 0.549-0.846 → 低估
+  - 0.846-1.147 → 合理
+  - 1.147-1.682 → 偏高
+  - 1.682-3.344 → 高估
+  - 3.344-9.457 → 泡沫
+  - > 9.457 → 极端泡沫（历史样本后续回报显著转弱）
+- **全历史回测（2017-2026, 3181 天）**：
+  - <0.45(映射): n=420, fwd180 +86.5%, 胜率 88%
+  - 0.45-0.8(映射): n=784, fwd180 +67.5%, 胜率 89%
+  - 2.0-5.0(映射): n=275, fwd180 -15.4%, 胜率 20%
+  - 5.0-20.0(映射): n=108, fwd180 -7.7%, 胜率 30%
+
+#### `ahr999_divergence`（分歧检测器 — 转向预警）
+- **定义**：当固定公式 AHR999（原始）与自适应百分位方向不一致时触发。
+- **三种预警模式**：
+  - 原始低估 (<0.8) + 自适应偏贵 (q>55%) → "下跌中继，降低单边结论置信度"
+  - 原始贵 (>1.2) + 自适应偏低 (q<35%) → "熊市初期反弹陷阱"
+  - 原始泡沫 (>2.0) + 自适应不极端 (q<50%) → "最危险分歧，历史 -53% fwd180, 0% 胜率"
+- **无分歧时不出现此指标**。分歧 = 转向而非跟随的信号。
+
+#### 三维估值分解（V/M/P — 观复估值域主框架）
+
+> 盘面中通过 `d3_score` / `d3_val_ratio` / `d3_momentum` / `d3_panic` 四个指标输出。
+
+- **核心理念**：AHR999 = V(price/fair) × M(price/DCA)。拆开后，V 是唯一必需的维度。再加 P(90d drawdown) 区分"便宜但还在跌"和"便宜且开始反转"。
+- **回测发现（2017-2026，3181 天）**：
+  - **V--（仅便宜）：n=632, +100.9% fwd180, 95% 胜率，最差 -11.8%** — 全历史最强信号
+  - **-M-（仅跌不便宜）：n=131, -33.4% fwd180, 11% 胜率** — 接飞刀信号
+  - VMP（三项全满）：n=549, +66.5% fwd180, 85% 胜率
+  - -MP（偏贵+跌+恐慌）：n=443, -21.3% fwd180, 19% 胜率（熊市反弹陷阱）
+- **读盘规则**：有 V = 积累倾向增强；无 V = 估值证据不足。M（价格在均线下）单独出现是风险信号。
+- **阈值确认（网格搜索验证）**：V<0.8, M<1.0, P<-20% 为最优切分点。放宽 V 阈值会稀释胜率。
+
+#### `mvrv_z_score` / `nupl` (Phase 2，**需付费源**)
+- **状态**：CoinMetrics community API 已收紧，免费 tier 无 realized cap。需 Glassnode/CryptoQuant 付费 API key 才能填充。
+- **若有数据**，关键阈值：
+  - MVRV Z < 0 → 历史深度低估（2018、2020、2022）
+  - MVRV Z > 7 → 历史顶部
+  - NUPL < 0 capitulation；NUPL 0-0.25 hope；0.25-0.5 optimism；0.5-0.75 belief；>0.75 euphoria
+
+---
+
+### ⛏️ Network — 网络
+
+#### `hash_rate_ehs` (EH/s)
+- **定义**：BTC 全网哈希率，长期一直上行。绝对值用于和历史比较。
+- **历史阈值**：
+  - 2024-04 减半时 ~600 EH/s
+  - 2024 末 ~700 EH/s
+  - 2025 ~900 EH/s
+- **注意**：哈希率绝对值会随硬件周期长期上移，实时值以 guanfu 面板为准，不在 SKILL 中固化。
+- **意义**：长期上行 = 矿工对网络/价格的信心投票。
+
+#### `hash_ribbons` (30d MA vs 60d MA)
+- **取值**：`上行（矿工扩张）` / `交叉中` / `下行（矿工投降信号）`
+- **可信度**：较高。下行（30 < 60）历史上多次出现在矿工压力阶段，常领先修复，但不是独立底部信号。
+- **失效**：低概率但存在，机制需结合宏观和资金流确认。
+- **失效情形**：监管事件（如 2021 中国矿工迁移）可能误触发。
+
+#### `difficulty_change_pct`
+- **定义**：上次难度调整百分比（每 2016 块调一次，约 14 天）。
+- **阈值**：
+  - < -7% 大幅下调 → 矿工投降，常发生在恐慌底部
+  - -2% ~ +3% 正常
+  - > +8% 大幅上调 → 算力 FOMO 入场，常见于牛市中段
+- **联动**：与 hash_ribbons 同向。
+
+#### `mempool_mb`
+- **定义**：mempool 待打包字节数（MB）。
+- **阈值**：
+  - < 5 → 畅通（牛市后期、熊市常见）
+  - 5-30 → 正常
+  - 30-100 → 拥堵
+  - > 100 → 极度拥堵（2017 末、2021 4月、铭文/Runes 热潮 2023-2024）
+- **意义**：链上活跃度。极度拥堵常是顶部信号或风潮事件。
+
+---
+
+### 📊 Positioning — 杠杆 & 情绪
+
+#### `funding_rate_pct` (永续合约资金费率，% / 8h)
+- **阈值**：
+  - < -0.01% 负值 → 多头不愿付费给空头 → **潜在反转信号**（极端恐慌 / 已大跌之后）
+  - -0.01% ~ 0.005% 正常
+  - > 0.05% 多头拥挤 → 清算风险
+  - > 0.1% 极度过热（2021 4月、2024 3月顶都见过）
+- **联动**：funding < 0 + F&G < 25 + price 跌破均线 = 短期修复概率上升。
+
+#### `oi_to_mc` (OI / 市值比)
+- **阈值**：
+  - < 0.015 杠杆松弛 → 行情可能蓄力
+  - 0.015-0.025 中性
+  - 0.025-0.035 偏拥挤
+  - > 0.04 过度拥挤 → 任何利空触发清算瀑布
+
+#### `fear_greed`
+- **阈值**：< 20 极度恐慌（历史深度恐慌区）；> 80 极度贪婪（顶部风险信号）
+- **可信度**：中。极端值（<20 或 >80）较有意义，中间值噪音。
+- **联动**：与 funding rate / 价格 三角验证。
+
+#### `altcoin_season`
+- **定义**：Top 50 代币中过去 90 天跑赢 BTC 的百分比（0-100）。自算 — 基于 Binance Top 50 kline，与 blockchaincenter.net 定义一致，无需外部 API。
+- **阈值**：
+  - ≥ 75 山寨季 — 资金溢出 BTC → Alt
+  - 50-75 偏山寨季
+  - 25-50 偏 BTC 季
+  - < 25 BTC 季 — 资金集中 BTC
+- **可信度**：中高。区块链中心实时计算，每日更新。
+- **联动**：与 ETH/BTC 比率 + BTC Dominance 交叉验证。山寨季 > 75 + ETH/BTC 上行 + BTC Dom 下降 = Alt 风险偏好回归。
+
+---
+
+### 🌍 Macro — 宏观（FRED）
+
+需要 `FRED_API_KEY` 环境变量。无 key 时该 domain 全部为 placeholder。
+
+#### `dxy_60d_trend_pct` (DTWEXBGS 60 日变化 %)
+- **定义**：Trade-Weighted USD Index (Broad)，FRED 上 DXY 的最佳代理（真 ^DXY 不在 FRED）。
+- **阈值**：
+  - < -3% 美元大幅走弱（BTC 顺风）
+  - -3% ~ -1% 走弱
+  - -1% ~ +1% 横盘
+  - +1% ~ +3% 走强
+  - > +3% 大幅走强（BTC 逆风）
+- **联动**：与 BTC 价格历史负相关明显（2022 美元强势 = BTC 大熊）。
+
+#### `real_yield_10y_pct` (DFII10)
+- **定义**：10 年期 TIPS 实际利率（已是百分比）。
+- **阈值**：
+  - < 0% 负实际利率（极度宽松，2020-2022 风险资产狂飙时期）
+  - 0% ~ 1% 低位（BTC 顺风）
+  - 1% ~ 2% 正常
+  - 2% ~ 2.5% 高位（BTC 逆风，2023-2024 多数时间）
+  - > 2.5% 历史性逆风
+- **机制**：实际利率 = 持有现金的真实回报。它越高，无风险资产相对吸引力越强，BTC/股市估值压缩。
+
+#### `m2_yoy` (M2SL 同比 %)
+- **定义**：M2 货币供应量同比增速（季调，月度数据）。
+- **阈值**：
+  - < -1% 收缩（罕见，2008、2022 末出现过）
+  - -1% ~ 2% 停滞（流动性紧）
+  - 2% ~ 5% 温和扩张
+  - 5% ~ 8% 扩张（BTC 顺风）
+  - > 8% 强劲扩张（2020-21 印钞峰值，BTC 翻数倍背景）
+- **数据时效**：M2SL 月度发布，通常滞后 30-45 天。as_of 日期看 note 字段。
+
+#### `spx_correlation_30d` (BTC vs SPX 30 日 Pearson 相关)
+- **定义**：BTC 与 S&P 500 过去 30 个 SPX 交易日对数收益率的 Pearson 相关系数 [-1, 1]。
+- **阈值**：
+  - < -0.3 负相关（BTC 走独立避险行情，罕见）
+  - -0.3 ~ +0.2 弱相关（BTC 独立性较强，是好 diversifier）
+  - +0.2 ~ +0.5 中等相关
+  - +0.5 ~ +0.7 强相关（BTC 表现像高 beta 科技股）
+  - > +0.7 极强相关（与股市同步度极高，组合风险集中）
+
+**启发**：2020 后 BTC 越来越像高 beta 风险资产，spx_correlation_30d 中位水平在 0.3-0.5。当 corr 突然飙到 >0.7，说明 BTC 已经被纳入"风险资产篮"由宏观流动性主导；当 corr 跌到 <0，往往是 BTC 出现独立叙事（如 ETF 通过、监管利好/利空）的时期。读盘必须把这 4 个指标和价格行为结合看。
+
+#### `oil_proxy_usd` / `oil_proxy_60d_trend_pct`
+- **定义**：Futu `US.USO` 原油 ETF proxy。它跟踪油价相关资产，但不是 WTI 桶价；不能把 `BTC / oil_proxy_usd` 解读为“多少桶油”。
+- **用途**：观察油价相关资产的 60 日方向，用于通胀压力 / 需求崩塌的宏观辅助判断。
+
+#### `wti_crude_usd` / `wti_crude_60d_trend_pct`
+- **定义**：Yahoo `CL=F` WTI 近月原油期货（$/桶），通常作为 USO 不可用时的 fallback。
+- **用途**：当 `source_health` 中 `cross_asset` 的 `fallback_used=true` 且指标 source 为 `yahoo:CL=F` 时，可按 WTI 桶价解释；否则优先按 oil proxy 解释。
+
+---
+
+### 💸 Flow — 资金流
+
+#### `etf_net_flow_7d_usd` / `etf_net_flow_30d_usd`
+- **定义**：现货 BTC ETF（IBIT, FBTC 等 11 只）净流入。来源 SoSoValue。
+- **意义**：2024+ **最重要的边际需求驱动**。日均 $200M+ 持续流入支撑价格。
+- **阈值（30d cumulative）**：
+  - > $5B 强劲流入（机构 FOMO）
+  - $1-5B 持续流入（正常牛市节奏）
+  - $0-1B 微弱
+  - < 0 流出（机构减持，BTC 逆风）
+  - < -$3B 持续流出（前期顶部典型）
+- **数据时效**：T-1 或 T-2（看 stale_days 字段）。
+
+#### `etf_total_assets_usd`
+- ETF 行业总持仓。$100B+ 表示机构覆盖深度。
+
+#### `stablecoin_market_cap_usd` / `stablecoin_supply_30d_pct`
+- **定义**：`stablecoin_market_cap_usd` = USDT+USDC+DAI+FDUSD+FRAX 总市值（CoinGecko 实时）。`stablecoin_supply_30d_pct` = 基于 history.db 采集的 30 日增速。
+- **意义**：稳定币总市值 30 日增速 → 加密链上流动性。扩张 = 新钱进场。
+- **注意**：`stablecoin_supply_30d_pct` 需要 history.db 攒够 ≥ 30 天稳定币市值数据才会出现。冷启动期间先看 `stablecoin_market_cap_usd` 绝对值。
+- **阈值**（30d 增速）：
+  - > +5% 强劲扩张
+  - +1% ~ +5% 温和扩张
+  - -3% ~ +1% 停滞
+  - < -3% 收缩（流动性退潮）
+
+#### `eth_btc_ratio`
+- **定义**：ETH 价 / BTC 价。
+- **解读**：
+  - < 0.030 → ETH 极弱，资金避险偏 BTC
+  - 0.030-0.045 → ETH 弱（典型熊市后期）
+  - 0.045-0.060 → 中性
+  - > 0.075 → ETH 强（风险偏好高 / Alt season 临近）
+
+---
+
+### 📈 Technical — 技术指标 (v3 新增)
+
+#### `rsi_14`
+- **定义**：14 日相对强弱指数 (0-100)。
+- **阈值**：< 20 极度超卖；20-30 超卖；30-45 偏弱；45-55 中性；55-70 偏强；70-80 超买；> 80 极度超买。
+- **联动**：RSI < 30 + MACD 空头收窄 + funding < 0 = 短期修复概率上升。
+
+#### `macd_histogram`
+- **定义**：MACD(12,26,9) 柱状图。>0 多头动能，<0 空头动能。
+- **关键信号**：柱为负但收窄 = **底部反转信号**；柱为正但收窄 = 可能见顶。
+
+#### `ema_cross` / `ma_alignment`
+- `ema_cross` (EMA12 vs EMA26) → 短期趋势。>0 多头。
+- `ma_alignment` (MA50 vs MA200) → 中期趋势。>0 金叉。
+- **矛盾时**：EMA 多头 + MA 死叉 = 短多中空，横盘蓄势信号。
+
+#### `bb_position` / `volatility_20d`
+- BB(20,2) 位置 + 20 日波动率。两者同时极端低 = 变盘前兆（1-2 周内）。
+
+---
+
+### 🔗 CrossAsset — 跨资产对比 (v3 新增)
+
+数据源：Yahoo Finance (GC=F / QQQ / SPY)。
+
+#### `btc_gold_ratio` / `btc_qqq_ratio` / `btc_spy_ratio`
+- **定义**：1 BTC = X oz 黄金 / X 股 QQQ / X 股 SPY。
+- **btc_gold_ratio** 历史区间：~5（BTC 极弱）~ ~40（BTC 极强，2021 高点）。
+
+#### `btc_gold_corr_30d` / `btc_qqq_corr_30d` / `btc_spy_corr_30d`
+- **定义**：30 日对数收益率 Pearson 相关 [-1, 1]。
+- **阈值**：< -0.3 负相关；-0.3~0.2 弱相关；0.2-0.5 中等；> 0.5 强相关；> 0.7 极强。
+- **关键**：BTC 与 QQQ/SPY 相关骤升到 > 0.7 → BTC 被纳入"风险资产篮"，由宏观流动性主导。
+
+#### `uup_price` / `btc_uup_corr_30d` (v3.1, Futu)
+- **uup_price**：做多美元 ETF (Invesco DB USD Index Bullish Fund)。作为 DXY 的实时代理（FRED DTWEXBGS 延迟 1-3 天且需 API key）。来源 Futu US.UUP。
+- **解读**：UUP 上涨 = DXY 走强 = 美元购买力上升 → BTC 以 USD 计价承压。历史相关性稳定为负。
+- **btc_uup_corr_30d**：BTC vs UUP 30 日对数收益率 Pearson 相关。预期值应为 **负值**（-0.3 ~ -0.7）。
+  - 若转正 → 反常信号，可能 BTC 与美元同涨（全球避险 + 美元避险同时发生），需警惕宏观极端事件。
+- **联动**：UUP 走强 + 实际利率 > 2% + M2 收缩 → 三重美元逆风，BTC 压力最大。
+
+#### `vixy_price` (v3.1, Futu)
+- **定义**：VIX 短期期货 ETF，追踪 S&P 500 隐含波动率。传统市场"恐慌指数"。来源 Futu US.VIXY。
+- **阈值**：< 15 极度平静（市场自满 → 警惕黑天鹅）；15-20 低波；20-25 正常；25-30 偏高（市场紧张）；> 30 极高恐慌 → 风险资产全面承压。
+- **联动**：VIXY > 30 + F&G < 20 + funding < 0 = 全市场恐慌修复观察窗口（2020-03、2022-06 等阶段）。
+- **失效**：VIXY 跟踪的是美股波动，BTC 有时走独立行情（如 2024 ETF 通过时 VIXY 平稳但 BTC 暴涨）。需结合 `spx_correlation_30d` 判断独立性。
+
+#### `gld_etf_price` (v3.1, Futu)
+- **定义**：SPDR Gold Trust (GLD)，全球最大实物黄金 ETF。每份 ≈ 1/10 oz 黄金。来源 Futu US.GLD。
+- **与 PAXG 的关系**：GLD × 10 ≈ PAXG（允许 ±2% 偏差，因 ETF 管理费和流动性差异）。两者同时可用时优先信 PAXG（币安 klines 与 BTC 时间戳对齐更好）；GLD 提供更长的历史（2011+，PAXG 仅 2019+）。
+- **失效**：若 PAXG 与 GLD 偏离 > 5%，检查是否其中一方数据源异常（如 PAXG 流动性不足脱锚，或 GLD 美股休市）。
+
+#### `rel_strength_90d_gold`
+- **定义**：BTC 90 日收益率 - 黄金 90 日收益率（百分点差）。>0 BTC 跑赢。QQQ/SPY 相对强弱已去重，避免和股指相关性重复计票。
+- ⚠ 跨资产历史长度可能不对齐，极端值需结合比率交叉验证。
+
+---
+
+## 读盘框架（Claude 输出情景化结论时遵循）
+
+### 域级方向规则
+
+8 个域，每域统计看涨/看跌指标数，得出域级方向：
+
+| 域 | 看涨条件 | 看跌条件 |
+|----|---------|---------|
+| Cycle | mayer < 1.0 或 sma_200w_dev < 0 | pi_cycle ≥ 0.85 或 sma_200w_dev > 1.5（+150%） |
+| Valuation | ahr999_compressed < 0.846 或 MVRV Z < 0 | ahr999_compressed > 3.344 或 MVRV Z > 5 |
+| Network | hash_ribbons 上行 或 difficulty > +5% | hash_ribbons 下行 + difficulty < -5%（单独下行只进入底部接近度） |
+| Positioning | 至少 2 个确认：funding < 0、OI/MC < 0.015、F&G < 25、skew > 5、DVOL 高分位/高位 | 至少 2 个确认：funding > 0.05%、OI/MC > 0.035、F&G > 80、skew < -3、DVOL 低分位/低位 |
+| Macro | M2 > 5%、real_yield < 1%、DXY 60d < -1% 中至少 2 个 | M2 < 0%、real_yield > 2.5%、DXY 60d > +1% 中至少 2 个 |
+| Flow | ETF 30d > $1B 为主信号；或稳定币扩张 + ETH/BTC risk-on 双确认 | ETF 30d < -$1B 为主信号；或稳定币收缩等资金退潮确认 |
+| Technical | MACD > 0、EMA12 > EMA26、MA50 > MA200 中至少 2 个 | MACD < 0、EMA12 < EMA26、MA50 < MA200 中至少 2 个；或 RSI > 80 / RSI < 20 + MACD < 0 |
+| CrossAsset | BTC/SPY corr < 0.3 + BTC 90d 跑赢 Gold | BTC/SPY corr > 0.7 + BTC 90d 跑输 Gold |
+
+**一致性计数**：每域看涨 = +1，看跌 = -1，中性/矛盾 = 0。净方向范围 [-8, +8]，只用于描述多域一致性，不单独作为交易指令。
+
+### 读盘口径映射
+
+| 净方向 | 读盘口径 | 含义 |
+|------|------|------|
+| **≥ +5** | **强积累倾向** | 5+ 域一致看涨。适合讨论积累倾向是否增强，但仍需用户期限、风险预算和执行层约束。 |
+| **+3 ~ +4** | **偏积累倾向** | 多数域看涨但非全部。偏向分批观察，不追求一次性动作。 |
+| **+1 ~ +2** | **持有观察倾向** | 略微偏多但信号不强。强调等待确认和风险边界。 |
+| **0** | **等待** | 多空信号抵消。等待方向明朗。 |
+| **-1 ~ -2** | **防守倾向** | 略微偏空。优先讨论风险暴露、现金比例和失效条件。 |
+| **-3 ~ -4** | **高防守倾向** | 多数域看跌。优先讨论风险暴露是否过高，但不替用户指定执行参数。 |
+| **≤ -5** | **分配/避险风险** | 5+ 域一致看跌。强调风险控制、反证和失效条件，不输出执行式指令。 |
+
+### 输出模板
+
+每次分析必须包含：
+
+```
+## 读盘结论: [强积累倾向/偏积累倾向/持有观察倾向/等待/防守倾向/高防守倾向/分配风险]
+
+### 域级一致性: +X / -8~+8
+[列出每域的 +/-/0 和依据指标]
+
+### 证据链
+- 支持当前结论的 TOP 3 域级证据：
+  1. [域名: 已确认的指标组合, 为什么支持]
+  2. ...
+  3. ...
+
+### 反证
+- 不支持当前结论的 TOP 2 域级反证：
+  1. [域名: 已确认的反向指标组合, 为什么矛盾/存疑]
+  2. ...
+
+### 失效条件
+- 如果 [X 指标] 变化到 [阈值]，当前结论失效，应重新读盘
+
+### 概率权重
+- 基准情景 (XX%): [描述]
+- 替代情景 (XX%): [描述]
+- 尾部风险 (XX%): [描述]
+
+### 图表（必选）
+先展示 3 张图表（价格估值带 / 8 域雷达图 / VMP 三维打分），再读文本。
+图表生成方式见 Step 9。图片用 Read 工具读取后直接展示。
+```
+
+### 关键原则
+
+1. **至少 3 域一致才有倾向性结论** — 单域信号不可单独决策
+2. **q 分位 > label** — label 是静态阈值，q 是动态历史位置
+3. **必须列出反证** — 每条结论必须有至少 2 个反证指标
+4. **必须设失效条件** — 什么情况下这个结论就错了
+5. **概率权重而非确定** — 用百分比而非"一定/绝对"
+6. **不替代 trade-execution** — 仓位规模、风险阈值等执行细节交给执行层处理
+7. **不输出无上下文交易指令** — 用户没有给出持仓、期限、风险预算时，不给执行式结论
+
+---
+
+## 「读盘」工作流（Claude 应遵循）
+
+不要从前到后读，而是按**决策影响顺序**：
+
+### Step 1: 周期位置（地图坐标）
+> "现在 BTC 大致在 cycle 哪一段？"
+
+读 `days_since_halving` + `sma_200w_dev` + `phase`：
+- accumulation / early_post_halving + dev<0% → 极端低估，DCA 黄金窗口
+- markup + dev 0-100% → 中段，趋势跟随
+- late_markup_or_top + dev>100% → 警惕分配
+- distribution_risk + `sma_200w_dev` > 1.5（+150%）→ 接近顶部
+
+### Step 2: 估值一致性（4 项交叉验证）
+> "估值信号是否清晰？"
+
+读 4 个估值指标：`ahr999`, `mayer_multiple`, `sma_200w_dev`, `pi_cycle_top_ratio`：
+- **4 项都说低估** → 强烈低估，置信度高
+- **4 项分歧** → 估值信号不清晰，等待
+- **Pi Cycle 触发** → 顶部信号，独立看，权重最高
+
+### Step 3: 网络健康（矿工是否在投降/扩张）
+读 `hash_ribbons` + `difficulty_change_pct` + `mempool_mb`：
+- 哈希率下行 + 难度大幅下调 → 矿工投降 = **底部前奏**
+- 哈希率上行 + mempool 拥堵 → 链上活跃 = 牛市中-末
+
+### Step 4: 杠杆健康（避免高拥挤区追逐反弹）
+读 `funding_rate_pct` + `oi_to_mc`：
+- funding < 0 + OI 低 → 杠杆已洗，潜在反弹
+- funding 高 + OI 高 → 杠杆拥挤，清算风险
+
+### Step 5: 宏观（货币环境）
+读 macro domain（4 个 FRED 指标）：
+- `m2_yoy` 上行 + `dxy_60d_trend_pct` < 0 + `real_yield_10y_pct` 下行 → 流动性宽松，BTC 顺风
+- 反之 → BTC 逆风
+- `spx_correlation_30d` > 0.5 → BTC 主要受宏观流动性驱动（看股市判断方向）
+- `spx_correlation_30d` < 0.2 → BTC 走独立行情（看链上 / ETF 流入判断）
+
+### Step 6: 流入（边际新钱）
+读 flow domain：
+- ETF 持续正流入 + 稳定币扩张 + ETH/BTC 上行 → 风险偏好回归
+- ETF 流出 + 稳定币收缩 → 流动性退潮
+
+### Step 7: 技术指标（短期方向确认）
+读 `rsi_14` + `macd_histogram` + `ma_alignment` + `bb_position` + `volatility_20d`：
+- RSI < 30 + MACD 空头收窄 → 短期修复概率上升
+- RSI > 70 + MACD 多头减弱 → 短期过热概率上升
+- MA 死叉 + EMA 多头 = 短多中空 → 横盘/方向待选
+- BB 收窄 + 低波动 → 1-2 周内变盘
+
+### Step 8: 跨资产（BTC 相对位置）
+读 cross_asset domain：
+- BTC/Gold 比率偏离历史区间 → 跨资产估值极端
+- BTC 与 QQQ/SPY 30d 相关性骤升 → 宏观流动性主导
+- BTC 独立行情（< 0.2 相关）+ ETF 持续流入 → BTC 自身叙事驱动
+
+### Step 9: 图表输出（增强读盘可读性）
+
+所有读盘结论应附带图表。使用 `guanfu --json` 输出结构化数据 + Python matplotlib 生成 3 张核心图表，保存为 PNG 并用 Read 工具展示给用户。
+
+**图表 1：价格 + 移动均线 + 估值带**
+
+从 `guanfu --json` 的 `BTCPriceHistory` 字段提取约 400 天收盘价，叠加 MA50/MA200，并在背景标注当前估值分位色带（低估区绿色、高估区红色）。这使用户一眼看到价格相对历史的位置。
+
+```python
+# 伪代码示意
+import matplotlib.pyplot as plt, json, subprocess
+data = json.loads(subprocess.check_output(["guanfu", "--json"]))
+prices = data["panel"]["indicators"]["BTCPriceHistory"][:400]
+# ... plot with SMA50, SMA200, fill between
+plt.savefig("/tmp/guanfu_price.png")
+```
+
+**图表 2：8 域方向雷达图**
+
+从 verdict 的 `domains` 数组绘制雷达图，每个域一个轴，值为 `vote`（-1 到 +1）。颜色映射：正 = 绿，负 = 红，零 = 灰。轴标签为中文域名（周期/估值/网络/杠杆/宏观/资金流/技术/跨资产）。
+
+**图表 3：V/M/P 三维打分仪表盘**
+
+三个独立仪表盘（水平并排），每个显示 V/M/P 维度的原始值、阈值线和触发状态（已触发/未触发）。仪表盘可简单用 `matplotlib.subplots` 实现，或用三个水平柱状图 + 截止线。
+
+**生成步骤**：
+1. 调用 `guanfu --json` 获取结构化数据
+2. 写 Python 脚本生成 3 张图（matplotlib，使用 `Agg` backend 避免 GUI 依赖）
+3. 保存到 `/tmp/guanfu_chart_1.png` 等路径
+4. 用 Read 工具读取并展示图片
+5. 图片在对话中展示后，可删除临时文件
+
+**注意事项**：
+- 使用 `import matplotlib; matplotlib.use('Agg')` 确保在无 GUI 环境运行
+- 如 matplotlib 未安装，`pip install matplotlib` 或降级为 Unicode 水平柱状图（纯文本）
+- 图表标注中文时用 `plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Heiti TC', 'WenQuanYi Micro Hei']`
+- 每张图控制在 800x500 像素以内
+- 估值带用 `fill_between` 轻量填充，不遮挡价格线
+
+**输出顺序**：先展示 3 张图表，再输出读盘结论文本。图表提供视觉速览，文本提供详细推理。
+
+---
+
+## 知识库 (kb/)
+
+读盘时不仅看指标值，还要看**为什么是这个值**和**接下来通常怎么演变**。`kb/` 目录是机制库，不是行情快照库：实时数值、日期、source health、missing 状态一律以本次 `guanfu --json` 为准；KB 只提供解释框架、失效条件和风险边界。
+
+**加载协议**：
+1. 每次读盘先检查 `source_health` / `stale_warnings`，再读指标。
+2. 若需要字段口径，先读 `kb/00-data-contract.md`。
+3. 常规读盘最多加载 3 个 KB 文件：`06` + `07` 是默认上下文，第三个按异常域选择。
+4. 若触发危机条件，跳过常规类比，直接读 `09-crisis-playbook.md`。
+5. 不得把 KB 中的历史示例或样例数值当作实时事实。
+
+| 文件 | 层级 | 内容 | 何时触发 |
+|---|---|---|---|
+| `00-data-contract.md` | L0 契约 | 指标单位、missing/fallback、口径优先级 | 字段解释不确定时 |
+| `06-regime-taxonomy.md` | L2 测算 | 6 种宏观测算 + 转换信号 | 每次读盘必查 |
+| `07-historical-analogues.md` | L2 类比 | 历史相似组合 + 类比库 | 每次读盘必查 |
+| `01-macro-transmission.md` | L1 因果 | 利率/通胀/美元/财政传导链 | 宏观域出现显著变化时 |
+| `02-liquidity-plumbing.md` | L1 因果 | 稳定币/ETF/杠杆的"钱怎么进出" | Flow/Positioning 域异常时 |
+| `03-crypto-mechanics.md` | L1 因果 | 减半/矿工/LTH/MVRV 的结构性因子 | Cycle/Valuation 域分析时 |
+| `04-cross-asset.md` | L1 因果 | BTC vs Gold/SPX/Bonds 联动规则 | CrossAsset 域分析时 |
+| `05-geopolitical.md` | L1 因果 | 5 类地缘冲击 × BTC 反应时间线 | 出现地缘事件时 |
+| `08-decision-matrix.md` | L3 读盘 | 不同测算下的权重 + 误读防护 | 输出读盘结论前 |
+| `09-crisis-playbook.md` | L3 应急 | 30s 危机判别 → 风险降级优先级 → 恢复确认清单 | VIX>35 / HY+100bp / BTC-15% / 脱锚 任一触发时 |
+
+**输出边界**：KB 可以说“积累倾向增强 / 防守倾向增强 / 风险暴露需审视”，不要输出无上下文执行动作或具体风险参数。执行层必须由用户的期限、资金性质、风险预算和税务约束决定。
+
+---
+
+## 历史 Pattern 提示（轻量）
+
+历史组合只作为模式识别入口，完整类比必须按 `kb/07-historical-analogues.md` 输出相似点、差异点、反向案例和失效条件。
+
+### 深度低估 + 矿工压力
+常见组合：`sma_200w_dev < 0`、`mayer_multiple < 0.7`、`ahr999_compressed < 0.549`、`hash_ribbons` 下行或刚修复、`funding_rate_pct` 偏低、`fear_greed < 20`。
+
+读盘含义：长期估值压力较低，但短期仍需确认宏观测算、资金流和杠杆是否同步修复。
+
+### 分布风险 + 拥挤
+常见组合：`pi_cycle_top_ratio >= 1.0`、`mayer_multiple > 2.4`、`sma_200w_dev > 1.5`、`funding_rate_pct > 0.1%`、`oi_to_mc > 0.04`、`fear_greed > 80`。
+
+读盘含义：估值、情绪和杠杆共振时，风险暴露需要审视，但仍要检查 ETF 时代资金流是否改变周期节奏。
+
+### 假信号提醒
+- AHR 低位但 hash ribbons 仍恶化时，低估只能作为背景。
+- funding 极高但 ETF / M2 同时支持时，拥挤信号可能提前。
+- 链外事件会污染链上估值和交易所数据，必须进入事件框架。
+
+---
+
+## 反模式
+
+- ❌ **看一个指标做决策** — 至少 3 个 domain 一致才有意义
+- ❌ **从 4 个估值指标里挑利己的** — 4 个都看低估再说
+- ❌ **忽略 stale_days 警告** — ETF 数据是 T-1，遇到周末/假期更滞后
+- ❌ **盘面不写入交易日志就行动** — 用 trade-journal skill 留痕，事后才能复盘
+- ❌ **黑天鹅时还看 观复** — 监管 / 交易所暴雷 / 协议漏洞超出指标范围，需立刻切换 news-dashboard
+- ❌ **用 观复 决策 altcoin** — 仅覆盖 BTC + ETH/BTC 比率，山寨币用 cmc-mcp / okx-dex
+- ❌ **看到 phase=accumulation 就给极端结论** — phase 是粗分类，必须配合具体指标 + 风险预算（执行层另行处理）
+- ❌ **输出倾向但不列反证** — 每条读盘结论必须有 ≥ 2 个反证指标
+- ❌ **用绝对语气** — "一定会涨"、"绝对是底" → 正确表述："概率约 X%，基于 A/B/C 三个域一致看涨"
+- ❌ **不设失效条件** — 必须声明"如果 X 指标变为 Y，本结论失效"
+- ❌ **读完盘不输出图表** — 必须生成 3 张图表（价格估值带/8 域雷达图/VMP 仪表盘），文本再详细也不如图一眼
+
+---
+
+## 联动其他 skill
+
+| 协同 skill | 用法 |
+|---|---|---|
+| `cmc-mcp` | 实时 BTC/ETH/F&G 数据，观复 是历史 + 周期 |
+| `market-pulse` | 跨资产宏观 MHS，与 BTC 局部信号交叉验证 |
+| `okx-dex` | altcoin/memecoin（观复 不覆盖）|
+| `news-dashboard` | 黑天鹅事件 / 监管 / 交易所新闻 |
+| `polymarket` | 加密相关预测市场（btc 价 / ETF 通过率 / 监管） |
+| `trade-execution` | 观复给风险读盘 → 执行层再处理风险预算和执行细节 |
+| `trade-journal` | 决策时 log，事后复盘 |
+| `valuation`（贵金属模式）| BTC 与黄金互补避险，跨资产估值 |
+
+---
+
+## 演进历史 / 设计决策
+
+| 项目 | v1 (废弃) | v2 | v3 (当前) |
+|---|---|---|---|
+| 总分 0-100 | ❌ 设计性稀释，永远停在 50 附近 | 不输出 |
+| Action / State | ❌ 硬编码阈值 = 假精度 | 不输出，由 Claude 综合 |
+| 4 维 sigmoid 子分 | ❌ 隐式压缩 | → 8 域原始指标 + 历史分位 |
+| 数据源 | BTC + mempool + ETF + F&G + FRED + 极简 ETH |
+| 估值层 | **压缩版 sqrt-AHR（主用）** + Mayer + 200wSMA dev + Pi Cycle + **三维打分 V/M/P（v3.2 新增）** |
+| 网络层 | hash rate + ribbons + difficulty + mempool |
+| 资金流 | 仅稳定币 | ETF 7d/30d + 稳定币 + ETH/BTC |
+| 宏观层 | 无 | DXY + 10Y real yield + M2 YoY + BTC/SPX 30d corr (FRED) |
+| 历史分位 | 无 | SQLite 每日采集 15 个指标 → 730 天分位 |
+| 技术域 | 无 | 无 | RSI/MACD/EMA/MA/BB/波动 (7 指标) |
+| 跨资产 | 无 | 无 | Gold/QQQ/SPY/UUP(DXY)/VIXY/GLD + 相关性 + 相对强弱 (12 指标) |
+| 三维打分 V/M/P | — | — | — | V(price/fair<0.8)+M(mayer<1.0)+P(90d dd<-20%) 三维独立计分，零污染
+| 山寨季 | ❌ (1-btc_dom)×100 | blockchaincenter.net → 自算 | 自算 (基于 Top50 kline) |
+| 黄金数据 | 无 | 无 | Binance PAXG + Futu GLD 双源交叉验证 |
+| 美元指数 | 无 | FRED DTWEXBGS (需 key, 延迟) | Futu UUP 实时 + FRED 备用 |
+
+| 决策依据 | 1 个 score / 1 个 action | 8 域指标盘 + 本手册 + Claude 综合 |
