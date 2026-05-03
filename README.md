@@ -151,10 +151,10 @@ Network 网络
 | 💰 Valuation 估值 | **ahr999_compressed**（推荐）、ahr999（自适应）、ahr999_divergence、MVRV、NUPL |
 | ⛏️ Network 网络 | 哈希率、Hash Ribbons、难度调整、Mempool 拥堵 |
 | 📊 Positioning 杠杆 | 资金费率、OI/MC、恐慌贪婪、山寨季指数（自算） |
-| 🌍 Macro 宏观 | DXY 60d 趋势、10Y TIPS、M2 同比、SPX 相关性 |
+| 🌍 Macro 宏观 | DXY 60d、10Y TIPS、M2 YoY、SPX 相关、**WTI 油价**、**HY 信用利差**、**10Y-2Y 利差** |
 | 💸 Flow 资金流 | ETF 7d/30d 净流入、稳定币市值、ETH/BTC 资金偏好 |
 | 📈 Technical 技术 | RSI(14)、MACD 柱、EMA 交叉、MA50/200、Bollinger、波动率 |
-| 🔗 CrossAsset 跨资产 | BTC/Gold·QQQ·SPY/UUP/VIXY/GLD 比率、相关性、相对强弱 |
+| 🔗 CrossAsset 跨资产 | BTC/Gold·QQQ·SPY/UUP/VIXY/GLD 比率、相关性、相对强弱、**BTC/原油** |
 
 ## 环境变量
 
@@ -191,7 +191,7 @@ ETF、mempool、资金费率等指标没有公开历史 API。guanfu 通过 SQLi
 | CoinMetrics | MVRV/NUPL/MVRV Z | ✅ 社区端点 |
 | Yahoo Finance | GC=F (黄金)、QQQ、SPY (Futu 不可用时的降级) | ✅ |
 | Futu OpenD | QQQ/SPY/GLD/UUP/VIXY (本地网关，需 Python bridge) | ✅ |
-| FRED | DXY/10Y TIPS/M2/SPX | 需注册(免费) |
+| FRED | DXY/10Y TIPS/M2/SPX/HY利差/10Y-2Y利差 | 需注册(免费) |
 
 ## AI 集成
 
@@ -267,6 +267,7 @@ python3 bin/import_csv_kline.py /path/to/BTC_history.csv
 | `06-regime-taxonomy.md` | 6 种宏观测算 + 转换信号 |
 | `07-historical-analogues.md` | 历史相似组合 + 类比库 |
 | `08-decision-matrix.md` | 不同测算下的权重 + 不做什么 |
+| `09-crisis-playbook.md` | 30s 危机判别 → 保命优先级 → 恢复确认清单 |
 
 ## 项目结构
 

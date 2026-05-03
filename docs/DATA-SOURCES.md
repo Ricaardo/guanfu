@@ -22,7 +22,7 @@
 
 | 数据源 | 用途 | 注册方式 | 环境变量 |
 |---|---|---|---|
-| **FRED** (St. Louis Fed) | DTWEXBGS (DXY代理)、DFII10 (10Y TIPS)、M2SL (M2)、SP500 | https://fred.stlouisfed.org/docs/api/api-key.html | `FRED_API_KEY` |
+| **FRED** (St. Louis Fed) | DTWEXBGS (DXY代理)、DFII10 (10Y TIPS)、M2SL (M2)、SP500、**BAMLH0A0HYM2 (HY利差)**、**T10Y2Y (10Y-2Y利差)** | https://fred.stlouisfed.org/docs/api/api-key.html | `FRED_API_KEY` |
 
 ### 本地网关
 
