@@ -20,7 +20,7 @@
 
 | 维度 | 指标 | 正常来源 | 缺失处理 |
 |---|---|---|---|
-| 美元方向 | `macro.dxy_60d_trend_pct` | FRED / UUP proxy | 缺失时用 `cross_asset.uup_60d_trend_pct` 辅助，但标注 proxy |
+| 美元方向 | `macro.dxy_60d_trend_pct` | FRED / UUP proxy | 缺失时用 `cross_asset.uup_price` 自行算趋势辅助，但标注 proxy |
 | 实际利率 | `macro.real_yield_10y_pct` | FRED DFII10 | 缺失时不得给强宏观结论 |
 | 货币供应 | `macro.m2_yoy` | FRED M2SL | 月频指标，注意滞后 |
 | 风险相关 | `macro.spx_correlation_30d` | 计算值 | 用来判断 BTC 是否被风险资产篮主导 |
@@ -34,9 +34,9 @@
 
 ### 宽松狂欢 (Dovish Euphoria)
 
-**必要条件**：
+**必要条件**（少见状态，COVID 后期 2020-21 是唯一典型样本，常规年份难触发；触发即说明流动性极端）：
 - `real_yield_10y_pct < 0`
-- `m2_yoy > 8`
+- `m2_yoy > 6`
 - `dxy_60d_trend_pct < -1`
 - `etf_net_flow_30d_usd > 5e9` 或 `stablecoin_supply_30d_pct > 5`
 
@@ -52,9 +52,9 @@
 ### 温和顺风 (Mild Tailwind)
 
 **常见条件**（满足 3 项即可）：
-- `0 <= real_yield_10y_pct <= 1.5`
-- `m2_yoy > 5`
-- `dxy_60d_trend_pct < 1`
+- `0 < real_yield_10y_pct < 1.5`
+- `m2_yoy > 3`
+- `dxy_60d_trend_pct < 0`
 - `etf_net_flow_30d_usd > 1e9`
 - `stablecoin_supply_30d_pct > 0`
 
@@ -65,11 +65,14 @@
 
 ### 拉扯期 (Tug of War)
 
-**常见条件**：
-- `1 <= real_yield_10y_pct <= 2`
-- `2 <= m2_yoy <= 5`
-- `0.3 <= spx_correlation_30d <= 0.7`
-- 至少存在一个顺风信号和一个逆风信号。
+**触发**（满足任一）：
+- `real_yield_10y_pct ∈ [1.5, 2.0]`（边界过渡带）
+- `m2_yoy ∈ [0, 3]`（边界过渡带）
+- `dxy_60d_trend_pct ∈ [0, 1]`（边界过渡带）
+- 顺风类指标和逆风类指标各至少 1 个，且没有任何指标进入"紧缩冲击"或"宽松狂欢"区。
+
+**辅助识别**：
+- `spx_correlation_30d ∈ [0.3, 0.7]`：BTC 既不被宏观完全主导，也不完全独立。
 
 **读盘含义**：
 方向不清本身就是结论。此时应重点说明多空证据分别来自哪里，并列出升级为顺风或降级为逆风的触发条件。
@@ -85,9 +88,9 @@
 
 **常见条件**（满足 3 项即可）：
 - `dxy_60d_trend_pct > 1`
-- `1.5 <= real_yield_10y_pct <= 2.5`
-- `0 <= m2_yoy <= 2`
-- `etf_net_flow_30d_usd <= 0` 或 30 日流入明显降速
+- `real_yield_10y_pct > 2.0`（且未到 2.5 紧缩冲击线）
+- `m2_yoy < 0`（但 HY/SPX 相关未进入危机区）
+- `etf_net_flow_30d_usd ≤ 0` 或 30 日流入明显降速
 - `spx_correlation_30d > 0.5`
 
 **读盘含义**：
@@ -100,17 +103,17 @@
 **常见条件**（满足 3 项即可）：
 - `real_yield_10y_pct > 2.5`
 - `dxy_60d_trend_pct > 3`
-- `m2_yoy < 0`
+- `m2_yoy < 0` 且 `hy_spread_bps > 500`
 - `spx_correlation_30d > 0.7`
 - ETF 或稳定币资金同步流出。
 
 **读盘含义**：
 宏观极端信号压过估值信号。即使 AHR、Mayer、MVRV 显示低估，也只能说明长期赔率改善，不能说明短期压力结束。
 
-**退出紧缩冲击的证据**：
-- 实际利率从峰值回落超过 0.5 个百分点。
-- DXY 从峰值回落超过 3%。
-- ETF 或稳定币资金不再同步流出。
+**退出紧缩冲击的证据**（"峰值"指过去 90 日内最高/最低读数）：
+- `real_yield_10y_pct` 从 90 日峰值回落 ≥ 0.5 个百分点。
+- `dxy_60d_trend_pct` 从 90 日峰值回落 ≥ 3 个百分点。
+- ETF 或稳定币资金不再同步流出（连续 ≥ 7 日中性或正向）。
 
 ---
 

@@ -21,14 +21,14 @@
 
 | 类别 | 示例指标 | 作用 |
 |---|---|---|
-| 周期 | `cycle.days_since_halving`, `cycle.pi_cycle_ratio` | 判断时间窗口和周期拥挤度 |
-| 估值 | `valuation.mayer_multiple`, `valuation.ahr999`, `valuation.mvrv_z` | 判断价格相对链上/趋势的远近 |
-| 网络 | `network.hash_ribbons`, `network.difficulty_30d_change_pct` | 判断矿工压力和网络恢复 |
-| 杠杆 | `positioning.funding_rate_pct`, `positioning.oi_to_mc` | 判断清算风险和拥挤度 |
-| 宏观 | `macro.real_yield_10y_pct`, `macro.m2_yoy`, `macro.dxy_60d_trend_pct` | 判断外部流动性环境 |
-| 资金流 | `flow.etf_net_flow_30d_usd`, `flow.stablecoin_supply_30d_pct` | 判断边际买盘 / 场内资金 |
-| 技术 | `technical.volatility_20d`, `technical.ma50_ma200_gap_pct` | 判断波动和趋势状态 |
-| 跨资产 | `macro.spx_correlation_30d`, `cross_asset.gold_proxy_60d_trend_pct` | 判断 BTC 是否被风险资产主导 |
+| 周期 | `cycle.days_since_halving`, `cycle.pi_cycle_top_ratio`, `cycle.sma_200w_dev` | 判断时间窗口和周期拥挤度 |
+| 估值 | `cycle.mayer_multiple`, `valuation.ahr999_compressed`, `valuation.mvrv_z_score` | 判断价格相对链上/趋势的远近 |
+| 网络 | `network.hash_ribbons`, `network.difficulty_change_pct` | 判断矿工压力和网络恢复 |
+| 杠杆 | `positioning.funding_rate_pct`, `positioning.oi_to_mc`, `positioning.fear_greed` | 判断清算风险和拥挤度 |
+| 宏观 | `macro.real_yield_10y_pct`, `macro.m2_yoy`, `macro.dxy_60d_trend_pct`, `macro.hy_spread_bps` | 判断外部流动性环境 |
+| 资金流 | `flow.etf_net_flow_30d_usd`, `flow.stablecoin_supply_30d_pct`, `flow.eth_btc_ratio` | 判断边际买盘 / 场内资金轮动 |
+| 技术 | `technical.volatility_20d`, `technical.ma_alignment`, `technical.bb_position` | 判断波动和趋势状态 |
+| 跨资产 | `macro.spx_correlation_30d`, `cross_asset.btc_gold_corr_30d`, `cross_asset.rel_strength_90d_gold` | 判断 BTC 是否被风险资产或避险资产主导 |
 
 ---
 
@@ -50,6 +50,23 @@
 - 链上口径变化、交易所结构变化、稳定币制度变化会降低可比性。
 - 宏观方向相反时，总相似度通常不应超过中等。
 - 危机事件样本不能直接类比常规盘面。
+
+### Post-2024 结构变化清单
+
+2024 年 1 月美国 BTC 现货 ETF 通过后，下列 pre-2024 阈值的可比性显著下降，引用历史类比时必须显式降权或注明可能失效：
+
+| 指标 | 旧阈值 / 历史 pattern | 结构变化 |
+|---|---|---|
+| `valuation.mvrv` (raw) | 顶部常 >3.5（2017 顶 5.4，2021 顶 3.9） | 2024 ATH 时仅 2.7；ETF 持续买盘可能让顶部 MVRV 整体下移 |
+| `valuation.ahr999` (raw) | 顶部 >2.0、泡沫 >5.0 | 同理可能下移；优先用 `ahr999_compressed` 或 q 分位 |
+| `cycle.days_since_halving` 540-900 顶部窗口 | 2013/2017/2021 都成立 | ETF 改变边际需求节奏，顶部可能提前/延后或被资金流主导 |
+| `cross_asset.btc_gold_ratio` 顶部 | 2021 ~38、2024-25 ~33 | 黄金独立行情会让 ratio 阈值随时漂移 |
+| `flow.etf_net_flow_*_usd` | pre-2024 不存在 | 这是新维度，没有 pre-2024 历史可比 |
+
+操作建议：
+- 引用 pre-2024 估值类比时，加一句"该阈值未针对 ETF 时代重新校准"。
+- 优先用 `q`（历史分位）而非绝对阈值定位"高/低"。
+- 资金流相关的类比窗口起点不早于 2024-01。
 
 ---
 
@@ -96,7 +113,7 @@
 
 必须检查：
 - hash ribbons 是“下行中”还是“恢复中”。
-- `difficulty_30d_change_pct` 是否仍为负。
+- `network.difficulty_change_pct` 是否仍为负。
 - 宏观测算是否为紧缩冲击。
 - 资金流是否同步改善。
 
@@ -136,10 +153,11 @@
 典型含义：估值信号给长期背景，短期由美元、实际利率、信用压力主导。
 
 必须检查：
-- `real_yield_10y_pct` 是否高于紧缩阈值。
-- `dxy_60d_trend_pct` 是否快速走强。
-- `m2_yoy` 是否转负。
-- BTC/SPX 相关性是否升高。
+- `macro.real_yield_10y_pct` 是否高于紧缩阈值。
+- `macro.dxy_60d_trend_pct` 是否快速走强。
+- `macro.m2_yoy` 是否转负。
+- `macro.spx_correlation_30d` 是否升高。
+- `macro.hy_spread_bps` 是否扩大。
 
 禁止误读：
 - 低估指标不能覆盖系统性去风险。

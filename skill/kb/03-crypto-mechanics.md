@@ -82,19 +82,30 @@ guanfu 有两个 AHR 视角：
 
 MVRV = 市值 / realized cap，近似衡量全市场相对链上成本的盈利倍数。
 
-- `<1`：整体低于链上成本，历史底部区常见。
+历史阈值（基于 2013-2022 年数据）：
+- `< 1`：整体低于链上成本，历史底部区常见（2015、2018、2020-03、2022-11）。
 - `1-2`：中性到恢复区。
-- `>3.5`：过热风险上升。
+- `> 3.5`：过热风险上升（2017 顶 ~5.4，2021-04 顶 ~3.9）。
+
+> **ETF 时代结构变化**：2024-03 BTC 创历史新高时 MVRV 仅 ~2.7，未触及 3.5。原因可能是 ETF 持续买盘抬升 realized cap 增速，让 market cap 相对 realized cap 的"领先幅度"压缩。`> 3.5` 的"过热"阈值在 ETF 时代可能整周期不会触发——**优先用 `q`（历史分位）而非绝对值定位高/低**。
 
 ### `mvrv_z_score`
 
-MVRV Z 衡量市值相对 realized cap 的偏离程度。guanfu 当前是自算口径，和第三方全历史仪表盘不能直接数值对比。
+MVRV Z 衡量市值相对 realized cap 的偏离程度（标准化）。
 
-- `<0`：极端低估。
+> **重要口径差异**：guanfu 实现使用 **rolling 1-year std** 作为标准化分母（README "关键算法"节确认），而第三方仪表盘（Glassnode `MVRVZScore`、CoinMetrics `CapMVRVZ`）使用 **cumulative-to-date std**。两者不可直接数值对比：
+> - rolling 1y std 在低波动时段较小 → guanfu 的 Z 值会偏大；
+> - cumulative std 包含早期高波动 → 第三方 Z 值在历史底/顶更"压扁"。
+>
+> **首选**：用 `q`（历史分位）判断相对位置，不要直接套下面的绝对阈值（这些阈值是按标准 cumulative std 校准的）。
+
+下表是**标准 CapMVRVZ 口径**的参考阈值（guanfu 自算口径下需通过 backtest 重新校准）：
+
+- `< 0`：极端低估。
 - `0-2`：低估到中性。
 - `2-5`：偏高。
-- `>5`：高位预警。
-- `>7`：历史顶部区风险。
+- `> 5`：高位预警。
+- `> 7`：历史顶部区风险。
 
 ### `nupl`
 
@@ -105,6 +116,33 @@ NUPL = 未实现利润 / 市值，反映持有人心理状态：
 - `0.25-0.5`：optimism。
 - `0.5-0.75`：belief。
 - `>0.75`：euphoria。
+
+---
+
+## 加密内部资金轮动
+
+判断"周期晚期 / 顶部接近度"时，BTC 估值/网络/杠杆指标之外，**资金从 BTC 向 alt 的扩散程度**是关键证据。guanfu 提供 3 个相关字段：
+
+| 指标 | 域 | 用途 |
+|---|---|---|
+| `flow.eth_btc_ratio` | flow | ETH/BTC 价格比，反映资金对二号资产的偏好 |
+| `positioning.altcoin_season` | positioning | Binance Top 50 中 90 日跑赢 BTC 的占比 × 100 |
+| BTC dominance（外部） | — | guanfu 不直接输出 BTC 市占率，需外部数据 |
+
+### 阶段判读
+
+| 组合 | 含义 |
+|---|---|
+| `eth_btc_ratio` 上行 + `altcoin_season > 50` | 资金从 BTC 扩散到 alt，**周期晚期典型形态** |
+| `eth_btc_ratio` 下行 + `altcoin_season < 25` | 资金回流 BTC 或退出加密，BTC dominance 上升 |
+| `altcoin_season > 75` 且持续 | 极端 alt 行情，历史上常见于周期顶部前 4-12 周（2017-12, 2021-04, 2021-11） |
+| BTC 价格新高 + `altcoin_season < 25` | "纯 BTC 行情"，多见于 ETF 驱动阶段（2024-Q1）或机构主导早期 |
+
+### 读盘原则
+
+- alt 季节性单独不是顶部信号；必须同时看 funding/OI 拥挤、NUPL > 0.75、Pi cycle 接近这些 confirm。
+- ETF 时代的扩散节奏可能与 pre-2024 不同——2024-Q1 BTC 主升期间 alt 几乎纹丝不动，这是 ETF 资金通道**只接 BTC** 造成的结构性差异。
+- `eth_btc_ratio` 长期下行（2022-2024）反映了**ETH 未享受到 ETF 那一波叙事红利**，不必然意味着 ETH 弱。需要结合 ETH 自身（坎昆升级、L2 TVL、ETH ETF 流向）。
 
 ---
 

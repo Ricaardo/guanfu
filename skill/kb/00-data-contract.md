@@ -40,6 +40,22 @@
 
 若 `source_health` 不存在，按旧版面板处理：只能基于各指标 `updated_at`、`note` 和 `missing` 降低置信度。
 
+### Stale 容忍预算
+
+`updated_at` 距当前的最大可接受滞后：
+
+| 数据类 | 容忍上限 | 超过后处理 |
+|---|---|---|
+| BTC 价格、funding、OI、Top50 | 4 小时 | 标记 stale，不得做实时拥挤判断 |
+| 哈希率、mempool | 12 小时 | 标记 stale，仅作 1-2 日趋势 |
+| ETF 流入、稳定币市值 | 2 个交易日（周末/假日除外） | 标记 stale，不得做边际资金主证据 |
+| 链上估值（mvrv / nupl） | 2 天 | 标记 stale，仅作背景 |
+| 跨资产价格（GLD / QQQ / SPY / UUP / VIXY / TLT） | 1 个交易日 | 标记 stale，仅作背景 |
+| 月频宏观（M2、CPI、real yield、HY spread、yield curve） | 45 天 | 标记 stale；M2 因发布周期可放宽到 60 天 |
+| 减半距离、phase、SMA200W | 不会 stale | — |
+
+超过上限即视同 `stale`；接近上限（≥ 容忍 70%）应在 note/warning 中提示。
+
 ---
 
 ## 关键口径

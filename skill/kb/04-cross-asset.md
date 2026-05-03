@@ -35,15 +35,19 @@
 | 月 | 风险偏好轮动 | risk-on 时 BTC 跑赢，避险时黄金跑赢 |
 | 日 | 可同涨同跌也可背离 | 取决于冲击类型 |
 
-### `btc_gold_ratio`
+### `cross_asset.btc_gold_ratio`
+
+历史阈值（按 2017-2024 年数据校准）：
 
 | 区间 | 解读 |
 |---|---|
-| `<5` | BTC 极弱，历史深熊区 |
+| `< 5` | BTC 极弱，历史深熊区（2018-12, 2022-11） |
 | `5-10` | BTC 偏弱 |
 | `10-20` | 中性 |
 | `20-30` | BTC 偏强 |
-| `>30` | BTC 极强，风险偏好可能过热 |
+| `> 30` | BTC 极强，风险偏好可能过热（2021-04 ~38, 2024-03 ~33） |
+
+> **黄金独立行情会让 ratio 整体漂移**：例如 2024-2025 年黄金独立上行（央行储备购金 + 实际利率回落），即使 BTC 走平 ratio 也会下移。引用阈值时必须同时检查 `gld_etf_price` 趋势——若黄金 60 日涨幅 > 10%，ratio 阈值整体下调一档。
 
 组合优先于单点：
 
@@ -57,14 +61,9 @@
 
 ### 相关性不是方向
 
-`btc_spy_corr_30d` / `spx_correlation_30d` 表示解释变量权重：
+`cross_asset.btc_spy_corr_30d` / `macro.spx_correlation_30d` 表示解释变量权重。**阈值表见 `kb/01-macro-transmission.md` 的 SPX 相关性节**——本文不重复。
 
-| 相关性 | 含义 | 读盘重点 |
-|---|---|---|
-| `<0` | 独立或反向 | 查 ETF、监管、加密内部事件 |
-| `0-0.3` | 弱相关 | BTC 自身叙事权重高 |
-| `0.3-0.7` | 中等相关 | 宏观和内部共同作用 |
-| `>0.7` | 强风险资产联动 | SPX、美元、实际利率优先 |
+注意 `cross_asset.btc_spy_corr_30d` 与 `macro.spx_correlation_30d` 同名同义，分别在 cross_asset 和 macro 域下是历史原因；读盘时只引用其中一个值。
 
 ### 四象限
 
@@ -79,11 +78,14 @@
 
 ## BTC vs 美元
 
-UUP 是 DXY proxy，不等同于 FRED `DTWEXBGS`。使用方式：
+`cross_asset.uup_price` 是 DXY proxy（追踪 ICE U.S. Dollar Index 期货），不等同于 FRED `DTWEXBGS`（贸易加权美元）。
 
-- UUP 上涨 + `dxy_60d_trend_pct` 上行：美元逆风更可信。
-- UUP 上涨但 BTC 也涨：可能是独立叙事或全球避险并存，需看黄金和 SPX。
-- UUP 数据 stale 时，优先用 FRED 60 日趋势，但承认滞后。
+**美元四象限解读框架（利差/避险/贸易/去美元化）见 `kb/01-macro-transmission.md` 的美元传导链节**——本文只补 cross_asset 域的具体使用。
+
+数据使用：
+- `cross_asset.uup_price` 上涨 + `macro.dxy_60d_trend_pct` 上行：美元逆风更可信。
+- `cross_asset.uup_price` 上涨但 BTC 也涨：可能是独立叙事或全球避险并存，需看黄金和 SPX。
+- UUP 数据 stale 时，优先用 FRED `dxy_60d_trend_pct`，但承认 60 日窗口的滞后性。
 
 ---
 
