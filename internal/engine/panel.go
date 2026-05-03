@@ -672,6 +672,30 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 		}
 	}
 
+	// 信用利差 — HY Spread (BAMLH0A0HYM2)
+	if !snap.HYSpreadBps.IsZero() {
+		hyBps := f(snap.HYSpreadBps)
+		p.Macro["hy_spread_bps"] = model.Indicator{
+			Value:     hyBps,
+			Label:     hySpreadLabel(hyBps),
+			Source:    "fred:BAMLH0A0HYM2",
+			UpdatedAt: sourceTimestamp(snap.HYSpreadAsOf, ts),
+			Note:      fmt.Sprintf("ICE BofA US High Yield OAS (bp)。<350 风险偏好，>500 信用紧缩，>800 恐慌 (as of %s)", snap.HYSpreadAsOf),
+		}
+	}
+
+	// 收益率曲线 — 10Y-2Y spread (T10Y2Y)
+	if !snap.YieldCurve10Y2YBps.IsZero() {
+		ycBps := f(snap.YieldCurve10Y2YBps)
+		p.Macro["yield_curve_10y2y_bps"] = model.Indicator{
+			Value:     ycBps,
+			Label:     yieldCurveLabel(ycBps),
+			Source:    "fred:T10Y2Y",
+			UpdatedAt: sourceTimestamp(snap.YieldCurveAsOf, ts),
+			Note:      fmt.Sprintf("10Y-2Y Treasury spread (bp)。<0=倒挂(衰退预警)，>100=陡峭(复苏) (as of %s)", snap.YieldCurveAsOf),
+		}
+	}
+
 	// BTC vs SPX 30d 相关
 	if !snap.SPXCorrelation30d.IsZero() {
 		corr := f(snap.SPXCorrelation30d)
@@ -1763,6 +1787,40 @@ func wtiTrendLabel(pct float64) string {
 		return "上行（通胀压力↑）"
 	default:
 		return "飙升（供给冲击风险）"
+	}
+}
+
+// --- Credit / Yield Curve labels ---
+
+func hySpreadLabel(bps float64) string {
+	switch {
+	case bps < 300:
+		return "极低（信用市场自满 / 狂热）"
+	case bps < 400:
+		return "偏低（风险偏好正常）"
+	case bps < 500:
+		return "正常"
+	case bps < 650:
+		return "偏高（信用紧缩）"
+	case bps < 850:
+		return "高位（严重信用紧缩 — 类似 2016/2020）"
+	default:
+		return "极端（信用危机 — 类似 2008/2020-03）"
+	}
+}
+
+func yieldCurveLabel(bps float64) string {
+	switch {
+	case bps < -50:
+		return "深度倒挂（强烈衰退预警）"
+	case bps < 0:
+		return "倒挂（衰退预警）"
+	case bps < 50:
+		return "平坦（经济过渡期）"
+	case bps < 150:
+		return "正常陡峭"
+	default:
+		return "极陡（复苏初期 / 通胀预期高）"
 	}
 }
 

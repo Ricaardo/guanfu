@@ -37,6 +37,10 @@ type MacroData struct {
 	M2AsOf            string
 	SPXCorrelation30d float64 // BTC 与 SPX 日收益的 Pearson 相关，[-1, 1]
 	SPXAsOf           string
+	HYSpreadBps       float64 // BAMLH0A0HYM2: ICE BofA US High Yield OAS (bp)
+	HYSpreadAsOf      string
+	YieldCurve10Y2YBps float64 // T10Y2Y: 10Y-2Y Treasury spread (bp)
+	YieldCurveAsOf    string
 	StaleWarnings     []string
 }
 
@@ -68,21 +72,23 @@ func FetchMacroData(ctx context.Context, btcHistoryNewestFirst []decimal.Decimal
 		obs    []fredObservation
 		err    error
 	}
-	ch := make(chan result, 4)
+	ch := make(chan result, 6)
 
 	fetch := func(series string, limit int) {
 		obs, err := getFREDObservations(ctx, hc, apiKey, series, limit)
 		ch <- result{series: series, obs: obs, err: err}
 	}
 
-	go fetch("DTWEXBGS", 90)  // 60d 趋势 + buffer
-	go fetch("DFII10", 1)     // 仅最新
-	go fetch("M2SL", 14)      // YoY 同比，留 buffer
-	go fetch("SP500", 45)     // 30 trading days + 周末 buffer
+	go fetch("DTWEXBGS", 90)     // 60d 趋势 + buffer
+	go fetch("DFII10", 1)        // 仅最新
+	go fetch("M2SL", 14)         // YoY 同比，留 buffer
+	go fetch("SP500", 45)        // 30 trading days + 周末 buffer
+	go fetch("BAMLH0A0HYM2", 3)  // HY spread, monthly
+	go fetch("T10Y2Y", 3)        // 10Y-2Y spread, daily
 
 	results := map[string][]fredObservation{}
 	var stales []string
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 6; i++ {
 		r := <-ch
 		if r.err != nil {
 			stales = append(stales, fmt.Sprintf("%s 拉取失败: %v", r.series, r.err))
@@ -126,6 +132,24 @@ func FetchMacroData(ctx context.Context, btcHistoryNewestFirst []decimal.Decimal
 		if ok {
 			out.SPXCorrelation30d = corr
 			out.SPXAsOf = asof
+		}
+	}
+
+	// HY spread (basis points → float)
+	if obs := results["BAMLH0A0HYM2"]; len(obs) >= 1 {
+		v := parseFloat(obs[0].Value)
+		if !math.IsNaN(v) && obs[0].Value != "." {
+			out.HYSpreadBps = v * 100 // FRED returns %, convert to bps
+			out.HYSpreadAsOf = obs[0].Date
+		}
+	}
+
+	// 10Y-2Y yield curve spread (percentage points → basis points)
+	if obs := results["T10Y2Y"]; len(obs) >= 1 {
+		v := parseFloat(obs[0].Value)
+		if !math.IsNaN(v) && obs[0].Value != "." {
+			out.YieldCurve10Y2YBps = v * 100 // convert pp to bp
+			out.YieldCurveAsOf = obs[0].Date
 		}
 	}
 

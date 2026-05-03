@@ -8,7 +8,7 @@ import (
 
 // CurrentMarketSnapshotSchemaVersion guards the on-disk market cache contract.
 // Bump this when MarketSnapshot gains fields that materially change panel output.
-const CurrentMarketSnapshotSchemaVersion = 3
+const CurrentMarketSnapshotSchemaVersion = 5
 
 // MarketSnapshot 包含了计算宏观评分所需的所有市场数据
 type MarketSnapshot struct {
@@ -83,6 +83,10 @@ type MarketSnapshot struct {
 	M2AsOf            string
 	SPXCorrelation30d decimal.Decimal // BTC vs SPX 30 日收益 Pearson
 	SPXAsOf           string
+	HYSpreadBps       decimal.Decimal // ICE BofA US High Yield OAS (bp)
+	HYSpreadAsOf      string
+	YieldCurve10Y2YBps decimal.Decimal // 10Y-2Y Treasury spread (bp)
+	YieldCurveAsOf    string
 	MacroFetched      bool // FRED 是否成功拉取
 
 	// 情绪数据
