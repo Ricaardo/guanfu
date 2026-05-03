@@ -72,6 +72,7 @@ engine/calculator.go    engine/panel.go
          └────────┬───────────┘
                   │
           client/real.go      ← 多数据源并发拉取
+          client/btc_history.go ← BTC 全历史日线缓存 (CoinMetrics+Biance)
           client/mempool.go   ← mempool.space 网络数据
           client/coinmetrics.go ← 链上估值
           client/cross_asset.go ← 跨资产 (Binance PAXG + Futu/Yahoo)
@@ -90,6 +91,7 @@ engine/calculator.go    engine/panel.go
 | `cmd/guanfu/main.go` | CLI：flag 解析、人类表格 / JSON 输出 |
 | `cmd/guanfu-mcp/main.go` | MCP Server：tools/resources/stdout JSON-RPC |
 | `internal/client/real.go` | 数据采集：Binance、CoinGecko、mempool、SoSoValue、CoinMetrics、FRED |
+| `internal/client/btc_history.go` | BTC 全历史日线缓存：CoinMetrics PriceUSD 全量 + Binance 增量覆盖（2010-07-18 起） |
 | `internal/client/mempool.go` | mempool.space：哈希率、难度、mempool 拥堵 |
 | `internal/client/coinmetrics.go` | CoinMetrics：MVRV、NUPL、MVRV Z-Score |
 | `internal/engine/panel.go` | BuildPanel：8 域指标计算 + 历史分位回填 + label 函数 |
@@ -97,7 +99,9 @@ engine/calculator.go    engine/panel.go
 | `internal/history/store.go` | SQLite 历史存储：Record / QuantileAsOf / ValueAt |
 | `internal/mathutil/ma.go` | 技术指标：MA、EMA、MACD、RSI、Sigmoid、局部极值 |
 | `internal/model/types.go` | 数据模型：MarketSnapshot、IndicatorPanel、Indicator |
-| `internal/cache/cache.go` | 磁盘缓存：当日快照序列化，避免重复拉取 |
+| `internal/cache/cache.go` | 行情快照磁盘缓存：当日快照序列化，避免重复拉取 |
+| `internal/client/cross_asset.go` | 跨资产数据：Binance PAXG + Futu/Yahoo fallback |
+| `internal/client/futu.go` | 富途 OpenD Go 客户端（自写 protobuf） |
 | `skill/SKILL.md` + `skill/kb/` | Claude Code skill 包：指标语义、历史阈值、因果推理 |
 
 ---
@@ -225,6 +229,19 @@ guanfu --timeout 180s
 ### 冷启动
 
 首次完整冷启动通常 60-90s（拉 CoinMetrics BTC 2010+ 日线、Binance 最新日线/ETH/Top50、mempool、SoSoValue、F&G、CoinGecko Top50 等），后续缓存命中 < 1s。
+
+### 回测
+
+```bash
+# AHR999 全历史对比报告（默认复用生产 BTC 日线缓存）
+guanfu-backtest --all-data --interval 7 --report-md report.md
+
+# 自定义范围 + 外部指标注入
+guanfu-backtest --start 2020-01-01 --end 2026-01-01 --indicators indicators.json
+
+# 导出逐日 CSV
+guanfu-backtest --all-data --ahr-csv ahr_daily.csv
+```
 
 ### 重建二进制
 

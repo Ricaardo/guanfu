@@ -246,11 +246,17 @@ guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
 ```bash
 # AHR999 全历史对比报告（默认复用生产 BTC 日线缓存）
 guanfu-backtest --all-data --interval 7 --report-md report.md
+
+# 自定义日期范围 + 外部指标注入
+guanfu-backtest --start 2020-01-01 --end 2026-01-01 --indicators indicators.json --report-md report.md
+
+# 导出逐日 AHR999 CSV
+guanfu-backtest --all-data --ahr-csv ahr_daily.csv
 ```
 
-生产与回测共用 BTC 日线缓存：默认 `CACHE_DIR/btc_daily_history.json`（`CACHE_DIR` 默认 `./cache`），也可用 `GUANFU_BTC_KLINE_CACHE=/path/to/btc_daily_history.json` 指定固定路径。缓存会从 CoinMetrics `PriceUSD` 建立 2010-07-18 起的全历史，并在每次未命中快照缓存的运行中用 Binance 最新日线增量覆盖。
+生产与回测共用 BTC 日线缓存：默认 `CACHE_DIR/btc_daily_history.json`（`CACHE_DIR` 默认 `./cache`），也可用 `GUANFU_BTC_KLINE_CACHE=/path/to/btc_daily_history.json` 指定固定路径。缓存从 CoinMetrics `PriceUSD` 建立 2010-07-18 起的全历史，并在每次未命中快照缓存的运行中用 Binance 最新日线增量覆盖。
 
-`--kline-cache` 仍支持外部 JSON：既支持生产缓存 envelope，也兼容旧格式 `{"YYYY-MM-DD": close_price, ...}`。
+`--kline-cache` 仍支持手动指定缓存文件（兼容生产缓存 envelope 和旧格式 `{"YYYY-MM-DD": close_price, ...}`）。`--start` 不传时默认从 4 年前开始；`--all-data` 覆盖 `--start`，从 2010-07-18 起算。
 
 回测报告结构：Verdict 基线 → AHR999 三版对比（原始/改良/压缩）→ 3D 评分（V/M/P 8 组合）→ 分桶过渡矩阵。
 
@@ -281,13 +287,13 @@ guanfu/
 ├── cmd/guanfu-backtest/ # 回测工具（verdict + AHR999 对比）
 ├── .github/workflows/   # CI / release
 ├── internal/
-│   ├── client/          # 多数据源并发拉取
+│   ├── client/          # 多数据源并发拉取 + BTC 全历史日线缓存 (CoinMetrics + Binance)
 │   ├── engine/          # 指标计算 + 8 域盘面构建 + verdict 引擎
-│   ├── history/         # SQLite 历史分位
+│   ├── history/         # SQLite 历史分位 (15 个非价格指标)
 │   ├── model/           # 数据类型
 │   ├── mathutil/        # 技术指标 (MA/EMA/MACD/RSI/BB)
 │   ├── version/         # 构建版本信息
-│   └── cache/           # 磁盘缓存
+│   └── cache/           # 行情快照磁盘缓存
 ├── bin/                 # 本地编译输出（可选）
 ├── cache/               # 运行时缓存
 │   ├── market_cache.json
