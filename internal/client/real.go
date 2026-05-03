@@ -347,6 +347,22 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 		snap.M2AsOf = macro.M2AsOf
 		snap.SPXCorrelation30d = decimal.NewFromFloat(macro.SPXCorrelation30d)
 		snap.SPXAsOf = macro.SPXAsOf
+		// US Liquidity
+		snap.FedAssetsB = decimal.NewFromFloat(macro.FedAssetsB)
+		snap.FedAssetsAsOf = macro.FedAssetsAsOf
+		snap.RRPB = decimal.NewFromFloat(macro.RRPB)
+		snap.RRPAsOf = macro.RRPAsOf
+		snap.TGA_B = decimal.NewFromFloat(macro.TGA_B)
+		snap.TGAAsOf = macro.TGAAsOf
+		snap.NetLiquidityB = decimal.NewFromFloat(macro.NetLiquidityB)
+		snap.FedAssets60dTrendPct = decimal.NewFromFloat(macro.FedAssets60dTrendPct)
+		snap.RRP60dTrendPct = decimal.NewFromFloat(macro.RRP60dTrendPct)
+		snap.TGA60dTrendPct = decimal.NewFromFloat(macro.TGA60dTrendPct)
+		snap.NetLiq60dTrendPct = decimal.NewFromFloat(macro.NetLiq60dTrendPct)
+		snap.HYSpreadBps = decimal.NewFromFloat(macro.HYSpreadBps)
+		snap.HYSpreadAsOf = macro.HYSpreadAsOf
+		snap.YieldCurve10Y2YBps = decimal.NewFromFloat(macro.YieldCurve10Y2YBps)
+		snap.YieldCurveAsOf = macro.YieldCurveAsOf
 		for _, w := range macro.StaleWarnings {
 			log.Printf("FRED warning: %s", w)
 			addWarning("fred warning: %s", w)

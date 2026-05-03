@@ -304,6 +304,10 @@ var historyTracked = map[string]string{
 	"real_yield_10y_pct":        "macro",
 	"m2_yoy":                    "macro",
 	"spx_correlation_30d":       "macro",
+	"fed_assets_b":              "macro",
+	"rrp_b":                     "macro",
+	"tga_b":                     "macro",
+	"net_liquidity_b":           "macro",
 }
 
 const (
@@ -965,6 +969,73 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 				Source:    "fred:M2SL",
 				UpdatedAt: sourceTimestamp(snap.M2AsOf, ts),
 				Note:      fmt.Sprintf("M2 货币供应同比 %%。最新 $%.2fT（as of %s）。扩张 = BTC 顺风", f(snap.M2LatestB)/1000, snap.M2AsOf),
+			}
+		}
+	}
+
+	// ── US Liquidity (Fed Assets, RRP, TGA, Net Liquidity) ──
+	if !snap.FedAssetsB.IsZero() || snap.FedAssetsAsOf != "" {
+		fedA := f(snap.FedAssetsB)
+		rrp := f(snap.RRPB)
+		tga := f(snap.TGA_B)
+		netLiq := f(snap.NetLiquidityB)
+		liqTS := sourceTimestamp(snap.FedAssetsAsOf, ts)
+
+		p.Macro["fed_assets_b"] = model.Indicator{
+			Value:  fedA,
+			Source: "fred:WALCL",
+			UpdatedAt: liqTS,
+			Note:   fmt.Sprintf("Fed 总资产 ($%.2fT, as of %s)。QT 进行中则下降，QE 则上升", fedA/1000, snap.FedAssetsAsOf),
+		}
+		p.Macro["fed_assets_60d_trend_pct"] = model.Indicator{
+			Value:  f(snap.FedAssets60dTrendPct),
+			Label:  liqTrendLabel(f(snap.FedAssets60dTrendPct)),
+			Source: "fred:WALCL",
+			UpdatedAt: liqTS,
+			Note:   "Fed 总资产 60 日变化 %。负值 = QT 缩表，正值 = QE 扩表",
+		}
+		p.Macro["rrp_b"] = model.Indicator{
+			Value:  rrp,
+			Label:  rrpLabel(rrp),
+			Source: "fred:RRPONTSYD",
+			UpdatedAt: sourceTimestamp(snap.RRPAsOf, ts),
+			Note:   fmt.Sprintf("隔夜逆回购 ($%.0fB, as of %s)。下降 = 钱流入市场（顺风），上升 = 钱锁在 Fed（逆风）", rrp, snap.RRPAsOf),
+		}
+		p.Macro["rrp_60d_trend_pct"] = model.Indicator{
+			Value:  f(snap.RRP60dTrendPct),
+			Label:  liqTrendLabel(f(snap.RRP60dTrendPct)),
+			Source: "fred:RRPONTSYD",
+			UpdatedAt: sourceTimestamp(snap.RRPAsOf, ts),
+			Note:   "RRP 60 日变化 %。RRP 下降 = 流动性释出 = BTC 顺风（2023-2024 RRP 耗尽是隐性的主要推力）",
+		}
+		p.Macro["tga_b"] = model.Indicator{
+			Value:  tga,
+			Label:  tgaLabel(tga),
+			Source: "fred:WTREGEN",
+			UpdatedAt: sourceTimestamp(snap.TGAAsOf, ts),
+			Note:   fmt.Sprintf("财政部现金余额 ($%.0fB, as of %s)。下降 = 政府花钱注水，上升 = 抽水回笼（债务上限博弈期关键变量）", tga, snap.TGAAsOf),
+		}
+		p.Macro["tga_60d_trend_pct"] = model.Indicator{
+			Value:  f(snap.TGA60dTrendPct),
+			Label:  liqTrendLabel(f(snap.TGA60dTrendPct)),
+			Source: "fred:WTREGEN",
+			UpdatedAt: sourceTimestamp(snap.TGAAsOf, ts),
+			Note:   "TGA 60 日变化 %。TGA 上升 = 财政部回收流动性（逆风），下降 = 注水（顺风）",
+		}
+		if netLiq != 0 {
+			p.Macro["net_liquidity_b"] = model.Indicator{
+				Value:  netLiq,
+				Label:  netLiqLabel(netLiq),
+				Source: "derived: WALCL - RRPONTSYD - WTREGEN",
+				UpdatedAt: liqTS,
+				Note:   fmt.Sprintf("净流动性 = Fed资产($%.0fB) - RRP($%.0fB) - TGA($%.0fB) = $%.0fB。公式: WALCL - RRPONTSYD - WTREGEN", fedA, rrp, tga, netLiq),
+			}
+			p.Macro["net_liquidity_60d_trend_pct"] = model.Indicator{
+				Value:  f(snap.NetLiq60dTrendPct),
+				Label:  liqTrendLabel(f(snap.NetLiq60dTrendPct)),
+				Source: "derived",
+				UpdatedAt: liqTS,
+				Note:   "净流动性 60 日变化 %。正值 = 市场注水（风险资产顺风），负值 = 抽水（逆风）",
 			}
 		}
 	}
@@ -2294,6 +2365,72 @@ func d3MayerLabel(m float64) string {
 		return "偏高（超买风险）"
 	default:
 		return "极端高位（顶部风险）"
+	}
+}
+
+// ── US Liquidity labels ──
+
+func liqTrendLabel(pct float64) string {
+	switch {
+	case pct < -10:
+		return "大幅收缩（流动性急剧恶化）"
+	case pct < -3:
+		return "收缩（流动性偏紧）"
+	case pct < 3:
+		return "横盘"
+	case pct < 10:
+		return "扩张（流动性改善）"
+	default:
+		return "大幅扩张（流动性宽裕）"
+	}
+}
+
+func rrpLabel(v float64) string {
+	switch {
+	case v < 10:
+		return "耗尽（资金已全流入市场 — 2023-24 牛市关键推力）"
+	case v < 200:
+		return "低位（蓄水池近干）"
+	case v < 500:
+		return "正常"
+	case v < 1000:
+		return "偏高（大量资金锁在 Fed）"
+	case v < 2000:
+		return "高位（类似 2022 紧缩高峰）"
+	default:
+		return "极高（历史性紧缩蓄水）"
+	}
+}
+
+func tgaLabel(v float64) string {
+	switch {
+	case v < 100:
+		return "极低（债务上限约束，政府快没钱 — 短期顺风但风险积累）"
+	case v < 300:
+		return "偏低（政府花钱释放流动性）"
+	case v < 600:
+		return "正常（债务上限后重建中）"
+	case v < 900:
+		return "偏高（财政部回收流动性 — 逆风）"
+	default:
+		return "极高（大量抽水回 TGA — 类似 2021 债务上限后）"
+	}
+}
+
+func netLiqLabel(v float64) string {
+	switch {
+	case v < 4000:
+		return "极低（类似 2019 回购危机前 — 高波动预警）"
+	case v < 5000:
+		return "偏低（流动性紧张）"
+	case v < 6000:
+		return "正常偏紧"
+	case v < 7000:
+		return "正常"
+	case v < 8000:
+		return "宽裕（风险资产顺风）"
+	default:
+		return "极度宽裕（类似 2020-21 QE 高峰）"
 	}
 }
 
