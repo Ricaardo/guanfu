@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,11 +30,7 @@ const (
 
 // NewRealClient 创建RealClient实例并初始化缓存
 func NewRealClient() *RealClient {
-	// 创建缓存目录
-	cacheDir := "./cache"
-	if os.Getenv("CACHE_DIR") != "" {
-		cacheDir = os.Getenv("CACHE_DIR")
-	}
+	cacheDir := cache.DefaultDir()
 
 	cache, err := cache.NewCache(cacheDir)
 	if err != nil {

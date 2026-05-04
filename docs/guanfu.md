@@ -127,7 +127,7 @@ engine/calculator.go    engine/panel.go
 | `days_to_halving` | 距下次减半天数（估计） | — |
 | `sma_200w` | 200 周 (1400 日) SMA — BTC 长期价格地板 | 跌破 = 历史少数深度压力区，需结合宏观/流动性确认 |
 | `sma_200w_dev` | (price - 200wSMA) / 200wSMA | < 0 深度低估；> 1.5 牛市末期 |
-| `mayer_multiple` | price / 200d SMA | < 0.6 抄底；0.6-1.0 偏低估；1.0-2.4 中性；> 2.4 顶部 |
+| `mayer_multiple` | price / 200d SMA | < 0.6 极端低位；0.6-1.0 偏低估；1.0-2.4 中性；> 2.4 顶部 |
 | `pi_cycle_top_ratio` | 111dMA / (2 × 350dMA) | ≥ 1 触发 = 历史顶部风险信号，ETF 时代需交叉验证 |
 | `phase` | 启发式阶段分类 | accumulation / markup / distribution_risk / transition |
 
@@ -138,7 +138,7 @@ engine/calculator.go    engine/panel.go
 | `ahr999_compressed` | pow(固定公式 AHR999, 0.75) | 主估值信号；阈值见 `skill/SKILL.md` |
 | `ahr999` | 调和 DCA + 自适应 log-log fair value | 辅助诊断 / 分歧检测，不单独驱动估值域 |
 | `mvrv` | Market Cap / Realized Cap | < 0.8 底部；1.2-2.0 中性；> 3.5 过热 |
-| `mvrv_z_score` | (market_cap - realized_cap) / rolling_1y_std(mcap - rcap) | < 0 抄底；> 7 顶部 |
+| `mvrv_z_score` | (market_cap - realized_cap) / rolling_1y_std(mcap - rcap) | < 0 历史低位；> 7 顶部 |
 | `nupl` | (market_cap - realized_cap) / market_cap | < 0 capitulation；0.25-0.5 optimism；> 0.75 euphoria |
 
 **AHR999 改进要点**（v1.5 升级）：
@@ -162,7 +162,7 @@ engine/calculator.go    engine/panel.go
 |------|------|----------|
 | `funding_rate_pct` | 永续合约资金费率 (%/8h) | < -0.01% 反转信号；> 0.05% 多头拥挤；> 0.1% 过热 |
 | `oi_to_mc` | OI(USD) / BTC 市值 | < 0.015 杠杆松弛；> 0.04 清算风险 |
-| `fear_greed` | 恐慌贪婪指数 (0-100) | < 20 极度恐慌（抄底）；> 80 极度贪婪（顶部） |
+| `fear_greed` | 恐慌贪婪指数 (0-100) | < 20 极度恐慌（历史低位常见）；> 80 极度贪婪（顶部） |
 | `altcoin_season` | Top 50 中 90 日跑赢 BTC 的占比 | > 75 山寨季；< 25 BTC 季。**自算，不依赖外部 API** |
 
 ### 🌍 Macro — 宏观
@@ -223,7 +223,7 @@ guanfu --timeout 180s
 | `GUANFU_NO_HISTORY=1` | 禁用 history.db 写入/查询 |
 | `GUANFU_HISTORY_DB` | MCP Server 使用的 history.db 路径（CLI 用 `--history-db`） |
 | `GUANFU_SKILL_PATH` | MCP Resource `guanfu://knowledge/skill.md` 的 SKILL.md 路径 |
-| `CACHE_DIR` | 磁盘缓存目录（默认 `./cache`） |
+| `CACHE_DIR` | 磁盘缓存目录（默认系统用户缓存目录；设置后覆盖默认） |
 | `GUANFU_BTC_KLINE_CACHE` | BTC 全历史日线缓存路径（默认 `$CACHE_DIR/btc_daily_history.json`） |
 
 ### 冷启动
@@ -386,7 +386,7 @@ ahr999_compressed = pow((price / DCA_200d) × (price / fixed_power_law_fair_valu
 ahr999            = (price / DCA_200d) × (price / adaptive_fair_value)
 
 其中:
-  DCA_200d = 200 / Σ(1/price_i)        ← 调和均值（定投成本），非算术均值
+  DCA_200d = 200 / Σ(1/price_i)        ← 调和均值（固定金额成本基准），非算术均值
   ahr999_compressed = 主估值信号
   ahr999 = 自适应诊断量，仅用于辅助确认和 divergence
 ```

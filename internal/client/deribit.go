@@ -30,11 +30,11 @@ import (
 
 // DeribitOptionsData — DVOL + skew. Available bool tells caller whether to use it.
 type DeribitOptionsData struct {
-	DVOL              float64 // current DVOL value
-	DVOL60dTrendPct   float64 // (now / 60d-ago - 1) * 100
-	DVOLAvailable     bool
-	DVOLAsOf          time.Time
-	DVOLHistory       []float64 // up to ~365 daily samples (resolution=86400)
+	DVOL            float64 // current DVOL value
+	DVOL60dTrendPct float64 // (now / 60d-ago - 1) * 100
+	DVOLAvailable   bool
+	DVOLAsOf        time.Time
+	DVOLHistory     []float64 // up to ~365 daily samples (resolution=86400)
 
 	Skew25dNearTermPct float64 // IV(25Δ put) - IV(25Δ call) for nearest-monthly expiry, percentage points
 	SkewAvailable      bool
@@ -45,9 +45,9 @@ type DeribitOptionsData struct {
 }
 
 const (
-	deribitBase       = "https://www.deribit.com/api/v2/public"
+	deribitBase         = "https://www.deribit.com/api/v2/public"
 	deribitDVOLLookback = 365 // 1 year of daily DVOL
-	deribitTimeout    = 10 * time.Second
+	deribitTimeout      = 10 * time.Second
 )
 
 // FetchBTCDeribitOptions — best-effort. Never returns an error; failures show up
@@ -89,7 +89,7 @@ func FetchBTCDeribitOptions(ctx context.Context) *DeribitOptionsData {
 type dvolResp struct {
 	JSONRPC string `json:"jsonrpc"`
 	Result  struct {
-		Data       [][]float64 `json:"data"` // [ts_ms, open, high, low, close]
+		Data         [][]float64 `json:"data"` // [ts_ms, open, high, low, close]
 		Continuation interface{} `json:"continuation"`
 	} `json:"result"`
 }
@@ -134,10 +134,10 @@ func fetchDVOLDaily(ctx context.Context, hc *http.Client, lookbackDays int) (cur
 // --- 25-delta skew ---
 
 type instrument struct {
-	Name              string  `json:"instrument_name"`
-	Strike            float64 `json:"strike"`
-	OptionType        string  `json:"option_type"` // "call" / "put"
-	ExpirationTS      int64   `json:"expiration_timestamp"`
+	Name         string  `json:"instrument_name"`
+	Strike       float64 `json:"strike"`
+	OptionType   string  `json:"option_type"` // "call" / "put"
+	ExpirationTS int64   `json:"expiration_timestamp"`
 }
 
 type instrumentsResp struct {

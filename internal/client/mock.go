@@ -2,8 +2,8 @@ package client
 
 import (
 	"context"
-	"math/rand"
 	"github.com/Ricaardo/guanfu/internal/model"
+	"math/rand"
 	"time"
 
 	"github.com/shopspring/decimal"

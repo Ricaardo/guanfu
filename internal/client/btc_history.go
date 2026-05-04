@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ricaardo/guanfu/internal/cache"
 	"github.com/Ricaardo/guanfu/internal/model"
 	"github.com/shopspring/decimal"
 )
@@ -63,7 +64,7 @@ func BTCDailyHistoryCachePath(cacheDir string) string {
 		return expandHome(path)
 	}
 	if cacheDir == "" {
-		cacheDir = "./cache"
+		cacheDir = cache.DefaultDir()
 	}
 	return filepath.Join(cacheDir, btcDailyHistoryCacheFile)
 }
@@ -162,7 +163,7 @@ func SaveBTCDailyHistoryCache(path string, points []BTCDailyPoint) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return cache.WriteFileAtomic(path, data, 0o644)
 }
 
 func FetchCoinMetricsBTCPriceUSDHistory(ctx context.Context, hc *http.Client, from, to time.Time) ([]BTCDailyPoint, error) {

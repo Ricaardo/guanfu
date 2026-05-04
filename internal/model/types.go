@@ -93,18 +93,18 @@ type MarketSnapshot struct {
 	YieldCurve10Y2YBps decimal.Decimal // 10Y-2Y Treasury spread (bp)
 	YieldCurveAsOf     string
 	// US Liquidity (Priority: Fed assets, RRP, TGA)
-	FedAssetsB            decimal.Decimal // WALCL: Fed total assets (billions)
-	FedAssetsAsOf         string
-	RRPB                  decimal.Decimal // RRPONTSYD: ON reverse repo (billions)
-	RRPAsOf               string
-	TGA_B                 decimal.Decimal // WTREGEN: Treasury cash balance (billions)
-	TGAAsOf               string
-	NetLiquidityB         decimal.Decimal // FedAssets - RRP - TGA
-	FedAssets60dTrendPct  decimal.Decimal
-	RRP60dTrendPct        decimal.Decimal
-	TGA60dTrendPct        decimal.Decimal
-	NetLiq60dTrendPct     decimal.Decimal
-	MacroFetched          bool // FRED 是否成功拉取
+	FedAssetsB           decimal.Decimal // WALCL: Fed total assets (billions)
+	FedAssetsAsOf        string
+	RRPB                 decimal.Decimal // RRPONTSYD: ON reverse repo (billions)
+	RRPAsOf              string
+	TGA_B                decimal.Decimal // WTREGEN: Treasury cash balance (billions)
+	TGAAsOf              string
+	NetLiquidityB        decimal.Decimal // FedAssets - RRP - TGA
+	FedAssets60dTrendPct decimal.Decimal
+	RRP60dTrendPct       decimal.Decimal
+	TGA60dTrendPct       decimal.Decimal
+	NetLiq60dTrendPct    decimal.Decimal
+	MacroFetched         bool // FRED 是否成功拉取
 
 	// 情绪数据
 	BTCDominance           decimal.Decimal // BTC 市占率 (0.00-1.00)

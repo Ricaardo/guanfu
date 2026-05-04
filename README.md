@@ -132,8 +132,8 @@ Cycle 周期定位
   ...
 
 Valuation 估值
-  ahr999_compressed           0.5863  低估（定投区）
-  ahr999                      0.7224  q25  低估 / 定投区（自适应辅助）
+  ahr999_compressed           0.5863  低估区
+  ahr999                      0.7224  q25  低估区（自适应辅助）
   mvrv_z_score                1.2613  中性偏低
   ...
 
@@ -166,7 +166,7 @@ Network 网络
 | `GUANFU_NO_HISTORY=1` | 禁用 history.db 写入/查询 |
 | `GUANFU_HISTORY_DB` | MCP Server 使用的 history.db 路径（CLI 用 `--history-db`） |
 | `GUANFU_SKILL_PATH` | MCP Resource `guanfu://knowledge/skill.md` 的 SKILL.md 路径 |
-| `CACHE_DIR` | 缓存目录（默认 `./cache`） |
+| `CACHE_DIR` | 缓存目录（默认系统用户缓存目录，如 macOS `~/Library/Caches/guanfu`；设置后覆盖默认） |
 | `GUANFU_BTC_KLINE_CACHE` | BTC 全历史日线缓存路径（默认 `$CACHE_DIR/btc_daily_history.json`） |
 | `FUTU_GATEWAY` | 富途 OpenD 地址（默认 `127.0.0.1:11111`） |
 | `FUTU_ENABLED=0` | 禁用富途，直接用 Yahoo 降级 |
@@ -224,7 +224,7 @@ guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
 压缩版回测验证（2010-2026, 5767天）：
 - `<0.549`（映射 <0.45）：n=544, fwd180 +79.6%, 胜率 91%
 - `0.549-0.846`（映射 0.45-0.8）：n=1389, fwd180 +72.3%, 胜率 89%  
-- `3.344-9.457`（映射 5.0-20.0）：n=226, fwd180 **-14.7%** ← 真卖出信号
+- `3.344-9.457`（映射 5.0-20.0）：n=226, fwd180 **-14.7%** ← 高风险信号
 - `>9.457`（映射 ≥20.0）：n=49, fwd180 **-40.5%**, 胜率 0%
 
 详见 `docs/backtest-baseline-ahr999-*-*.md`。
@@ -239,7 +239,7 @@ guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
 
 ### Hash Ribbons
 
-30d MA vs 60d MA（180 天窗口），下行 = 矿工投降 = 历史抄底前兆。
+30d MA vs 60d MA（180 天窗口），下行 = 矿工投降 = 历史底部前常见。
 
 ## 回测
 
@@ -254,7 +254,7 @@ guanfu-backtest --start 2020-01-01 --end 2026-01-01 --indicators indicators.json
 guanfu-backtest --all-data --ahr-csv ahr_daily.csv
 ```
 
-生产与回测共用 BTC 日线缓存：默认 `CACHE_DIR/btc_daily_history.json`（`CACHE_DIR` 默认 `./cache`），也可用 `GUANFU_BTC_KLINE_CACHE=/path/to/btc_daily_history.json` 指定固定路径。缓存从 CoinMetrics `PriceUSD` 建立 2010-07-18 起的全历史，并在每次未命中快照缓存的运行中用 Binance 最新日线增量覆盖。
+生产与回测共用 BTC 日线缓存：默认 `$CACHE_DIR/btc_daily_history.json`（未设置 `CACHE_DIR` 时使用系统用户缓存目录），也可用 `GUANFU_BTC_KLINE_CACHE=/path/to/btc_daily_history.json` 指定固定路径。缓存从 CoinMetrics `PriceUSD` 建立 2010-07-18 起的全历史，并在每次未命中快照缓存的运行中用 Binance 最新日线增量覆盖。
 
 `--kline-cache` 仍支持手动指定缓存文件（兼容生产缓存 envelope 和旧格式 `{"YYYY-MM-DD": close_price, ...}`）。`--start` 不传时默认从 4 年前开始；`--all-data` 覆盖 `--start`，从 2010-07-18 起算。
 
@@ -295,7 +295,7 @@ guanfu/
 │   ├── version/         # 构建版本信息
 │   └── cache/           # 行情快照磁盘缓存
 ├── bin/                 # 本地编译输出（可选）
-├── cache/               # 运行时缓存
+├── cache/               # 可选本地缓存目录；默认在系统用户缓存目录
 │   ├── market_cache.json
 │   └── btc_daily_history.json   # BTC 全量日线缓存 (2010 至最新)
 ├── docs/                # 项目文档（数据源、回测方法、MCP 配置）

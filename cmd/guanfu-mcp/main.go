@@ -175,6 +175,7 @@ func main() {
 func handleRequest(req *rpcRequest) *rpcResponse {
 	switch req.Method {
 	case "initialize":
+		serverVersion, _, _ := version.Get()
 		return ok(req.ID, map[string]any{
 			"protocolVersion": "2024-11-05",
 			"capabilities": map[string]any{
@@ -183,7 +184,7 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 			},
 			"serverInfo": map[string]any{
 				"name":    "guanfu",
-				"version": "3.1.0",
+				"version": serverVersion,
 			},
 		})
 

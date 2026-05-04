@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,6 +213,74 @@ func TestSkillIndicatorContract(t *testing.T) {
 		for _, k := range keys {
 			if _, ok := dom[k]; ok {
 				t.Errorf("SKILL contract violation: %s.%s 已在 v4 SKILL.md 标注合并/废弃，但 BuildPanel 仍输出。请从 panel.go 删除。", domain, k)
+			}
+		}
+	}
+}
+
+func TestBuildPanelAvoidsExecutionInstructions(t *testing.T) {
+	snap := &model.MarketSnapshot{
+		Date:                    time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
+		SnapshotSchemaVersion:   model.CurrentMarketSnapshotSchemaVersion,
+		BTCPrice:                decimal.NewFromInt(80000),
+		ETHPrice:                decimal.NewFromInt(2500),
+		BTCDominance:            decimal.NewFromFloat(0.55),
+		TotalMarketCap:          decimal.NewFromFloat(1.5e12),
+		StablecoinMarketCap:     decimal.NewFromFloat(2e11),
+		FearGreedIndex:          decimal.NewFromInt(15),
+		AltcoinSeasonIndex:      decimal.NewFromInt(35),
+		BTCFundingRate:          decimal.NewFromFloat(0.0001),
+		BTCOpenInterest:         decimal.NewFromFloat(500000),
+		OnchainValuationFetched: true,
+		CapMVRVCur:              decimal.NewFromFloat(0.9),
+		MVRVZScore:              decimal.NewFromFloat(-0.2),
+		NUPL:                    decimal.NewFromFloat(-0.1),
+		HashRateEHs:             decimal.NewFromFloat(600),
+		HashRibbonsLabel:        "下行（矿工投降信号）",
+		DifficultyChangePct:     decimal.NewFromFloat(-8.0),
+		MempoolMB:               decimal.NewFromFloat(20),
+		ETFNetFlow7dUSD:         decimal.NewFromFloat(5e8),
+		ETFNetFlow30dUSD:        decimal.NewFromFloat(2e9),
+		ETFTotalAssetUSD:        decimal.NewFromFloat(1e11),
+		CrossAssetFetched:       true,
+		GoldPriceUSD:            decimal.NewFromInt(4500),
+		QQQPrice:                decimal.NewFromInt(500),
+		SPYPrice:                decimal.NewFromInt(550),
+	}
+
+	n := 1500
+	snap.BTCPriceHistory = make([]decimal.Decimal, n)
+	snap.ETHPriceHistory = make([]decimal.Decimal, n)
+	snap.GoldHistory = make([]decimal.Decimal, n)
+	snap.QQQHistory = make([]decimal.Decimal, n)
+	snap.SPYHistory = make([]decimal.Decimal, n)
+	for i := 0; i < n; i++ {
+		p := 80000.0 * (1 + float64(n-i)/float64(n)*0.5)
+		snap.BTCPriceHistory[i] = decimal.NewFromFloat(p)
+		snap.ETHPriceHistory[i] = decimal.NewFromFloat(p * 0.03)
+		snap.GoldHistory[i] = decimal.NewFromFloat(4500.0)
+		snap.QQQHistory[i] = decimal.NewFromFloat(500.0)
+		snap.SPYHistory[i] = decimal.NewFromFloat(550.0)
+	}
+
+	panel := NewCalculator(&model.Config{}).BuildPanel(snap)
+	forbidden := []string{"买入", "卖出", "加仓", "减仓", "清仓", "仓位", "建仓", "全仓", "抄底", "定投", "止损"}
+	for domain, indicators := range map[string]map[string]model.Indicator{
+		"cycle":       panel.Cycle,
+		"valuation":   panel.Valuation,
+		"network":     panel.Network,
+		"positioning": panel.Positioning,
+		"macro":       panel.Macro,
+		"flow":        panel.Flow,
+		"technical":   panel.Technical,
+		"cross_asset": panel.CrossAsset,
+	} {
+		for key, ind := range indicators {
+			text := ind.Label + "\n" + ind.Note
+			for _, term := range forbidden {
+				if strings.Contains(text, term) {
+					t.Fatalf("%s.%s contains execution term %q in label/note: label=%q note=%q", domain, key, term, ind.Label, ind.Note)
+				}
 			}
 		}
 	}

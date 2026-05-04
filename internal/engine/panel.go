@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/Ricaardo/guanfu/internal/mathutil"
@@ -81,337 +80,6 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 	return panel
 }
 
-func buildSourceHealth(snap *model.MarketSnapshot) []model.SourceHealth {
-	warnings := dedupeStrings(append([]string(nil), snap.SourceWarnings...))
-	out := make([]model.SourceHealth, 0, 11)
-
-	btcOK := !snap.BTCPrice.IsZero() && len(snap.BTCPriceHistory) > 0
-	ethOK := !snap.ETHPrice.IsZero() && len(snap.ETHPriceHistory) > 0
-	out = append(out, healthEntry(
-		"binance_spot",
-		combinedStatus(btcOK, ethOK),
-		latestAsOf(snap.BTCPriceAsOf, snap.ETHPriceAsOf),
-		false,
-		"BTC full daily history from CoinMetrics PriceUSD plus Binance latest; ETH spot history from Binance",
-		matchingWarnings(warnings, "binance btc", "coinmetrics priceusd", "binance eth"),
-	))
-
-	futuresOK := snap.FuturesFetched || !snap.BTCFundingRate.IsZero() || !snap.BTCOpenInterest.IsZero()
-	out = append(out, healthEntry(
-		"binance_futures",
-		statusFromBool(futuresOK),
-		sourceTimestamp(snap.FetchedAt, ""),
-		false,
-		"BTC funding rate and open interest",
-		matchingWarnings(warnings, "binance futures"),
-	))
-
-	coingeckoTotalOK := snap.GlobalMarketFetched || !snap.TotalMarketCap.IsZero()
-	coingeckoStableOK := snap.StablecoinMarketCapFetched || !snap.StablecoinMarketCap.IsZero()
-	out = append(out, healthEntry(
-		"coingecko_market",
-		combinedStatus(coingeckoTotalOK, coingeckoStableOK),
-		"",
-		false,
-		"global market cap and stablecoin cap inputs",
-		matchingWarnings(warnings, "coingecko global", "stablecoin"),
-	))
-	top50OK := snap.Top50Fetched && len(snap.Top50Coins) > 0 && snap.AltcoinSeasonAvailable
-	out = append(out, healthEntry(
-		"coingecko_top50",
-		statusFromBool(top50OK),
-		sourceTimestamp(snap.FetchedAt, ""),
-		false,
-		"CoinGecko top-50 list plus Binance top-50 history for altcoin season",
-		matchingWarnings(warnings, "top50", "altcoin season"),
-	))
-
-	out = append(out, healthEntry(
-		"alternative_fear_greed",
-		statusFromBool(snap.FearGreedFetched || !snap.FearGreedIndex.IsZero() || snap.FearGreedAsOf != ""),
-		snap.FearGreedAsOf,
-		false,
-		"Fear & Greed index",
-		matchingWarnings(warnings, "fear", "greed", "alternative.me"),
-	))
-
-	mempoolOK := snap.MempoolFetched || !snap.HashRateEHs.IsZero() || snap.HashRibbonsLabel != "" || !snap.MempoolMB.IsZero()
-	out = append(out, healthEntry(
-		"mempool_space",
-		statusFromBool(mempoolOK),
-		snap.MempoolAsOf,
-		false,
-		"hash rate, hash ribbons, difficulty and mempool depth",
-		matchingWarnings(warnings, "mempool"),
-	))
-
-	etfOK := !snap.ETFNetFlow7dUSD.IsZero() || !snap.ETFNetFlow30dUSD.IsZero() || !snap.ETFTotalAssetUSD.IsZero() || snap.ETFAsOf != ""
-	etfStatus := statusFromBool(etfOK)
-	etfNote := "US BTC spot ETF flows and total assets"
-	if etfOK && snap.ETFStaleDays >= 2 {
-		etfStatus = "stale"
-		etfNote = fmt.Sprintf("%s; latest sample is %d days old", etfNote, snap.ETFStaleDays)
-	}
-	out = append(out, healthEntry(
-		"sosovalue_etf",
-		etfStatus,
-		snap.ETFAsOf,
-		false,
-		etfNote,
-		matchingWarnings(warnings, "sosovalue", "etf"),
-	))
-
-	deribitStatus := combinedStatus(snap.DVOLAvailable, snap.SkewAvailable)
-	out = append(out, healthEntry(
-		"deribit_options",
-		deribitStatus,
-		latestAsOf(snap.DVOLAsOf, snap.SkewAsOf),
-		false,
-		"DVOL and 25-delta skew",
-		matchingWarnings(warnings, "deribit"),
-	))
-
-	out = append(out, healthEntry(
-		"coinmetrics_onchain",
-		statusFromBool(snap.OnchainValuationFetched),
-		snap.OnchainValuationAsOf,
-		false,
-		"MVRV, MVRV Z, NUPL and realized cap inputs",
-		matchingWarnings(warnings, "coinmetrics"),
-	))
-
-	out = append(out, healthEntry(
-		"fred_macro",
-		statusFromBool(snap.MacroFetched),
-		latestAsOf(snap.DXYAsOf, snap.RealYield10YAsOf, snap.M2AsOf, snap.SPXAsOf, snap.HYSpreadAsOf, snap.YieldCurveAsOf),
-		false,
-		"DXY, real yield, M2, SPX correlation, HY spread and yield curve",
-		matchingWarnings(warnings, "fred"),
-	))
-
-	crossOK := snap.CrossAssetFetched
-	crossCoreOK := !snap.GoldPriceUSD.IsZero() && !snap.QQQPrice.IsZero() && !snap.SPYPrice.IsZero()
-	crossStatus := combinedStatus(crossOK, crossCoreOK)
-	oilNote := oilSourceHealthNote(snap.OilPriceSource)
-	out = append(out, healthEntry(
-		"cross_asset",
-		crossStatus,
-		latestAsOf(snap.GoldPriceAsOf, snap.QQQPriceAsOf, snap.SPYPriceAsOf, snap.WTIPriceAsOf, snap.UUPPriceAsOf, snap.VIXYPriceAsOf),
-		crossFallbackUsed(snap, warnings),
-		oilNote,
-		matchingWarnings(warnings, "cross-asset", "futu", "yahoo", "paxg", "wti"),
-	))
-
-	return out
-}
-
-func healthEntry(source, status, asOf string, fallback bool, note string, warnings []string) model.SourceHealth {
-	if len(warnings) > 0 && status == "ok" {
-		status = "warning"
-	}
-	return model.SourceHealth{
-		Source:       source,
-		Status:       status,
-		AsOf:         asOf,
-		FallbackUsed: fallback,
-		Note:         note,
-		Warnings:     warnings,
-	}
-}
-
-func statusFromBool(ok bool) string {
-	if ok {
-		return "ok"
-	}
-	return "missing"
-}
-
-func combinedStatus(primaryOK, secondaryOK bool) string {
-	switch {
-	case primaryOK && secondaryOK:
-		return "ok"
-	case primaryOK || secondaryOK:
-		return "partial"
-	default:
-		return "missing"
-	}
-}
-
-func matchingWarnings(warnings []string, needles ...string) []string {
-	var out []string
-	for _, w := range warnings {
-		lower := strings.ToLower(w)
-		for _, needle := range needles {
-			if strings.Contains(lower, strings.ToLower(needle)) {
-				out = append(out, w)
-				break
-			}
-		}
-	}
-	return out
-}
-
-func latestAsOf(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func crossFallbackUsed(snap *model.MarketSnapshot, warnings []string) bool {
-	if snap.OilPriceSource == "yahoo:CL=F" {
-		return true
-	}
-	for _, w := range warnings {
-		lower := strings.ToLower(w)
-		if strings.Contains(lower, "will try yahoo") || strings.Contains(lower, "yahoo") {
-			return true
-		}
-	}
-	return false
-}
-
-func oilSourceHealthNote(source string) string {
-	switch source {
-	case "futu:US.USO":
-		return "cross-asset data includes USO ETF as oil proxy; do not interpret it as WTI $/barrel"
-	case "yahoo:CL=F":
-		return "cross-asset data includes Yahoo CL=F WTI futures fallback"
-	case "":
-		return "gold, QQQ, SPY and optional oil proxy inputs"
-	default:
-		return fmt.Sprintf("cross-asset data includes oil source %s", source)
-	}
-}
-
-// historyTracked 列出从 history.db 取分位的指标 → 所属 domain。
-// 这些指标缺少长 BTC-kline 派生历史，必须靠每日采集。
-var historyTracked = map[string]string{
-	"etf_net_flow_7d_usd":       "flow",
-	"etf_net_flow_30d_usd":      "flow",
-	"etf_total_assets_usd":      "flow",
-	"stablecoin_market_cap_usd": "flow",
-	"stablecoin_supply_30d_pct": "flow",
-	"mempool_mb":                "network",
-	"hash_rate_ehs":             "network",
-	"difficulty_change_pct":     "network",
-	"funding_rate_pct":          "positioning",
-	"oi_to_mc":                  "positioning",
-	"fear_greed":                "positioning",
-	"dxy_60d_trend_pct":         "macro",
-	"real_yield_10y_pct":        "macro",
-	"m2_yoy":                    "macro",
-	"spx_correlation_30d":       "macro",
-	"fed_assets_b":              "macro",
-	"rrp_b":                     "macro",
-	"tga_b":                     "macro",
-	"net_liquidity_b":           "macro",
-}
-
-const (
-	historyLookbackDays = 730 // 2 年
-	historyMinSamples   = 30  // 至少 30 天才算有意义
-)
-
-// persistAndAnnotateHistory 把今天的 tracked 指标写入 history.db，
-// 同时为已有足够样本的指标回填 Quantile。
-//
-// 没有 Store（c.History == nil）时跳过 — Calculator 仍输出指标盘，仅缺历史分位。
-func (c *Calculator) persistAndAnnotateHistory(p *model.IndicatorPanel, date string) {
-	if c.History == nil {
-		return
-	}
-
-	// 1) 收集今日值并批量写
-	todayKV := map[string]float64{}
-	for k, dom := range historyTracked {
-		ind, ok := getDomainIndicator(p, dom, k)
-		if !ok || ind.Missing || (ind.Value == 0 && ind.Label == "") {
-			continue
-		}
-		todayKV[k] = ind.Value
-	}
-	if len(todayKV) > 0 {
-		if err := c.History.RecordMany(date, todayKV); err != nil {
-			// 写失败不致命：仍输出本次盘面
-			return
-		}
-	}
-
-	// 2) 回填 Quantile（仅当样本 >= 30）
-	for k, dom := range historyTracked {
-		ind, ok := getDomainIndicator(p, dom, k)
-		if !ok {
-			continue
-		}
-		val, present := todayKV[k]
-		if !present {
-			continue
-		}
-		q, n, err := c.History.QuantileAsOf(k, val, historyLookbackDays, date)
-		if err != nil || n < historyMinSamples {
-			continue
-		}
-		ind.Quantile = q
-		ind.Note = fmt.Sprintf("%s（历史分位基于 %d 天采集）", ind.Note, n)
-		setDomainIndicator(p, dom, k, ind)
-	}
-}
-
-// stablecoinMarketCapNDaysAgo 从 history.db 查 N 天前的稳定币市值
-func (c *Calculator) stablecoinMarketCapNDaysAgo(asOfDate string, daysAgo int) (float64, bool) {
-	if c.History == nil {
-		return 0, false
-	}
-	t, err := time.Parse("2006-01-02", asOfDate)
-	if err != nil {
-		return 0, false
-	}
-	pastDate := t.AddDate(0, 0, -daysAgo).Format("2006-01-02")
-	return c.History.ValueAt(pastDate, "stablecoin_market_cap_usd")
-}
-
-func getDomainIndicator(p *model.IndicatorPanel, domain, key string) (model.Indicator, bool) {
-	m := domainMap(p, domain)
-	if m == nil {
-		return model.Indicator{}, false
-	}
-	ind, ok := m[key]
-	return ind, ok
-}
-
-func setDomainIndicator(p *model.IndicatorPanel, domain, key string, ind model.Indicator) {
-	m := domainMap(p, domain)
-	if m == nil {
-		return
-	}
-	m[key] = ind
-}
-
-func domainMap(p *model.IndicatorPanel, domain string) map[string]model.Indicator {
-	switch domain {
-	case "cycle":
-		return p.Cycle
-	case "valuation":
-		return p.Valuation
-	case "network":
-		return p.Network
-	case "positioning":
-		return p.Positioning
-	case "macro":
-		return p.Macro
-	case "flow":
-		return p.Flow
-	case "technical":
-		return p.Technical
-	case "cross_asset":
-		return p.CrossAsset
-	}
-	return nil
-}
-
 // ----------------- Cycle 周期 -----------------
 
 func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapshot, ts string) {
@@ -455,7 +123,7 @@ func (c *Calculator) fillCycle(p *model.IndicatorPanel, snap *model.MarketSnapsh
 			Label:     devLabel(dev),
 			Source:    btcDailyHistorySource,
 			UpdatedAt: btcTS,
-			Note:      "(price - 200wSMA) / 200wSMA。<0 历史抄底区，>1.5 牛市末期",
+			Note:      "(price - 200wSMA) / 200wSMA。<0 历史低位区，>1.5 牛市末期",
 		}
 	}
 
@@ -601,7 +269,7 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 				Label:     minerCostRatioLabel(ratio),
 				Source:    "derived",
 				UpdatedAt: networkTS,
-				Note:      fmt.Sprintf("price $%.0f / miner cost floor $%.0f = %.2fx。<1.0 = 矿工亏损（历史抄底区），<0.8 = 矿工深度亏损（仅 2018/2020/2022 出现）", btc, costFloor, ratio),
+				Note:      fmt.Sprintf("price $%.0f / miner cost floor $%.0f = %.2fx。<1.0 = 矿工亏损（历史低位区），<0.8 = 矿工深度亏损（仅 2018/2020/2022 出现）", btc, costFloor, ratio),
 			}
 		}
 	}
@@ -697,7 +365,7 @@ func (c *Calculator) fillValuation(p *model.IndicatorPanel, snap *model.MarketSn
 				Label:     priceToRealizedLabel(devPct),
 				Source:    "coinmetrics:derived",
 				UpdatedAt: onchainTS,
-				Note:      "(price - realized_price) / realized_price × 100。<0 = 持币者整体亏损 = 历史级抄底区（仅 2015/2018-12/2020-03/2022-11 出现）",
+				Note:      "(price - realized_price) / realized_price × 100。<0 = 持币者整体亏损 = 历史级低位区（仅 2015/2018-12/2020-03/2022-11 出现）",
 			}
 		}
 	} else {
@@ -752,7 +420,7 @@ func (c *Calculator) fillNetwork(p *model.IndicatorPanel, snap *model.MarketSnap
 			Label:     snap.HashRibbonsLabel,
 			Source:    "mempool.space",
 			UpdatedAt: networkTS,
-			Note:      "30d MA vs 60d MA 交叉。'下行' = 矿工投降信号（历史抄底前兆）",
+			Note:      "30d MA vs 60d MA 交叉。'下行' = 矿工投降信号（历史底部前常见）",
 		}
 	}
 
@@ -822,7 +490,7 @@ func (c *Calculator) fillPositioning(p *model.IndicatorPanel, snap *model.Market
 			Label:     fearGreedLabel(fg),
 			Source:    "alternative.me",
 			UpdatedAt: fearGreedTS,
-			Note:      "0=极度恐慌, 100=极度贪婪。<20 历史抄底, >80 谨慎",
+			Note:      "0=极度恐慌, 100=极度贪婪。<20 历史低位常见, >80 谨慎",
 		}
 	}
 
@@ -982,60 +650,60 @@ func (c *Calculator) fillMacro(p *model.IndicatorPanel, snap *model.MarketSnapsh
 		liqTS := sourceTimestamp(snap.FedAssetsAsOf, ts)
 
 		p.Macro["fed_assets_b"] = model.Indicator{
-			Value:  fedA,
-			Source: "fred:WALCL",
+			Value:     fedA,
+			Source:    "fred:WALCL",
 			UpdatedAt: liqTS,
-			Note:   fmt.Sprintf("Fed 总资产 ($%.2fT, as of %s)。QT 进行中则下降，QE 则上升", fedA/1000, snap.FedAssetsAsOf),
+			Note:      fmt.Sprintf("Fed 总资产 ($%.2fT, as of %s)。QT 进行中则下降，QE 则上升", fedA/1000, snap.FedAssetsAsOf),
 		}
 		p.Macro["fed_assets_60d_trend_pct"] = model.Indicator{
-			Value:  f(snap.FedAssets60dTrendPct),
-			Label:  liqTrendLabel(f(snap.FedAssets60dTrendPct)),
-			Source: "fred:WALCL",
+			Value:     f(snap.FedAssets60dTrendPct),
+			Label:     liqTrendLabel(f(snap.FedAssets60dTrendPct)),
+			Source:    "fred:WALCL",
 			UpdatedAt: liqTS,
-			Note:   "Fed 总资产 60 日变化 %。负值 = QT 缩表，正值 = QE 扩表",
+			Note:      "Fed 总资产 60 日变化 %。负值 = QT 缩表，正值 = QE 扩表",
 		}
 		p.Macro["rrp_b"] = model.Indicator{
-			Value:  rrp,
-			Label:  rrpLabel(rrp),
-			Source: "fred:RRPONTSYD",
+			Value:     rrp,
+			Label:     rrpLabel(rrp),
+			Source:    "fred:RRPONTSYD",
 			UpdatedAt: sourceTimestamp(snap.RRPAsOf, ts),
-			Note:   fmt.Sprintf("隔夜逆回购 ($%.0fB, as of %s)。下降 = 钱流入市场（顺风），上升 = 钱锁在 Fed（逆风）", rrp, snap.RRPAsOf),
+			Note:      fmt.Sprintf("隔夜逆回购 ($%.0fB, as of %s)。下降 = 钱流入市场（顺风），上升 = 钱锁在 Fed（逆风）", rrp, snap.RRPAsOf),
 		}
 		p.Macro["rrp_60d_trend_pct"] = model.Indicator{
-			Value:  f(snap.RRP60dTrendPct),
-			Label:  liqTrendLabel(f(snap.RRP60dTrendPct)),
-			Source: "fred:RRPONTSYD",
+			Value:     f(snap.RRP60dTrendPct),
+			Label:     liqTrendLabel(f(snap.RRP60dTrendPct)),
+			Source:    "fred:RRPONTSYD",
 			UpdatedAt: sourceTimestamp(snap.RRPAsOf, ts),
-			Note:   "RRP 60 日变化 %。RRP 下降 = 流动性释出 = BTC 顺风（2023-2024 RRP 耗尽是隐性的主要推力）",
+			Note:      "RRP 60 日变化 %。RRP 下降 = 流动性释出 = BTC 顺风（2023-2024 RRP 耗尽是隐性的主要推力）",
 		}
 		p.Macro["tga_b"] = model.Indicator{
-			Value:  tga,
-			Label:  tgaLabel(tga),
-			Source: "fred:WTREGEN",
+			Value:     tga,
+			Label:     tgaLabel(tga),
+			Source:    "fred:WTREGEN",
 			UpdatedAt: sourceTimestamp(snap.TGAAsOf, ts),
-			Note:   fmt.Sprintf("财政部现金余额 ($%.0fB, as of %s)。下降 = 政府花钱注水，上升 = 抽水回笼（债务上限博弈期关键变量）", tga, snap.TGAAsOf),
+			Note:      fmt.Sprintf("财政部现金余额 ($%.0fB, as of %s)。下降 = 政府花钱注水，上升 = 抽水回笼（债务上限博弈期关键变量）", tga, snap.TGAAsOf),
 		}
 		p.Macro["tga_60d_trend_pct"] = model.Indicator{
-			Value:  f(snap.TGA60dTrendPct),
-			Label:  liqTrendLabel(f(snap.TGA60dTrendPct)),
-			Source: "fred:WTREGEN",
+			Value:     f(snap.TGA60dTrendPct),
+			Label:     liqTrendLabel(f(snap.TGA60dTrendPct)),
+			Source:    "fred:WTREGEN",
 			UpdatedAt: sourceTimestamp(snap.TGAAsOf, ts),
-			Note:   "TGA 60 日变化 %。TGA 上升 = 财政部回收流动性（逆风），下降 = 注水（顺风）",
+			Note:      "TGA 60 日变化 %。TGA 上升 = 财政部回收流动性（逆风），下降 = 注水（顺风）",
 		}
 		if netLiq != 0 {
 			p.Macro["net_liquidity_b"] = model.Indicator{
-				Value:  netLiq,
-				Label:  netLiqLabel(netLiq),
-				Source: "derived: WALCL - RRPONTSYD - WTREGEN",
+				Value:     netLiq,
+				Label:     netLiqLabel(netLiq),
+				Source:    "derived: WALCL - RRPONTSYD - WTREGEN",
 				UpdatedAt: liqTS,
-				Note:   fmt.Sprintf("净流动性 = Fed资产($%.0fB) - RRP($%.0fB) - TGA($%.0fB) = $%.0fB。公式: WALCL - RRPONTSYD - WTREGEN", fedA, rrp, tga, netLiq),
+				Note:      fmt.Sprintf("净流动性 = Fed资产($%.0fB) - RRP($%.0fB) - TGA($%.0fB) = $%.0fB。公式: WALCL - RRPONTSYD - WTREGEN", fedA, rrp, tga, netLiq),
 			}
 			p.Macro["net_liquidity_60d_trend_pct"] = model.Indicator{
-				Value:  f(snap.NetLiq60dTrendPct),
-				Label:  liqTrendLabel(f(snap.NetLiq60dTrendPct)),
-				Source: "derived",
+				Value:     f(snap.NetLiq60dTrendPct),
+				Label:     liqTrendLabel(f(snap.NetLiq60dTrendPct)),
+				Source:    "derived",
 				UpdatedAt: liqTS,
-				Note:   "净流动性 60 日变化 %。正值 = 市场注水（风险资产顺风），负值 = 抽水（逆风）",
+				Note:      "净流动性 60 日变化 %。正值 = 市场注水（风险资产顺风），负值 = 抽水（逆风）",
 			}
 		}
 	}
@@ -1776,9 +1444,9 @@ func piCycleLabel(ratio float64) string {
 func ahrLabel(v float64) string {
 	switch {
 	case v < 0.45:
-		return "极端抄底区（历史底部）"
+		return "极端低估区（历史底部）"
 	case v < 0.8:
-		return "低估 / 定投区"
+		return "低估区"
 	case v < 1.2:
 		return "合理"
 	case v < 2.0:
@@ -1792,17 +1460,17 @@ func ahrLabel(v float64) string {
 // 回测验证：分歧 = 市场转向预警，历史 -34%~-53% fwd180, 0% 胜率。
 //
 // 三种分歧模式：
-//  1. 原始便宜 (<0.8) + 自适应偏贵 (q>55%) → 下跌中继，分批勿全仓
+//  1. 原始便宜 (<0.8) + 自适应偏贵 (q>55%) → 下跌中继风险
 //  2. 原始贵 (>1.2) + 自适应偏低 (q<35%) → 熊市初期反弹陷阱
 //  3. 原始泡沫 (>2.0) + 自适应不极端 (q<50%) → 最危险，历史 -53%
 func detectAhrDivergence(origRaw float64, adaptiveQ float64) string {
 	switch {
 	case origRaw < 0.45 && adaptiveQ > 0.35:
-		return "⚠️ 原始极端低估 + 自适应中性偏高 — 可能下跌中继，分批建仓勿全仓"
+		return "⚠️ 原始极端低估 + 自适应中性偏高 — 可能下跌中继，低估信号未充分确认"
 	case origRaw < 0.8 && adaptiveQ > 0.55:
 		return "⚠️ 原始低估 + 自适应偏贵 — 价格虽低但百分位偏高，可能尚未到底"
 	case origRaw > 1.2 && adaptiveQ < 0.35:
-		return "⚠️ 原始偏贵 + 自适应偏低 — 熊市初期反弹陷阱，谨慎追高"
+		return "⚠️ 原始偏贵 + 自适应偏低 — 熊市初期反弹陷阱，反弹质量偏弱"
 	case origRaw > 2.0 && adaptiveQ < 0.50:
 		return "🔴 原始泡沫 + 自适应不极端 — 最危险分歧，历史 fwd180 -53%，0% 胜率"
 	default:
@@ -1888,11 +1556,11 @@ func skew25Label(s float64) string {
 }
 
 // priceToRealizedLabel — 价格相对持币者平均成本的偏离
-// <0 历史抄底；0-50 低估；50-150 中性；>150 顶部区
+// <0 历史低位；0-50 低估；50-150 中性；>150 顶部区
 func priceToRealizedLabel(devPct float64) string {
 	switch {
 	case devPct < 0:
-		return "持币者整体亏损（历史级抄底）"
+		return "持币者整体亏损（历史级低位）"
 	case devPct < 50:
 		return "低估"
 	case devPct < 150:
@@ -1935,7 +1603,7 @@ func oiLabel(r float64) string {
 func fearGreedLabel(fg float64) string {
 	switch {
 	case fg < 20:
-		return "极度恐慌（历史抄底常见）"
+		return "极度恐慌（历史低位常见）"
 	case fg < 40:
 		return "恐慌"
 	case fg < 60:
@@ -2452,9 +2120,9 @@ func d3PanicLabel(dd float64) string {
 func minerCostRatioLabel(ratio float64) string {
 	switch {
 	case ratio < 0.8:
-		return "矿工深度亏损（历史级抄底，仅 2018/2020/2022 出现）"
+		return "矿工深度亏损（历史级低位，仅 2018/2020/2022 出现）"
 	case ratio < 1.0:
-		return "矿工亏损（成本支撑区，历史抄底）"
+		return "矿工亏损（成本支撑区，历史低位常见）"
 	case ratio < 1.3:
 		return "矿工微利（正常熊市/积累区）"
 	case ratio < 2.0:

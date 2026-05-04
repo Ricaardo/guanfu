@@ -3,14 +3,14 @@ package cache
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/shopspring/decimal"
 )
 
 // Cache 缓存管理器
@@ -22,6 +22,9 @@ type Cache struct {
 
 // NewCache 创建新的缓存实例
 func NewCache(cacheDir string) (*Cache, error) {
+	if cacheDir == "" {
+		cacheDir = DefaultDir()
+	}
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
@@ -41,6 +44,21 @@ func NewCache(cacheDir string) (*Cache, error) {
 	}
 
 	return cache, nil
+}
+
+// DefaultDir returns guanfu's runtime cache directory. CACHE_DIR remains an
+// explicit override for reproducible backtests and cron jobs.
+func DefaultDir() string {
+	if dir := strings.TrimSpace(os.Getenv("CACHE_DIR")); dir != "" {
+		return expandHome(dir)
+	}
+	if dir, err := os.UserCacheDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "guanfu")
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".guanfu", "cache")
+	}
+	return "./cache"
 }
 
 // Save 保存快照到缓存
@@ -147,7 +165,7 @@ func (c *Cache) HasDataForDate(date time.Time) bool {
 
 // loadFromFile 从文件加载缓存
 func (c *Cache) loadFromFile() error {
-	data, err := ioutil.ReadFile(c.file)
+	data, err := os.ReadFile(c.file)
 	if err != nil {
 		return err
 	}
@@ -168,7 +186,7 @@ func (c *Cache) saveToFile() error {
 		return err
 	}
 
-	return ioutil.WriteFile(c.file, data, 0644)
+	return WriteFileAtomic(c.file, data, 0o644)
 }
 
 // copySnapshot 创建快照副本。先做结构体值拷贝（覆盖所有标量字段），再深拷
@@ -213,4 +231,46 @@ func (c *Cache) copySnapshot(original *model.MarketSnapshot) *model.MarketSnapsh
 	}
 
 	return &snap
+}
+
+// WriteFileAtomic writes data to path via a same-directory temp file and rename.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func expandHome(path string) string {
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return path
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }

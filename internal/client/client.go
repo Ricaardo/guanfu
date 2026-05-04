@@ -1,8 +1,8 @@
 package client
 
 import (
-	"github.com/Ricaardo/guanfu/internal/model"
 	"context"
+	"github.com/Ricaardo/guanfu/internal/model"
 )
 
 // DataProvider 定义数据获取接口

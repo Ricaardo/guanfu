@@ -1249,7 +1249,7 @@ func build3DScore(prices []pricePoint, startT, endT time.Time, prov engine.Price
 	// Bucket stats by specific signal combination (8 combos = 2^3)
 	comboLabels := []string{
 		"--- 三项全缺（最贵+不跌+无恐慌）",
-		"V-- 仅估值便宜（便宜+不跌+无恐慌 — 最佳买入！）",
+		"V-- 仅估值便宜（便宜+不跌+无恐慌 — 历史强势低估组合）",
 		"-M- 仅动量（偏贵+跌+无恐慌）",
 		"VM- 估值便宜+跌+无恐慌（熊市中继）",
 		"--P 仅恐慌（估值合理+不跌+恐慌）",
@@ -1347,7 +1347,7 @@ func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, d3 d3Result
 
 	b.WriteString("\n### Compressed sqrt-AHR buckets (harmonic DCA + fixed fair + pow(raw, 0.75))\n\n")
 	writeAHRStatsTable(&b, a.CompressedStats)
-	b.WriteString("\n> sqrt-AHR = 原始 AHR999^0.75。压缩 price² 的凸性偏差，让 5.0+ 泡沫桶从假阳性翻转为真卖出信号。回测验证：5.0-20.0 桶 fwd180 从 +47% 降至 -35%。\n")
+	b.WriteString("\n> sqrt-AHR = 原始 AHR999^0.75。压缩 price² 的凸性偏差，让 5.0+ 泡沫桶从假阳性翻转为高风险信号。回测验证：5.0-20.0 桶 fwd180 从 +47% 降至 -35%。\n")
 
 	b.WriteString("\n### Raw bucket transition counts\n\n")
 	b.WriteString("| original bucket | modified raw bucket | n |\n")
@@ -1360,7 +1360,7 @@ func renderMarkdownReport(r *engine.BacktestReport, a ahrComparison, d3 d3Result
 	b.WriteString("\n## 3-Dimensional Score (估值 × 动量 × 恐慌)\n\n")
 	b.WriteString("> 三维打分替代单一 AHR999 指数。三个独立维度，每条 +1 分 (0-3)。\n")
 	b.WriteString("> 1. price/power_law_fair < 0.5 — 估值维度：幂律趋势线下极便宜 (AHR999 的右半)\n")
-	b.WriteString("> 2. price < 200d SMA — 动量维度：定投者亏损 = 情绪负向 (AHR999 的左半显式化)\n")
+	b.WriteString("> 2. price < 200d SMA — 动量维度：DCA 成本基准承压 = 情绪负向 (AHR999 的左半显式化)\n")
 	b.WriteString("> 3. drawdown 90d > 30% — 恐慌维度：暴跌中他人割肉你接 (独立来自价格行为)\n")
 	b.WriteString("> 三个维度来自不同时间尺度，不互相污染。\n\n")
 

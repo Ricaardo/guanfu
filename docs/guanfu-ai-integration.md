@@ -224,7 +224,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.25' }
+        with: { go-version-file: go.mod }
       - run: go install github.com/Ricaardo/guanfu/cmd/guanfu@latest
       - name: Run and report
         env:

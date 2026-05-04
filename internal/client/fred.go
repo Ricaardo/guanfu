@@ -9,7 +9,7 @@
 //   - RRPONTSYD: 隔夜逆回购（daily），daily — 流动性蓄水池
 //   - WTREGEN:  财政部现金余额（daily），daily — TGA 注水/抽水
 //
-// Net Liquidity ≈ WALCL - RRPONTSYD - WTREGEN
+// # Net Liquidity ≈ WALCL - RRPONTSYD - WTREGEN
 //
 // 需要环境变量 FRED_API_KEY。无 key 时 FetchMacroData 返回 nil + nil error，
 // 由 RealClient 决定是否填 placeholder。
@@ -32,28 +32,28 @@ import (
 
 // MacroData FRED 衍生指标 + 时效性
 type MacroData struct {
-	DXY60dTrendPct    float64
-	DXYLatest         float64
-	DXYAsOf           string
-	RealYield10YPct   float64
-	RealYield10YAsOf  string
-	M2YoYPct          float64
-	M2LatestB         float64
-	M2AsOf            string
-	SPXCorrelation30d float64
-	SPXAsOf           string
-	HYSpreadBps       float64
-	HYSpreadAsOf      string
+	DXY60dTrendPct     float64
+	DXYLatest          float64
+	DXYAsOf            string
+	RealYield10YPct    float64
+	RealYield10YAsOf   string
+	M2YoYPct           float64
+	M2LatestB          float64
+	M2AsOf             string
+	SPXCorrelation30d  float64
+	SPXAsOf            string
+	HYSpreadBps        float64
+	HYSpreadAsOf       string
 	YieldCurve10Y2YBps float64
-	YieldCurveAsOf    string
+	YieldCurveAsOf     string
 	// US Liquidity (Priority: Fed assets, RRP, TGA)
-	FedAssetsB        float64 // WALCL: Fed total assets (millions USD), converted to billions
-	FedAssetsAsOf     string
-	RRPB              float64 // RRPONTSYD: ON reverse repo (billions USD)
-	RRPAsOf           string
-	TGA_B             float64 // WTREGEN: Treasury General Account (billions USD)
-	TGAAsOf           string
-	NetLiquidityB     float64 // FedAssets - RRP - TGA (billions)
+	FedAssetsB    float64 // WALCL: Fed total assets (millions USD), converted to billions
+	FedAssetsAsOf string
+	RRPB          float64 // RRPONTSYD: ON reverse repo (billions USD)
+	RRPAsOf       string
+	TGA_B         float64 // WTREGEN: Treasury General Account (billions USD)
+	TGAAsOf       string
+	NetLiquidityB float64 // FedAssets - RRP - TGA (billions)
 	// 60d trends
 	FedAssets60dTrendPct float64
 	RRP60dTrendPct       float64
@@ -97,15 +97,15 @@ func FetchMacroData(ctx context.Context, btcHistoryNewestFirst []decimal.Decimal
 		ch <- result{series: series, obs: obs, err: err}
 	}
 
-	go fetch("DTWEXBGS", 90)     // 60d 趋势 + buffer
-	go fetch("DFII10", 1)        // 仅最新
-	go fetch("M2SL", 14)         // YoY 同比，留 buffer
-	go fetch("SP500", 45)        // 30 trading days + 周末 buffer
-	go fetch("BAMLH0A0HYM2", 3)  // HY spread, monthly
-	go fetch("T10Y2Y", 3)        // 10Y-2Y spread, daily
-	go fetch("WALCL", 20)        // weekly: 20 weeks → ~140d buffer for 60d trend
-	go fetch("RRPONTSYD", 90)    // daily: 90d buffer
-	go fetch("WTREGEN", 90)      // daily (business): 90d buffer
+	go fetch("DTWEXBGS", 90)    // 60d 趋势 + buffer
+	go fetch("DFII10", 1)       // 仅最新
+	go fetch("M2SL", 14)        // YoY 同比，留 buffer
+	go fetch("SP500", 45)       // 30 trading days + 周末 buffer
+	go fetch("BAMLH0A0HYM2", 3) // HY spread, monthly
+	go fetch("T10Y2Y", 3)       // 10Y-2Y spread, daily
+	go fetch("WALCL", 20)       // weekly: 20 weeks → ~140d buffer for 60d trend
+	go fetch("RRPONTSYD", 90)   // daily: 90d buffer
+	go fetch("WTREGEN", 90)     // daily (business): 90d buffer
 
 	results := map[string][]fredObservation{}
 	var stales []string

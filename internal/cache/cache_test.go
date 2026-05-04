@@ -1,11 +1,14 @@
 package cache
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/shopspring/decimal"
 )
 
 func TestCache(t *testing.T) {
@@ -104,5 +107,41 @@ func TestCachePersistence(t *testing.T) {
 	}
 	if retrieved.SnapshotSchemaVersion != model.CurrentMarketSnapshotSchemaVersion {
 		t.Errorf("schema version mismatch after reload: expected %d, got %d", model.CurrentMarketSnapshotSchemaVersion, retrieved.SnapshotSchemaVersion)
+	}
+}
+
+func TestDefaultDirUsesCacheDirOverride(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "custom-cache")
+	t.Setenv("CACHE_DIR", dir)
+
+	if got := DefaultDir(); got != dir {
+		t.Fatalf("DefaultDir() = %q, want %q", got, dir)
+	}
+}
+
+func TestSaveUsesAtomicRename(t *testing.T) {
+	tempDir := t.TempDir()
+	cache, err := NewCache(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create cache: %v", err)
+	}
+	if err := cache.Save(&model.MarketSnapshot{
+		Date:     time.Now(),
+		BTCPrice: decimal.NewFromFloat(60000.0),
+	}); err != nil {
+		t.Fatalf("Failed to save snapshot: %v", err)
+	}
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".tmp-market_cache.json-") {
+			t.Fatalf("atomic temp file was left behind: %s", entry.Name())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "market_cache.json")); err != nil {
+		t.Fatalf("market_cache.json not written: %v", err)
 	}
 }

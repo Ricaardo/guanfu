@@ -383,7 +383,7 @@ func (c *Calculator) calcETHBTCStrength(snap *model.MarketSnapshot) decimal.Deci
 // 返回 (score, rawAhr)；score ∈ [-1,1]，rawAhr 是原始 AHR999 数值（便于人工核对）。
 //
 // 修复点：
-// 1. 固定金额定投成本使用调和均值，而不是算术均线。
+// 1. 固定金额成本基准使用调和均值，而不是算术均线。
 // 2. 长期估值线用最近 8 年数据动态拟合 log(price)=a+b*log(age)，避免沿用 2019 年旧系数。
 // 3. 得分阈值用同一窗口内 AHR 分布的动态分位数，不再固定使用 0.45/1.2。
 // 4. Huber IRLS 单次重加权，降低 2021 牛市顶 / LUNA-FTX 双爆等极端样本对拟合的影响。
@@ -538,7 +538,7 @@ const (
 // calcCompressedAhr999 计算压缩版 sqrt-AHR999。
 // 公式：raw = (price/dcaCost) * (price/fairValue)，然后 compressed = raw^0.75。
 // 阈值使用原始阈值^0.75，保证分档与原始 AHR999 数学等价。
-// 压缩降低 price² 的凸性偏差，让 5.0+ 泡沫桶从假阳性翻转为真卖出信号。
+// 压缩降低 price² 的凸性偏差，让 5.0+ 泡沫桶从假阳性翻转为高风险信号。
 // 回测验证：5.0-20.0 桶 fwd180 从 +47% 降至 -35%；≥20.0 桶胜率保持 0%。
 func (c *Calculator) calcCompressedAhr999(snap *model.MarketSnapshot) (score decimal.Decimal, rawCompressed float64, rawOriginal float64, ok bool) {
 	if snap.BTCPrice.IsZero() || len(snap.BTCPriceHistory) < ahrDCAWindowDays {
@@ -610,29 +610,9 @@ func (c *Calculator) calcCompressedAhr999(snap *model.MarketSnapshot) (score dec
 	return s, rawCompressed, rawOriginal, true
 }
 
-// ahrCompressedLabel 压缩版 AHR999 标签（阈值经 pow(x,0.75) 映射）
-func ahrCompressedLabel(v float64) string {
-	switch {
-	case v < ctComp045:
-		return "极端低估（定投/抄底）"
-	case v < ctComp08:
-		return "低估（定投区）"
-	case v < ctComp12:
-		return "合理"
-	case v < ctComp20:
-		return "偏高"
-	case v < ctComp50:
-		return "高估（减仓）"
-	case v < ctComp200:
-		return "泡沫（大幅减仓）"
-	default:
-		return "极端泡沫（清仓）"
-	}
-}
-
 // calc3DScore 计算三维打分（估值 × 动量 × 恐慌）。
 // 回测验证：V--（仅估值便宜）fwd180 +100.9%/95%胜率
-// -M-（仅动量/价格低于200d SMA）fwd180 -33.4%/11%胜率 = 接飞刀信号。
+// -M-（仅动量/价格低于200d SMA）fwd180 -33.4%/11%胜率 = 下跌延续风险。
 func (c *Calculator) calc3DScore(snap *model.MarketSnapshot) (score int, val float64, mayer float64, dd float64, ok bool) {
 	price, _ := snap.BTCPrice.Float64()
 	if price <= 0 || len(snap.BTCPriceHistory) < 200 {
@@ -680,30 +660,6 @@ func (c *Calculator) calc3DScore(snap *model.MarketSnapshot) (score int, val flo
 		score++
 	}
 	return score, val, mayer, dd, true
-}
-
-func d3Label(score int, val, mayer, dd float64) string {
-	hasV := val > 0 && val < 0.8
-	hasM := mayer > 0 && mayer < 1.0
-	hasP := dd < -0.20
-	switch {
-	case hasV && hasM && hasP:
-		return "VMP 三项全满（极端底部）"
-	case hasV && !hasM && hasP:
-		return "V-P 便宜+不跌+恐慌（恐慌底）"
-	case !hasV && hasM && hasP:
-		return "-MP 偏贵+跌+恐慌（熊市反弹陷阱）"
-	case hasV && hasM && !hasP:
-		return "VM- 估值便宜+动量弱（熊市中继）"
-	case hasV && !hasM && !hasP:
-		return "V-- 仅估值便宜（最佳买入时机）"
-	case !hasV && hasM && !hasP:
-		return "-M- 仅动量（偏贵+跌，接飞刀信号）"
-	case !hasV && !hasM && hasP:
-		return "--P 仅恐慌（估值合理+恐慌，假底信号）"
-	default:
-		return "--- 三项全缺（估值偏高+不跌+无恐慌）"
-	}
 }
 
 type ahrLogLogFit struct {
@@ -1067,150 +1023,6 @@ func (c *Calculator) calcAhr999Jacobian(snap *model.MarketSnapshot) (raw float64
 //   - Elec cost per TH/day: 25 * 24 / 3600 * 0.05 = $0.00833/day (per TH/s)
 //
 //	More precisely: 25 J/TH * 24h * (1kWh/3.6e6J) * $0.05/kWh = $0.00833/TH/day
-
-const (
-	minerEfficiencyJPerTH = 25.0   // J/TH for modern ASIC
-	minerElecCostPerKWh   = 0.05   // $/kWh global industrial avg
-	minerBTCMinedPerDay   = 450.0  // 3.125 subsidy * 144 blocks (post-2024 halving)
-)
-
-func calcMinerCostFloor(hashRateEHs float64) (float64, bool) {
-	if hashRateEHs <= 0 {
-		return 0, false
-	}
-	// Convert EH/s → TH/s: 1 EH = 1e6 TH
-	hashRateTHs := hashRateEHs * 1e6
-	// Electricity cost per TH per day
-	elecPerTHPerDay := minerEfficiencyJPerTH * 24.0 * minerElecCostPerKWh / 3600.0
-	// Total daily electricity cost
-	dailyElecUSD := hashRateTHs * elecPerTHPerDay
-	// Per-BTC production cost
-	costPerBTC := dailyElecUSD / minerBTCMinedPerDay
-	if !isUsablePositive(costPerBTC) {
-		return 0, false
-	}
-	return costPerBTC, true
-}
-
-// ── Difficulty-Adjusted Cost Floor (complementary to pure-electricity model) ──
-//
-// Uses mining difficulty as a "distilled" cost measure that accounts for both
-// hardware efficiency improvements AND electricity costs implicitly.
-// When BTC price / difficulty-implied-cost < 1.0, miners are under water.
-//
-// Fitted from historical difficulty vs price: log(price) ≈ a + b*log(difficulty).
-// Since we only have current difficulty (not history), we use a simplified ratio:
-// price / (difficulty * network_efficiency_factor).
-//
-// The key insight: difficulty adjusts every 2016 blocks to target 10min/block,
-// so it embeds the miner breakeven calculation. A -2.3% difficulty drop (like now)
-// means some miners already turned off — we're approaching the cost floor.
-
-func calcDifficultyCostRatio(difficultyChangePct float64) (ratio float64, note string) {
-	// Simplified: when difficulty is dropping, miners are capitulating.
-	// The magnitude tells us how close we are to the cost floor.
-	// Historical pattern: difficulty drops >5% typically mark local bottoms.
-	switch {
-	case difficultyChangePct < -7:
-		ratio = 0.85
-		note = "difficulty -7%+: miner capitulation, historically at/near cost floor"
-	case difficultyChangePct < -5:
-		ratio = 0.92
-		note = "difficulty -5~-7%: approaching miner cost floor"
-	case difficultyChangePct < -2:
-		ratio = 0.97
-		note = "difficulty -2~-5%: marginal miners under pressure"
-	case difficultyChangePct < 0:
-		ratio = 1.0
-		note = "difficulty flat/slight down: miners at breakeven"
-	default:
-		ratio = 1.05
-		note = "difficulty rising: miners profitable, expanding"
-	}
-	return ratio, note
-}
-
-// ── Diminishing Returns Cycle Model (Priority 5) ──
-//
-// Models the exponential decay of BTC's cycle ROI across halvings.
-// Historical cycle peak multipliers (from halving price to cycle top):
-//
-//	Cycle 1 (2012-2013): ~98x, peak at ~370d post-halving
-//	Cycle 2 (2016-2017): ~30x, peak at ~520d
-//	Cycle 3 (2020-2021): ~8x,  peak at ~550d
-//	Cycle 4 (2024-now):  est ~2.4x, peak est ~555d (Mar 2026)
-//
-// rho ≈ 0.29 (geometric decay of peak multiples)
-// Peak delay asymptote ≈ 552 days (saturating lag model)
-//
-// This gives a rough ceiling estimate — not a price target, but an anchor
-// for when upside is structurally limited.
-
-type cyclePeak struct {
-	halvingDate   time.Time
-	peakDate      time.Time
-	peakPrice     float64
-	halvingPrice  float64
-}
-
-var knownCyclePeaks = []cyclePeak{
-	{time.Date(2012, 11, 28, 0, 0, 0, 0, time.UTC), time.Date(2013, 12, 4, 0, 0, 0, 0, time.UTC), 1147, 12},
-	{time.Date(2016, 7, 9, 0, 0, 0, 0, time.UTC), time.Date(2017, 12, 17, 0, 0, 0, 0, time.UTC), 19783, 650},
-	{time.Date(2020, 5, 11, 0, 0, 0, 0, time.UTC), time.Date(2021, 11, 10, 0, 0, 0, 0, time.UTC), 68789, 8700},
-}
-
-// calcDiminishingROI estimates the current cycle's implied peak price and timing
-// based on the exponential decay of cycle returns across halvings.
-//
-// Peak = halving_price * roi_multiple, where roi_multiple decays geometrically:
-//
-//	roi[n] = roi[n-1] * rho,  rho ≈ 0.29 (geometric mean of (30/98), (8/30))
-//
-// Halving price anchor: uses the 200w SMA at halving date as the structural base.
-// Peak delay asymptote: 552 days (saturating lag model).
-func calcDiminishingROI(halving200wSMA float64) (estPeakPrice float64, estPeakDays int, roiMultiple float64, ok bool) {
-	if len(knownCyclePeaks) < 2 || halving200wSMA <= 0 {
-		return 0, 0, 0, false
-	}
-
-	// Compute rho from historical cycle ROI ratios
-	roi0 := knownCyclePeaks[0].peakPrice / knownCyclePeaks[0].halvingPrice // ~98x
-	roi1 := knownCyclePeaks[1].peakPrice / knownCyclePeaks[1].halvingPrice // ~30x
-	roi2 := knownCyclePeaks[2].peakPrice / knownCyclePeaks[2].halvingPrice // ~8x
-	rho := math.Sqrt((roi1 / roi0) * (roi2 / roi1)) // geometric mean decay
-
-	// This cycle's ROI estimate
-	estROI := roi2 * rho
-
-	// Peak delay: saturating toward 552-day asymptote
-	peakDelays := make([]float64, len(knownCyclePeaks))
-	for i, cp := range knownCyclePeaks {
-		peakDelays[i] = cp.peakDate.Sub(cp.halvingDate).Hours() / 24
-	}
-	lastDelay := peakDelays[len(peakDelays)-1]
-	estDelay := lastDelay + (552-lastDelay)*0.5
-	if estDelay < lastDelay {
-		estDelay = lastDelay
-	}
-
-	// Peak estimate: anchor from halving-time structural price floor * ROI multiple
-	estPeakPrice = halving200wSMA * estROI
-	if !isUsablePositive(estPeakPrice) {
-		return 0, 0, 0, false
-	}
-
-	estPeakDays = int(estDelay)
-	roiMultiple = estROI
-	return estPeakPrice, estPeakDays, roiMultiple, true
-}
-
-func isUsablePositive(value float64) bool {
-	return value > 0 && isUsableFinite(value)
-}
-
-func isUsableFinite(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0)
-}
 
 // --- Volatility ---
 // calcVolatilityScore 计算波动率得分
