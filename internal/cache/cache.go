@@ -48,15 +48,17 @@ func NewCache(cacheDir string) (*Cache, error) {
 
 // DefaultDir returns guanfu's runtime cache directory. CACHE_DIR remains an
 // explicit override for reproducible backtests and cron jobs.
+// Default places cache under ~/.guanfu/cache/ to keep all guanfu data
+// (panels, history.db, market_cache.json, btc_daily_history.json) in one tree.
 func DefaultDir() string {
 	if dir := strings.TrimSpace(os.Getenv("CACHE_DIR")); dir != "" {
 		return expandHome(dir)
 	}
-	if dir, err := os.UserCacheDir(); err == nil && dir != "" {
-		return filepath.Join(dir, "guanfu")
-	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return filepath.Join(home, ".guanfu", "cache")
+	}
+	if dir, err := os.UserCacheDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "guanfu")
 	}
 	return "./cache"
 }
