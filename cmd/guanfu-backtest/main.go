@@ -28,9 +28,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/client"
-	"github.com/Ricaardo/guanfu/internal/engine"
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/client"
+	"github.com/Ricaardo/guanfu/pkg/engine"
+	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
 const (

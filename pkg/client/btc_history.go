@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/cache"
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/cache"
+	"github.com/Ricaardo/guanfu/pkg/model"
 	"github.com/shopspring/decimal"
 )
 

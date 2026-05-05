@@ -21,7 +21,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/client"
+	"github.com/Ricaardo/guanfu/pkg/client"
 )
 
 type pricePoint struct {

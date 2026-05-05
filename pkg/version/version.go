@@ -1,7 +1,7 @@
 // Package version exposes build metadata.
 //
 // At release build time GoReleaser injects values via -ldflags
-// (-X github.com/Ricaardo/guanfu/internal/version.Version=... etc.).
+// (-X github.com/Ricaardo/guanfu/pkg/version.Version=... etc.).
 // At plain `go build`/`go install` time those vars stay empty and we
 // fall back to runtime/debug.ReadBuildInfo() so the binary still
 // reports a useful version (module pseudo-version + vcs.revision).

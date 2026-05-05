@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Ricaardo/guanfu/internal/model"
-	"github.com/Ricaardo/guanfu/internal/version"
+	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/version"
 )
 
 const defaultHistoryDir = "~/.guanfu/panels"

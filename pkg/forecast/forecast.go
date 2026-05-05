@@ -1,0 +1,843 @@
+package forecast
+
+import (
+	"fmt"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Ricaardo/guanfu/pkg/client"
+	"github.com/Ricaardo/guanfu/pkg/model"
+)
+
+const (
+	defaultTopK                = 21
+	defaultStepDays            = 7
+	defaultDiversifyWindowDays = 30
+	minSelectedAnalogs         = 5
+	minSharedFeatures          = 6
+	expectedFeatureCount       = 11
+
+	ahrLegacyLogSlope      = 5.84
+	ahrLegacyLogIntercept  = -17.01
+	ahrCompressionExponent = 0.75
+)
+
+var defaultHorizons = []int{30, 90, 180}
+
+// Options controls the historical analogue forecast.
+type Options struct {
+	Horizons            []int `json:"horizons"`
+	TopK                int   `json:"top_k"`
+	StepDays            int   `json:"step_days"`
+	DiversifyWindowDays int   `json:"diversify_window_days"`
+}
+
+// Point is an oldest-first daily BTC close.
+type Point struct {
+	Date   string  `json:"date"`
+	Close  float64 `json:"close"`
+	Source string  `json:"source,omitempty"`
+}
+
+// Forecast is a probabilistic scenario inference, not a deterministic price target.
+type Forecast struct {
+	Date            string            `json:"date"`
+	CurrentPrice    float64           `json:"current_price"`
+	Method          string            `json:"method"`
+	MethodNote      string            `json:"method_note"`
+	Coverage        Coverage          `json:"coverage"`
+	CurrentFeatures []FeatureValue    `json:"current_features"`
+	Horizons        []HorizonForecast `json:"horizons"`
+	Analogs         []Analog          `json:"analogs"`
+	Caveats         []string          `json:"caveats"`
+}
+
+type Coverage struct {
+	FeatureCount      int     `json:"feature_count"`
+	ExpectedFeatures  int     `json:"expected_features"`
+	FeatureCoverage   float64 `json:"feature_coverage"`
+	CandidateCount    int     `json:"candidate_count"`
+	SelectedAnalogs   int     `json:"selected_analogs"`
+	AverageSimilarity float64 `json:"average_similarity"`
+	Confidence        string  `json:"confidence"`
+}
+
+type FeatureValue struct {
+	Name       string  `json:"name"`
+	Value      float64 `json:"value"`
+	Normalized float64 `json:"normalized"`
+	Weight     float64 `json:"weight"`
+	Note       string  `json:"note,omitempty"`
+}
+
+type HorizonForecast struct {
+	Days                          int     `json:"days"`
+	SampleSize                    int     `json:"sample_size"`
+	AverageReturnPct              float64 `json:"avg_return_pct"`
+	MedianReturnPct               float64 `json:"median_return_pct"`
+	P10ReturnPct                  float64 `json:"p10_return_pct"`
+	P25ReturnPct                  float64 `json:"p25_return_pct"`
+	P75ReturnPct                  float64 `json:"p75_return_pct"`
+	P90ReturnPct                  float64 `json:"p90_return_pct"`
+	ProbabilityUp                 float64 `json:"probability_up"`
+	ProbabilityUpsideContinuation float64 `json:"probability_upside_continuation"`
+	ProbabilityRange              float64 `json:"probability_range"`
+	ProbabilityDownsidePressure   float64 `json:"probability_downside_pressure"`
+	ExpectedPrice                 float64 `json:"expected_price"`
+	MedianPrice                   float64 `json:"median_price"`
+	P10Price                      float64 `json:"p10_price"`
+	P90Price                      float64 `json:"p90_price"`
+	DominantScenario              string  `json:"dominant_scenario"`
+	DominantLabel                 string  `json:"dominant_label"`
+	UpsideThresholdPct            float64 `json:"upside_threshold_pct"`
+	DownsideThresholdPct          float64 `json:"downside_threshold_pct"`
+}
+
+type Analog struct {
+	Date              string             `json:"date"`
+	Price             float64            `json:"price"`
+	Distance          float64            `json:"distance"`
+	Similarity        float64            `json:"similarity"`
+	MatchedFeatures   int                `json:"matched_features"`
+	ForwardReturnsPct map[string]float64 `json:"forward_returns_pct"`
+}
+
+type featureSet struct {
+	values []FeatureValue
+	byName map[string]FeatureValue
+}
+
+type candidate struct {
+	index    int
+	date     time.Time
+	dist     float64
+	sim      float64
+	matched  int
+	features featureSet
+}
+
+func DefaultOptions() Options {
+	return Options{
+		Horizons:            append([]int(nil), defaultHorizons...),
+		TopK:                defaultTopK,
+		StepDays:            defaultStepDays,
+		DiversifyWindowDays: defaultDiversifyWindowDays,
+	}
+}
+
+func ParseHorizons(raw string) ([]int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return append([]int(nil), defaultHorizons...), nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(strings.TrimSuffix(part, "d"))
+		if part == "" {
+			continue
+		}
+		days, err := strconv.Atoi(part)
+		if err != nil || days <= 0 {
+			return nil, fmt.Errorf("invalid horizon %q", part)
+		}
+		out = append(out, days)
+	}
+	return normalizeHorizons(out), nil
+}
+
+func PointsFromBTCDaily(points []client.BTCDailyPoint) []Point {
+	out := make([]Point, 0, len(points))
+	for _, p := range points {
+		close, _ := p.Close.Float64()
+		out = append(out, Point{Date: p.Date, Close: close, Source: p.Source})
+	}
+	return normalizePoints(out)
+}
+
+func PointsFromSnapshot(snap *model.MarketSnapshot) ([]Point, error) {
+	if snap == nil {
+		return nil, fmt.Errorf("snapshot is nil")
+	}
+	if len(snap.BTCPriceHistory) == 0 {
+		return nil, fmt.Errorf("snapshot has no BTC price history")
+	}
+	latestDate, err := parseSnapshotBTCDate(snap)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Point, 0, len(snap.BTCPriceHistory))
+	for idx := len(snap.BTCPriceHistory) - 1; idx >= 0; idx-- {
+		close, _ := snap.BTCPriceHistory[idx].Float64()
+		date := latestDate.AddDate(0, 0, -idx).Format("2006-01-02")
+		out = append(out, Point{Date: date, Close: close, Source: "snapshot:BTCPriceHistory"})
+	}
+	return normalizePoints(out), nil
+}
+
+func Build(points []Point, opts Options) (*Forecast, error) {
+	points = normalizePoints(points)
+	if len(points) == 0 {
+		return nil, fmt.Errorf("BTC daily history is empty")
+	}
+	opts = normalizeOptions(opts)
+	maxHorizon := maxInt(opts.Horizons)
+	if len(points) <= maxHorizon+200 {
+		return nil, fmt.Errorf("BTC daily history has %d days, need more than %d", len(points), maxHorizon+200)
+	}
+
+	currentIdx := len(points) - 1
+	currentFeatures, ok := featuresAt(points, currentIdx)
+	if !ok {
+		return nil, fmt.Errorf("current BTC history lacks enough lookback for forecast features")
+	}
+
+	candidates := make([]candidate, 0, len(points)/opts.StepDays)
+	for i := 0; i+maxHorizon < len(points); i += opts.StepDays {
+		fs, ok := featuresAt(points, i)
+		if !ok {
+			continue
+		}
+		dist, matched, ok := distance(currentFeatures, fs)
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			index:    i,
+			date:     mustParseDate(points[i].Date),
+			dist:     dist,
+			sim:      similarityFromDistance(dist),
+			matched:  matched,
+			features: fs,
+		})
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no comparable historical analogues with forward returns")
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].dist == candidates[j].dist {
+			return candidates[i].date.Before(candidates[j].date)
+		}
+		return candidates[i].dist < candidates[j].dist
+	})
+	selected := selectAnalogs(candidates, opts.TopK, opts.DiversifyWindowDays)
+	if len(selected) < minSelectedAnalogs {
+		return nil, fmt.Errorf("only %d historical analogues selected, need at least %d", len(selected), minSelectedAnalogs)
+	}
+
+	analogs := buildAnalogs(points, selected, opts.Horizons)
+	horizons := buildHorizonForecasts(points[currentIdx].Close, points, selected, opts.Horizons)
+	avgSim := averageSimilarity(selected)
+	featureCoverage := float64(len(currentFeatures.values)) / float64(expectedFeatureCount)
+
+	return &Forecast{
+		Date:         points[currentIdx].Date,
+		CurrentPrice: points[currentIdx].Close,
+		Method:       "historical_analogue_knn_v1",
+		MethodNote:   "Uses comparable historical BTC daily states from price, valuation, volatility, RSI, AHR, and halving-cycle features; returns are empirical forward-return distributions.",
+		Coverage: Coverage{
+			FeatureCount:      len(currentFeatures.values),
+			ExpectedFeatures:  expectedFeatureCount,
+			FeatureCoverage:   clamp01(featureCoverage),
+			CandidateCount:    len(candidates),
+			SelectedAnalogs:   len(selected),
+			AverageSimilarity: avgSim,
+			Confidence:        confidenceLabel(featureCoverage, avgSim, len(selected), opts.TopK),
+		},
+		CurrentFeatures: currentFeatures.values,
+		Horizons:        horizons,
+		Analogs:         analogs,
+		Caveats: []string{
+			"这是历史相似盘面推演，不是确定性价格预测。",
+			"v1 只使用可全历史回放的 BTC 价格/周期特征；ETF、FRED、funding、mempool 等指标需长期 panel archive 后才能进入训练样本。",
+			"样本统计描述的是历史相似状态后的分布，遇到政策、交易所、流动性或宏观断裂时可能失效。",
+		},
+	}, nil
+}
+
+func normalizeOptions(opts Options) Options {
+	if len(opts.Horizons) == 0 {
+		opts.Horizons = append([]int(nil), defaultHorizons...)
+	}
+	opts.Horizons = normalizeHorizons(opts.Horizons)
+	if opts.TopK <= 0 {
+		opts.TopK = defaultTopK
+	}
+	if opts.StepDays <= 0 {
+		opts.StepDays = defaultStepDays
+	}
+	if opts.DiversifyWindowDays <= 0 {
+		opts.DiversifyWindowDays = defaultDiversifyWindowDays
+	}
+	return opts
+}
+
+func normalizeHorizons(values []int) []int {
+	seen := map[int]struct{}{}
+	out := make([]int, 0, len(values))
+	for _, v := range values {
+		if v <= 0 {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	sort.Ints(out)
+	if len(out) == 0 {
+		return append([]int(nil), defaultHorizons...)
+	}
+	return out
+}
+
+func normalizePoints(points []Point) []Point {
+	byDate := make(map[string]Point, len(points))
+	for _, p := range points {
+		t, err := time.Parse("2006-01-02", strings.TrimSpace(p.Date))
+		if err != nil || !usablePositive(p.Close) {
+			continue
+		}
+		p.Date = t.UTC().Format("2006-01-02")
+		byDate[p.Date] = p
+	}
+	out := make([]Point, 0, len(byDate))
+	for _, p := range byDate {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
+	return out
+}
+
+func featuresAt(points []Point, i int) (featureSet, bool) {
+	var fs featureSet
+	fs.byName = map[string]FeatureValue{}
+	add := func(name string, raw, normalized, weight float64, note string) {
+		if !usableFinite(raw) || !usableFinite(normalized) || weight <= 0 {
+			return
+		}
+		fv := FeatureValue{
+			Name:       name,
+			Value:      round4(raw),
+			Normalized: round4(clip(normalized, 3)),
+			Weight:     weight,
+			Note:       note,
+		}
+		fs.values = append(fs.values, fv)
+		fs.byName[name] = fv
+	}
+
+	if r, ok := returnOver(points, i, 30); ok {
+		add("return_30d", r*100, r/0.30, 1.10, "30d momentum, pct")
+	}
+	if r, ok := returnOver(points, i, 90); ok {
+		add("return_90d", r*100, r/0.60, 1.00, "90d momentum, pct")
+	}
+	if r, ok := returnOver(points, i, 180); ok {
+		add("return_180d", r*100, r/1.00, 0.80, "180d momentum, pct")
+	}
+	if dd, ok := drawdown(points, i, 90); ok {
+		add("drawdown_90d", dd*100, dd/0.40, 1.10, "distance from 90d high, pct")
+	}
+	if mayer, ok := mayerMultiple(points, i); ok {
+		add("mayer_multiple", mayer, math.Log(mayer)/math.Log(2.4), 1.20, "price / 200d SMA")
+	}
+	if dev, ok := smaDeviation(points, i, 1400); ok {
+		add("sma_200w_dev", dev*100, dev/1.50, 1.00, "(price - 200wSMA) / 200wSMA, pct")
+	}
+	if vol, ok := realizedVol(points, i, 30); ok {
+		add("realized_vol_30d", vol*100, (vol-0.60)/0.50, 0.70, "annualized 30d realized volatility, pct")
+	}
+	if rsi, ok := rsi(points, i, 14); ok {
+		add("rsi_14", rsi, (rsi-50)/25, 0.80, "14d RSI")
+	}
+	if ahr, ok := compressedAHR(points, i); ok {
+		add("ahr999_compressed", ahr, math.Log(ahr)/math.Log(2.5), 1.40, "legacy AHR999 compressed by pow(x, 0.75)")
+	}
+	if progress, ok := halvingProgress(mustParseDate(points[i].Date)); ok {
+		add("halving_cycle_sin", math.Sin(2*math.Pi*progress), math.Sin(2*math.Pi*progress), 0.35, "cyclical halving phase")
+		add("halving_cycle_cos", math.Cos(2*math.Pi*progress), math.Cos(2*math.Pi*progress), 0.35, "cyclical halving phase")
+	}
+
+	if len(fs.values) < minSharedFeatures {
+		return fs, false
+	}
+	return fs, true
+}
+
+func returnOver(points []Point, i, days int) (float64, bool) {
+	if i-days < 0 || !usablePositive(points[i-days].Close) {
+		return 0, false
+	}
+	return points[i].Close/points[i-days].Close - 1, true
+}
+
+func drawdown(points []Point, i, window int) (float64, bool) {
+	if i-window+1 < 0 {
+		return 0, false
+	}
+	maxClose := 0.0
+	for j := i - window + 1; j <= i; j++ {
+		if points[j].Close > maxClose {
+			maxClose = points[j].Close
+		}
+	}
+	if !usablePositive(maxClose) {
+		return 0, false
+	}
+	return points[i].Close/maxClose - 1, true
+}
+
+func mayerMultiple(points []Point, i int) (float64, bool) {
+	ma, ok := sma(points, i, 200)
+	if !ok || !usablePositive(ma) {
+		return 0, false
+	}
+	return points[i].Close / ma, true
+}
+
+func smaDeviation(points []Point, i, window int) (float64, bool) {
+	ma, ok := sma(points, i, window)
+	if !ok || !usablePositive(ma) {
+		return 0, false
+	}
+	return points[i].Close/ma - 1, true
+}
+
+func sma(points []Point, i, window int) (float64, bool) {
+	if window <= 0 || i-window+1 < 0 {
+		return 0, false
+	}
+	sum := 0.0
+	for j := i - window + 1; j <= i; j++ {
+		if !usablePositive(points[j].Close) {
+			return 0, false
+		}
+		sum += points[j].Close
+	}
+	return sum / float64(window), true
+}
+
+func realizedVol(points []Point, i, window int) (float64, bool) {
+	if window <= 1 || i-window < 0 {
+		return 0, false
+	}
+	returns := make([]float64, 0, window)
+	for j := i - window + 1; j <= i; j++ {
+		if !usablePositive(points[j].Close) || !usablePositive(points[j-1].Close) {
+			return 0, false
+		}
+		returns = append(returns, math.Log(points[j].Close/points[j-1].Close))
+	}
+	std := stddev(returns)
+	if !usableFinite(std) {
+		return 0, false
+	}
+	return std * math.Sqrt(365), true
+}
+
+func rsi(points []Point, i, window int) (float64, bool) {
+	if window <= 0 || i-window < 0 {
+		return 0, false
+	}
+	gains := 0.0
+	losses := 0.0
+	for j := i - window + 1; j <= i; j++ {
+		diff := points[j].Close - points[j-1].Close
+		if diff > 0 {
+			gains += diff
+		} else {
+			losses -= diff
+		}
+	}
+	if losses == 0 {
+		if gains == 0 {
+			return 50, true
+		}
+		return 100, true
+	}
+	rs := (gains / float64(window)) / (losses / float64(window))
+	return 100 - 100/(1+rs), true
+}
+
+func compressedAHR(points []Point, i int) (float64, bool) {
+	dca, ok := sma(points, i, 200)
+	if !ok || !usablePositive(dca) {
+		return 0, false
+	}
+	date := mustParseDate(points[i].Date)
+	genesis := time.Date(2009, 1, 3, 0, 0, 0, 0, time.UTC)
+	age := date.Sub(genesis).Hours() / 24
+	if age <= 0 {
+		return 0, false
+	}
+	fair := math.Pow(10, ahrLegacyLogSlope*math.Log10(age)+ahrLegacyLogIntercept)
+	if !usablePositive(fair) {
+		return 0, false
+	}
+	raw := (points[i].Close / dca) * (points[i].Close / fair)
+	if !usablePositive(raw) {
+		return 0, false
+	}
+	return math.Pow(raw, ahrCompressionExponent), true
+}
+
+func distance(a, b featureSet) (float64, int, bool) {
+	sum := 0.0
+	weightSum := 0.0
+	matched := 0
+	for _, av := range a.values {
+		bv, ok := b.byName[av.Name]
+		if !ok {
+			continue
+		}
+		diff := av.Normalized - bv.Normalized
+		sum += av.Weight * diff * diff
+		weightSum += av.Weight
+		matched++
+	}
+	required := minSharedFeatures
+	if len(a.values)-1 > required {
+		required = len(a.values) - 1
+	}
+	if matched < required || weightSum <= 0 {
+		return 0, matched, false
+	}
+	return math.Sqrt(sum / weightSum), matched, true
+}
+
+func selectAnalogs(candidates []candidate, topK, windowDays int) []candidate {
+	if topK <= 0 || topK > len(candidates) {
+		topK = len(candidates)
+	}
+	selected := make([]candidate, 0, topK)
+	used := map[int]struct{}{}
+	for _, c := range candidates {
+		if len(selected) >= topK {
+			break
+		}
+		if tooCloseToSelected(c, selected, windowDays) {
+			continue
+		}
+		selected = append(selected, c)
+		used[c.index] = struct{}{}
+	}
+	for _, c := range candidates {
+		if len(selected) >= topK {
+			break
+		}
+		if _, ok := used[c.index]; ok {
+			continue
+		}
+		selected = append(selected, c)
+		used[c.index] = struct{}{}
+	}
+	return selected
+}
+
+func tooCloseToSelected(c candidate, selected []candidate, windowDays int) bool {
+	if windowDays <= 0 {
+		return false
+	}
+	for _, s := range selected {
+		days := math.Abs(c.date.Sub(s.date).Hours() / 24)
+		if days < float64(windowDays) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildAnalogs(points []Point, selected []candidate, horizons []int) []Analog {
+	out := make([]Analog, 0, len(selected))
+	for _, c := range selected {
+		forward := map[string]float64{}
+		for _, h := range horizons {
+			if c.index+h >= len(points) {
+				continue
+			}
+			ret := points[c.index+h].Close/points[c.index].Close - 1
+			forward[strconv.Itoa(h)+"d"] = round2(ret * 100)
+		}
+		out = append(out, Analog{
+			Date:              points[c.index].Date,
+			Price:             round2(points[c.index].Close),
+			Distance:          round4(c.dist),
+			Similarity:        round2(c.sim),
+			MatchedFeatures:   c.matched,
+			ForwardReturnsPct: forward,
+		})
+	}
+	return out
+}
+
+func buildHorizonForecasts(currentPrice float64, points []Point, selected []candidate, horizons []int) []HorizonForecast {
+	out := make([]HorizonForecast, 0, len(horizons))
+	for _, h := range horizons {
+		returns := make([]float64, 0, len(selected))
+		for _, c := range selected {
+			if c.index+h >= len(points) {
+				continue
+			}
+			returns = append(returns, points[c.index+h].Close/points[c.index].Close-1)
+		}
+		if len(returns) == 0 {
+			continue
+		}
+		out = append(out, summarizeHorizon(currentPrice, h, returns))
+	}
+	return out
+}
+
+func summarizeHorizon(currentPrice float64, days int, returns []float64) HorizonForecast {
+	sort.Float64s(returns)
+	avg := average(returns)
+	median := quantile(returns, 0.50)
+	p10 := quantile(returns, 0.10)
+	p25 := quantile(returns, 0.25)
+	p75 := quantile(returns, 0.75)
+	p90 := quantile(returns, 0.90)
+	upThresh, downThresh := scenarioThresholds(days)
+
+	up := 0
+	upside := 0
+	downside := 0
+	for _, r := range returns {
+		if r > 0 {
+			up++
+		}
+		if r*100 >= upThresh {
+			upside++
+		}
+		if r*100 <= -downThresh {
+			downside++
+		}
+	}
+	n := len(returns)
+	pUpside := float64(upside) / float64(n)
+	pDownside := float64(downside) / float64(n)
+	pRange := 1 - pUpside - pDownside
+	if pRange < 0 {
+		pRange = 0
+	}
+	scenario, label := dominantScenario(pUpside, pRange, pDownside)
+	return HorizonForecast{
+		Days:                          days,
+		SampleSize:                    n,
+		AverageReturnPct:              round2(avg * 100),
+		MedianReturnPct:               round2(median * 100),
+		P10ReturnPct:                  round2(p10 * 100),
+		P25ReturnPct:                  round2(p25 * 100),
+		P75ReturnPct:                  round2(p75 * 100),
+		P90ReturnPct:                  round2(p90 * 100),
+		ProbabilityUp:                 round4(float64(up) / float64(n)),
+		ProbabilityUpsideContinuation: round4(pUpside),
+		ProbabilityRange:              round4(pRange),
+		ProbabilityDownsidePressure:   round4(pDownside),
+		ExpectedPrice:                 round2(currentPrice * (1 + avg)),
+		MedianPrice:                   round2(currentPrice * (1 + median)),
+		P10Price:                      round2(currentPrice * (1 + p10)),
+		P90Price:                      round2(currentPrice * (1 + p90)),
+		DominantScenario:              scenario,
+		DominantLabel:                 label,
+		UpsideThresholdPct:            upThresh,
+		DownsideThresholdPct:          -downThresh,
+	}
+}
+
+func scenarioThresholds(days int) (float64, float64) {
+	switch {
+	case days <= 45:
+		return 8, 8
+	case days <= 120:
+		return 15, 15
+	default:
+		return 25, 25
+	}
+}
+
+func dominantScenario(upside, rangeProb, downside float64) (string, string) {
+	if upside >= rangeProb && upside >= downside {
+		return "upside_continuation", "上行延续"
+	}
+	if downside >= upside && downside >= rangeProb {
+		return "downside_pressure", "下行压力"
+	}
+	return "range", "区间震荡"
+}
+
+func confidenceLabel(featureCoverage, avgSimilarity float64, selected, topK int) string {
+	sampleRatio := 0.0
+	if topK > 0 {
+		sampleRatio = math.Min(1, float64(selected)/float64(topK))
+	}
+	score := 0.45*clamp01(featureCoverage) + 0.35*clamp01(avgSimilarity/100) + 0.20*sampleRatio
+	switch {
+	case score >= 0.75:
+		return "高"
+	case score >= 0.55:
+		return "中"
+	default:
+		return "低"
+	}
+}
+
+func averageSimilarity(selected []candidate) float64 {
+	if len(selected) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, c := range selected {
+		sum += c.sim
+	}
+	return round2(sum / float64(len(selected)))
+}
+
+func similarityFromDistance(dist float64) float64 {
+	return clamp01(1-dist/2) * 100
+}
+
+func halvingProgress(date time.Time) (float64, bool) {
+	halvings := []time.Time{
+		time.Date(2012, 11, 28, 0, 0, 0, 0, time.UTC),
+		time.Date(2016, 7, 9, 0, 0, 0, 0, time.UTC),
+		time.Date(2020, 5, 11, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, 4, 20, 0, 0, 0, 0, time.UTC),
+		time.Date(2028, 4, 20, 0, 0, 0, 0, time.UTC),
+	}
+	var prev, next time.Time
+	for _, h := range halvings {
+		if h.After(date) {
+			next = h
+			break
+		}
+		prev = h
+	}
+	if prev.IsZero() || next.IsZero() {
+		return 0, false
+	}
+	total := next.Sub(prev).Hours() / 24
+	elapsed := date.Sub(prev).Hours() / 24
+	if total <= 0 {
+		return 0, false
+	}
+	return clamp01(elapsed / total), true
+}
+
+func parseSnapshotBTCDate(snap *model.MarketSnapshot) (time.Time, error) {
+	for _, raw := range []string{snap.BTCPriceAsOf, snap.Date.Format(time.RFC3339), snap.Date.Format("2006-01-02")} {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			return t.UTC().Truncate(24 * time.Hour), nil
+		}
+		if t, err := time.Parse("2006-01-02", raw); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("snapshot has no parseable BTC date")
+}
+
+func mustParseDate(date string) time.Time {
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}
+
+func stddev(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	avg := average(values)
+	sum := 0.0
+	for _, v := range values {
+		diff := v - avg
+		sum += diff * diff
+	}
+	return math.Sqrt(sum / float64(len(values)))
+}
+
+func average(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, v := range values {
+		sum += v
+	}
+	return sum / float64(len(values))
+}
+
+func quantile(sorted []float64, q float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if q <= 0 {
+		return sorted[0]
+	}
+	if q >= 1 {
+		return sorted[len(sorted)-1]
+	}
+	pos := q * float64(len(sorted)-1)
+	lo := int(math.Floor(pos))
+	hi := int(math.Ceil(pos))
+	if lo == hi {
+		return sorted[lo]
+	}
+	frac := pos - float64(lo)
+	return sorted[lo]*(1-frac) + sorted[hi]*frac
+}
+
+func usablePositive(v float64) bool {
+	return v > 0 && usableFinite(v)
+}
+
+func usableFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func clip(v, absMax float64) float64 {
+	if v > absMax {
+		return absMax
+	}
+	if v < -absMax {
+		return -absMax
+	}
+	return v
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+func round4(v float64) float64 {
+	return math.Round(v*10000) / 10000
+}
+
+func maxInt(values []int) int {
+	max := 0
+	for _, v := range values {
+		if v > max {
+			max = v
+		}
+	}
+	return max
+}

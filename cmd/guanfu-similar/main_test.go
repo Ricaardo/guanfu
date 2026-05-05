@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
 func TestComparePanelsUsesSharedQuantiles(t *testing.T) {

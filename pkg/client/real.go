@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/cache"
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/cache"
+	"github.com/Ricaardo/guanfu/pkg/model"
 	"github.com/go-resty/resty/v2"
 	"github.com/shopspring/decimal"
 )

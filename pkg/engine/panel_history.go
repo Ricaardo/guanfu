@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
 // historyTracked 列出从 history.db 取分位的指标 → 所属 domain。

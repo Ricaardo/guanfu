@@ -6,6 +6,7 @@
 // 提供的 Tools:
 //   get_btc_panel       — 完整 8 域盘面 (JSON)
 //   get_btc_verdict     — 结构化多域读盘 (JSON)
+//   get_btc_forecast    — 历史相似盘面走势推演 (JSON)
 //   get_domain          — 单个域 (cycle/valuation/network/...)
 //   get_indicator       — 单个指标 (ahr999, hash_ribbons, ...)
 //
@@ -13,6 +14,7 @@
 //   guanfu://knowledge/skill.md — SKILL.md 知识库
 //   guanfu://panel/latest       — 缓存的最新盘面
 //   guanfu://verdict/latest     — 缓存盘面的结构化读盘
+//   guanfu://forecast/latest    — 缓存盘面的走势推演
 //
 // 部署: 在 claude_desktop_config.json 中添加:
 //
@@ -42,11 +44,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/client"
-	"github.com/Ricaardo/guanfu/internal/engine"
-	"github.com/Ricaardo/guanfu/internal/history"
-	"github.com/Ricaardo/guanfu/internal/model"
-	"github.com/Ricaardo/guanfu/internal/version"
+	"github.com/Ricaardo/guanfu/pkg/client"
+	"github.com/Ricaardo/guanfu/pkg/engine"
+	"github.com/Ricaardo/guanfu/pkg/forecast"
+	"github.com/Ricaardo/guanfu/pkg/history"
+	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/version"
 )
 
 // ─── JSON-RPC types ───────────────────────────────────
@@ -97,6 +100,19 @@ var tools = json.RawMessage(`
       "type": "object",
       "properties": {
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
+        "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
+      }
+    }
+  },
+  {
+    "name": "get_btc_forecast",
+    "description": "获取 BTC 历史相似盘面走势推演。输出 30/90/180 天等周期的前向收益分布、情景概率、相似样本和覆盖率；不是确定性价格预测，也不输出交易指令。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
+        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数，默认 [30,90,180]"},
+        "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
     }
@@ -212,7 +228,8 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 		return ok(req.ID, map[string]any{"resources": json.RawMessage(`[
 			{"uri":"guanfu://knowledge/skill.md","name":"SKILL.md","mimeType":"text/markdown","description":"观复 BTC 投资盘面解读知识库"},
 			{"uri":"guanfu://panel/latest","name":"最新盘面","mimeType":"application/json","description":"缓存的最新完整盘面 JSON"},
-			{"uri":"guanfu://verdict/latest","name":"最新结构化读盘","mimeType":"application/json","description":"缓存盘面的 verdict JSON"}
+			{"uri":"guanfu://verdict/latest","name":"最新结构化读盘","mimeType":"application/json","description":"缓存盘面的 verdict JSON"},
+			{"uri":"guanfu://forecast/latest","name":"最新走势推演","mimeType":"application/json","description":"缓存盘面的 forecast JSON"}
 		]`)})
 
 	case "resources/read":
@@ -262,6 +279,41 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		}
 		panel := getOrFetchPanel(timeout)
 		b, _ := json.MarshalIndent(buildVerdictPayload(panel, p.IncludePanel), "", "  ")
+		return string(b), nil
+
+	case "get_btc_forecast":
+		var p struct {
+			TimeoutSeconds int   `json:"timeout_seconds,omitempty"`
+			Horizons       []int `json:"horizons,omitempty"`
+			TopK           int   `json:"top_k,omitempty"`
+			IncludePanel   bool  `json:"include_panel,omitempty"`
+		}
+		if rpcErr := decodeArgs(args, &p); rpcErr != nil {
+			return "", rpcErr
+		}
+		timeout, rpcErr := timeoutFromSeconds(p.TimeoutSeconds)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		opts := forecast.DefaultOptions()
+		if len(p.Horizons) > 0 {
+			opts.Horizons = p.Horizons
+		}
+		if p.TopK != 0 {
+			if p.TopK < minForecastTopK() {
+				return "", &rpcError{Code: -32602, Message: fmt.Sprintf("top_k must be >= %d", minForecastTopK())}
+			}
+			opts.TopK = p.TopK
+		}
+		if rpcErr := validateForecastHorizons(opts.Horizons); rpcErr != nil {
+			return "", rpcErr
+		}
+		panel := getOrFetchPanel(timeout)
+		fc, err := buildForecast(timeout, opts)
+		if err != nil {
+			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
+		}
+		b, _ := json.MarshalIndent(buildForecastPayload(panel, fc, p.IncludePanel), "", "  ")
 		return string(b), nil
 
 	case "get_domain":
@@ -328,6 +380,14 @@ func handleResourceRead(uri string) (string, *rpcError) {
 		panel := getOrFetchPanel(defaultPanelTimeout)
 		b, _ := json.MarshalIndent(buildVerdictPayload(panel, false), "", "  ")
 		return string(b), nil
+	case "guanfu://forecast/latest":
+		panel := getOrFetchPanel(defaultPanelTimeout)
+		fc, err := buildForecast(defaultPanelTimeout, forecast.DefaultOptions())
+		if err != nil {
+			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
+		}
+		b, _ := json.MarshalIndent(buildForecastPayload(panel, fc, false), "", "  ")
+		return string(b), nil
 	default:
 		return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
 	}
@@ -337,7 +397,7 @@ func resourceMimeType(uri string) string {
 	switch uri {
 	case "guanfu://knowledge/skill.md":
 		return "text/markdown"
-	case "guanfu://panel/latest", "guanfu://verdict/latest":
+	case "guanfu://panel/latest", "guanfu://verdict/latest", "guanfu://forecast/latest":
 		return "application/json"
 	default:
 		return "text/plain"
@@ -356,6 +416,29 @@ func buildVerdictPayload(panel *model.IndicatorPanel, includePanel bool) any {
 		Verdict: verdict,
 		Panel:   panel,
 	}
+}
+
+func buildForecastPayload(panel *model.IndicatorPanel, fc *forecast.Forecast, includePanel bool) any {
+	if !includePanel {
+		return fc
+	}
+	return struct {
+		Forecast *forecast.Forecast    `json:"forecast"`
+		Panel    *model.IndicatorPanel `json:"panel"`
+	}{
+		Forecast: fc,
+		Panel:    panel,
+	}
+}
+
+func buildForecast(timeout time.Duration, opts forecast.Options) (*forecast.Forecast, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	points, err := client.LoadOrUpdateBTCDailyHistory(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	return forecast.Build(forecast.PointsFromBTCDaily(points), opts)
 }
 
 // ─── Panel fetch with cache ───────────────────────────
@@ -489,4 +572,20 @@ func timeoutFromSeconds(seconds int) (time.Duration, *rpcError) {
 		return 0, &rpcError{Code: -32602, Message: "timeout_seconds must be <= 300"}
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func validateForecastHorizons(horizons []int) *rpcError {
+	for _, h := range horizons {
+		if h <= 0 {
+			return &rpcError{Code: -32602, Message: "forecast horizons must be positive"}
+		}
+		if h > 730 {
+			return &rpcError{Code: -32602, Message: "forecast horizons must be <= 730 days"}
+		}
+	}
+	return nil
+}
+
+func minForecastTopK() int {
+	return 5
 }

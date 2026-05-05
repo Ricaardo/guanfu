@@ -27,11 +27,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/client"
-	"github.com/Ricaardo/guanfu/internal/engine"
-	"github.com/Ricaardo/guanfu/internal/history"
-	"github.com/Ricaardo/guanfu/internal/model"
-	"github.com/Ricaardo/guanfu/internal/version"
+	"github.com/Ricaardo/guanfu/pkg/client"
+	"github.com/Ricaardo/guanfu/pkg/engine"
+	"github.com/Ricaardo/guanfu/pkg/forecast"
+	"github.com/Ricaardo/guanfu/pkg/history"
+	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/version"
 )
 
 // domain 中英文显示名
@@ -55,6 +56,10 @@ func main() {
 	pretty := flag.Bool("pretty", false, "pretty JSON 输出")
 	verdict := flag.Bool("verdict", false, "输出综合判断（牛熊/顶底/读盘标签）")
 	verdictOnly := flag.Bool("verdict-only", false, "仅输出 verdict（隐藏指标盘）")
+	forecastOut := flag.Bool("forecast", false, "输出 BTC 历史相似盘面走势推演")
+	forecastOnly := flag.Bool("forecast-only", false, "仅输出 forecast（隐藏指标盘）")
+	forecastHorizons := flag.String("forecast-horizons", "30,90,180", "走势推演周期，逗号分隔天数，如 30,90,180")
+	forecastTop := flag.Int("forecast-top", 21, "走势推演使用的历史相似样本数")
 	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow/technical/cross_asset")
 	timeout := flag.Duration("timeout", 90*time.Second, "拉数据超时")
 	halfLife := flag.Int("halflife", 0, "AHR 拟合半衰期（天，默认 1460）")
@@ -107,19 +112,44 @@ func main() {
 		v = engine.BuildVerdict(panel)
 	}
 
+	var fc *forecast.Forecast
+	if *forecastOut || *forecastOnly {
+		horizons, err := forecast.ParseHorizons(*forecastHorizons)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "parse forecast horizons failed: %v\n", err)
+			os.Exit(1)
+		}
+		points, err := forecast.PointsFromSnapshot(snap)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "build forecast points failed: %v\n", err)
+			os.Exit(1)
+		}
+		opts := forecast.DefaultOptions()
+		opts.Horizons = horizons
+		opts.TopK = *forecastTop
+		fc, err = forecast.Build(points, opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "build forecast failed: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	// JSON 输出
 	if *jsonOut || *pretty {
 		var out interface{} = panel
-		if *domainFilter != "" {
+		if *domainFilter != "" && !*verdict && !*verdictOnly && !*forecastOut && !*forecastOnly {
 			out = filterDomain(panel, *domainFilter)
 		}
-		if *verdictOnly {
+		if *forecastOnly {
+			out = fc
+		} else if *verdictOnly {
 			out = v
-		} else if *verdict {
+		} else if *verdict || *forecastOut {
 			out = struct {
-				Panel   *model.IndicatorPanel `json:"panel"`
-				Verdict *engine.Verdict       `json:"verdict"`
-			}{Panel: panel, Verdict: v}
+				Panel    *model.IndicatorPanel `json:"panel"`
+				Verdict  *engine.Verdict       `json:"verdict,omitempty"`
+				Forecast *forecast.Forecast    `json:"forecast,omitempty"`
+			}{Panel: panel, Verdict: v, Forecast: fc}
 		}
 		var b []byte
 		if *pretty {
@@ -132,11 +162,14 @@ func main() {
 	}
 
 	// 人类盘面
-	if !*verdictOnly {
+	if !*verdictOnly && !*forecastOnly {
 		printHumanPanel(panel, *domainFilter, *plain || *noEmoji)
 	}
-	if v != nil {
+	if v != nil && !*forecastOnly {
 		printHumanVerdict(v, *plain || *noEmoji)
+	}
+	if fc != nil {
+		printHumanForecast(fc, *plain || *noEmoji)
 	}
 }
 
@@ -196,6 +229,68 @@ func printHumanVerdict(v *engine.Verdict, plain bool) {
 	if v.MissingNote != "" {
 		fmt.Println()
 		fmt.Printf("  数据缺失提示：%s\n", v.MissingNote)
+	}
+	fmt.Println(bar)
+	fmt.Println()
+}
+
+func printHumanForecast(fc *forecast.Forecast, plain bool) {
+	bar := "═══════════════════════════════════════════════════════════"
+	title := "走势推演"
+	if plain {
+		bar = "==========================================================="
+		title = "FORECAST"
+	}
+	fmt.Println()
+	fmt.Println(bar)
+	if plain {
+		fmt.Printf("%s  %s\n", title, fc.Date)
+	} else {
+		fmt.Printf("🔮  %s  %s\n", title, fc.Date)
+	}
+	fmt.Println(bar)
+	fmt.Printf("  Method       : %s\n", fc.Method)
+	fmt.Printf("  Price        : $%.2f\n", fc.CurrentPrice)
+	fmt.Printf("  Coverage     : %.0f%% (%d/%d features), analogs=%d/%d, similarity=%.1f%%, confidence=%s\n",
+		fc.Coverage.FeatureCoverage*100,
+		fc.Coverage.FeatureCount,
+		fc.Coverage.ExpectedFeatures,
+		fc.Coverage.SelectedAnalogs,
+		fc.Coverage.CandidateCount,
+		fc.Coverage.AverageSimilarity,
+		fc.Coverage.Confidence)
+	fmt.Println()
+	fmt.Println("  Horizon scenarios:")
+	for _, h := range fc.Horizons {
+		fmt.Printf("    %3dd  %-12s  up=%.0f%% range=%.0f%% down=%.0f%%  median=%+.2f%%  p10/p90=%+.2f%%/%+.2f%%  median_price=$%.0f\n",
+			h.Days,
+			h.DominantLabel,
+			h.ProbabilityUpsideContinuation*100,
+			h.ProbabilityRange*100,
+			h.ProbabilityDownsidePressure*100,
+			h.MedianReturnPct,
+			h.P10ReturnPct,
+			h.P90ReturnPct,
+			h.MedianPrice)
+	}
+	if len(fc.Analogs) > 0 {
+		fmt.Println()
+		fmt.Println("  Closest analogues:")
+		limit := len(fc.Analogs)
+		if limit > 8 {
+			limit = 8
+		}
+		for i := 0; i < limit; i++ {
+			a := fc.Analogs[i]
+			fmt.Printf("    %2d. %s  similarity=%.1f%%  price=$%.0f\n", i+1, a.Date, a.Similarity, a.Price)
+		}
+	}
+	if len(fc.Caveats) > 0 {
+		fmt.Println()
+		fmt.Println("  Caveats:")
+		for _, c := range fc.Caveats {
+			fmt.Printf("    - %s\n", c)
+		}
 	}
 	fmt.Println(bar)
 	fmt.Println()

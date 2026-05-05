@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
 // Verdict 综合读盘结论。

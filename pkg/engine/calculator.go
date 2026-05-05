@@ -5,9 +5,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/history"
-	"github.com/Ricaardo/guanfu/internal/mathutil"
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/history"
+	"github.com/Ricaardo/guanfu/pkg/mathutil"
+	"github.com/Ricaardo/guanfu/pkg/model"
 
 	"github.com/shopspring/decimal"
 )

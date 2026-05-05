@@ -2,7 +2,7 @@ package client
 
 import (
 	"context"
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/model"
 	"math/rand"
 	"time"
 

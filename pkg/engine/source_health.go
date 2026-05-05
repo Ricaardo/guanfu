@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
 func buildSourceHealth(snap *model.MarketSnapshot) []model.SourceHealth {

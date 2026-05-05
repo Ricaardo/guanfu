@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Ricaardo/guanfu/internal/model"
+	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
 func TestInitializedNotificationHasNoResponse(t *testing.T) {
@@ -50,8 +50,10 @@ func TestToolsListIncludesVerdictAndAvoidsFixedIndicatorCount(t *testing.T) {
 		t.Fatalf("marshal tools/list response: %v", err)
 	}
 	body := string(b)
-	if !strings.Contains(body, "get_btc_verdict") {
-		t.Fatalf("expected get_btc_verdict in tools/list: %s", body)
+	for _, want := range []string{"get_btc_verdict", "get_btc_forecast"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %s in tools/list: %s", want, body)
+		}
 	}
 	if strings.Contains(body, "42 个指标") || strings.Contains(body, "44 指标") {
 		t.Fatalf("tools/list should not advertise stale fixed indicator counts: %s", body)
@@ -143,6 +145,7 @@ func TestResourceMimeTypeMatchesDeclaredResources(t *testing.T) {
 		"guanfu://knowledge/skill.md": "text/markdown",
 		"guanfu://panel/latest":       "application/json",
 		"guanfu://verdict/latest":     "application/json",
+		"guanfu://forecast/latest":    "application/json",
 		"guanfu://unknown":            "text/plain",
 	}
 	for uri, want := range cases {
@@ -172,6 +175,21 @@ func TestTimeoutDefaultsAndBounds(t *testing.T) {
 	_, rpcErr = timeoutFromSeconds(301)
 	if rpcErr == nil {
 		t.Fatal("expected upper-bound timeout error")
+	}
+}
+
+func TestValidateForecastArgs(t *testing.T) {
+	if rpcErr := validateForecastHorizons([]int{30, 90, 180}); rpcErr != nil {
+		t.Fatalf("valid horizons returned error: %+v", rpcErr)
+	}
+	if rpcErr := validateForecastHorizons([]int{0}); rpcErr == nil {
+		t.Fatal("expected non-positive horizon error")
+	}
+	if rpcErr := validateForecastHorizons([]int{731}); rpcErr == nil {
+		t.Fatal("expected max horizon error")
+	}
+	if minForecastTopK() != 5 {
+		t.Fatalf("unexpected min forecast top k: %d", minForecastTopK())
 	}
 }
 
