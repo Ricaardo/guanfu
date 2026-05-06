@@ -1,38 +1,64 @@
 ---
 name: btc-guanfu
 description: |
-  观复 / 观察万物之周期回归 — BTC 投资盘面 + 解读知识库。输出 8 个域（cycle / valuation / network / positioning / macro / flow / technical / cross_asset）的纯指标盘，每个指标含原始值、历史分位、解读标签、数据源。**不输出单一评分或无上下文交易指令** — 而是基于多维指标一致性，输出概率加权的读盘结论，每条结论附完整证据链、反证和失效条件。
-  当用户问「BTC 该不该买/卖」、「比特币现在估值如何」、「加密底/顶在哪」、「定投区吗」、「AHR999/MVRV/哈希率/ETF 流入多少」、「BTC 周期位置」、「观复」、「BTC 技术指标」「BTC vs 黄金/美股/VIX」时触发。
-  NOT for: 仅查 BTC 实时价格 → cmc-mcp；altcoin/memecoin → cmc-mcp / okx-dex；K 线图形态分析 → technical-analysis；链上钱包 → okx-wallet。
+  观复 v2 / 观察万物之周期回归 — 多资产投资盘面 + 解读知识库。覆盖 BTC/QQQ/SPY/Gold/CSI300。BTC 输出 8 域 40+ 指标，权益/黄金/CSI300 输出 6 域面板含顶底检测、估值区间、中国宏观。支持 kNN 走势推演、DCA 定投回放、懒人组合配置、多资产回测。**不输出单一评分或交易指令**。
+  当用户问「BTC/QQQ/SPY/黄金/沪深300 该不该买/卖」、「估值如何」、「顶/底在哪」、「定投」、「AHR999/MVRV/哈希率/ETF」、「周期位置」、「观复」时触发。
+  NOT for: 仅查实时价格 → cmc-mcp；altcoin/memecoin → cmc-mcp/okx-dex；K线形态 → technical-analysis。
 license: MIT
 user-invocable: true
 required_tools:
   - guanfu        # https://github.com/Ricaardo/guanfu — `go install github.com/Ricaardo/guanfu/cmd/guanfu@latest`
 optional_tools:
-  - jq            # 解析 --json 输出
-  - guanfu-similar  # 历史相似度复盘
+  - jq            # JSON 解析
+  - python3       # AkShare/Futu 桥接
 ---
 
-# 观复 (btc-guanfu): BTC 投资盘面 + 解读手册
+# 观复 v2 (btc-guanfu): 多资产投资盘面 + 解读手册
 
-> 致虚极，守静笃。**万物并作，吾以观复。**
-> ——《道德经》第十六章
+> 致虚极，守静笃。**万物并作，吾以观复。** ——《道德经》第十六章
 
-## 核心哲学
+## CLI 命令
 
-**这个 skill 是观象台，不是观象者。** 老子言「万物并作，吾以观复」—— 万物纷纭起作，我守在静处看它们的往复回归。本工具做的就是这件事：
+```bash
+guanfu                    # BTC 8域40+指标盘面（默认）
+guanfu btc --verdict      # BTC + 读盘结论 + 顶底检测
+guanfu btc --forecast     # BTC kNN 历史相似走势推演
+guanfu qqq --verdict      # QQQ 6域面板（技术/估值/宏观/情绪）
+guanfu spy --verdict      # SPY 6域面板
+guanfu gold --verdict     # 黄金面板（估值：实际利率/DXY/VIX）
+guanfu hs300              # 沪深300面板（中国宏观：PMI/CPI/M2/CNY）
+guanfu dca                # DCA定投策略对比（Fixed/AHR/Mayer）
+guanfu allocate           # 全天候懒人组合偏离检测
+guanfu market             # 多资产一览 + 共识/分歧信号
+guanfu backtest btc       # kNN回测（单资产）
+guanfu backtest all       # 全资产回测 + 对比报告
+guanfu status             # PriceStore数据状态诊断
+```
 
-- **万物并作** ↔ 8 个 domain × 40+ 个指标（周期 / 估值 / 网络 / 杠杆 / 宏观 / 资金流 / 技术 / 跨资产）同时呈现
-- **观复** ↔ 在历史分位中观察其往复 —— halving 周期回环、估值高低反覆、流入流出来去
-- **致虚守静** ↔ 不输出单一数字评分或无上下文交易指令，只输出**概率加权读盘结论**
+## 数据架构 (PriceStore)
 
-具体分工：
+26 个数据集，~/.guanfu/prices/ JSON 日频存档：
 
-- 二进制（`guanfu`，或源码构建出的 `bin/guanfu`）= 数据采集 + 指标计算 + 历史分位定位 = **盘**
-- 本 SKILL.md = 每个指标的语义、历史阈值、组合 pattern、失效情形 + **读盘框架** = **解读 + 风险倾向**
-- Claude 读完盘面 → 按 8 步读盘法 → 套用读盘框架 → 输出概率加权读盘结论
+| 类别 | 数据集 | 来源 |
+|------|--------|------|
+| 价格 | btc/qqq/spy/gold/hs300 | CoinMetrics/Yahoo/AkShare |
+| 链上 | btc_mvrv/btc_txcnt/btc_hashrate | CoinMetrics |
+| 宏观 | fred_dfii10/fred_dgs10/fred_dxy/fred_yield_curve | FRED |
+| 黄金 | gold_cot | CFTC COT |
+| 中国 | hs300_pmi/m2/cpi/retail/cny/northbound/volume/lpr | AkShare |
+| 估值 | spx_cape | Shiller |
 
-**v1 的错**（前身名 `coinman`）：用 1 个 0-100 总分 + 硬编码阈值输出 BUY/SELL。把多维结构压成 1 维丢失信息。**v2 更名「观复」**：不再产出单一评分，输出 8 域原始指标。**v3**：在指标盘基础上，由 Claude 依据 SKILL.md 读盘框架输出概率加权结论——每条结论附完整证据链、反证和失效条件。
+## kNN 预测引擎
+
+11 核心价格特征 + 6 跨资产特征 + 3 仓位特征。架构 v3：Mahalanobis 距离 + 状态匹配 + 多周期集成 + 动态 TopK。
+
+| 资产 | 方向命中率 | 最优方法 |
+|------|----------|---------|
+| QQQ | 73.6% | 状态匹配 |
+| SPY | 71.4% | 状态匹配 |
+| Gold | 68.8% | 多周期集成+COT |
+| BTC | 66.2% | 集成+链上+动态K |
+| CSI300 | 49.1% | 状态匹配+动态K+宏观 |
 
 ---
 
@@ -44,6 +70,11 @@ guanfu
 
 # JSON（喂 Claude / 程序）
 guanfu --json | jq
+
+# BTC 走势推演（历史相似盘面 + 前向收益分布）
+guanfu --forecast --plain
+guanfu --forecast-only --pretty
+guanfu --forecast --forecast-horizons 30,90,180 --forecast-top 21
 
 # 仅看一个 domain
 guanfu --domain cycle
@@ -105,6 +136,31 @@ sqlite3 ~/.guanfu/history.db "SELECT date, value FROM daily_metrics WHERE key='e
 ```
 
 BTC 价格相关指标（`sma_200w_dev`, `mayer_multiple`, AHR、技术指标等）的 q 由 BTC 全历史日线缓存直接计算：CoinMetrics `PriceUSD` 覆盖 2010-07-18 起全历史，Binance `BTCUSDT` 覆盖最近日线和当日最新值。它们不进 history.db。
+
+## 走势推演 (`--forecast`)
+
+`guanfu --forecast` 是 **historical analogue / kNN 情景推演**，不是确定性价格预测，也不是交易/仓位指令。
+
+v1 使用 BTC 全历史日线中可完整回放的特征：
+- 30/90/180d 动量
+- 90d drawdown
+- Mayer Multiple
+- 200wSMA 偏离
+- 30d 年化波动率
+- RSI 14
+- 压缩版 AHR999
+- halving cycle sin/cos
+
+输出：
+- 30/90/180d 前向收益分布（avg/median/p10/p90）
+- 情景概率：上行延续 / 区间震荡 / 下行压力
+- 隐含价格分布（expected/median/p10/p90）
+- 相似历史样本、特征覆盖率、平均相似度、置信度
+
+解读原则：
+- 把 `forecast` 当作概率分布和反证生成器，不要把 median/expected price 当作目标价。
+- 若 coverage 或 confidence 低，只能用于提醒不确定性。
+- ETF/FRED/funding/mempool 等非价格源目前没有全历史训练样本；需要长期 panel archive 后才能进入下一版推演。
 
 ---
 

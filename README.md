@@ -1,33 +1,55 @@
-# 观复 (guanfu) — BTC 投资盘面
+# 观复 v2 (guanfu) — 多资产投资盘面
 
-> 致虚极，守静笃。**万物并作，吾以观复。**
-> ——《道德经》第十六章
+> 致虚极，守静笃。**万物并作，吾以观复。** ——《道德经》第十六章
 
-guanfu 是一个 BTC 投资盘面 CLI 工具，输出 **8 个域 40+ 指标**的纯数据盘面。每个指标包含原始值、历史分位、解读标签和数据源。默认只输出指标；`--verdict` 可选输出结构化多域读盘，但仍**不输出交易指令 / 仓位指令** — 决策由人和 AI 综合完成。
+guanfu 是一个**多资产**投资盘面 CLI 工具，覆盖 **BTC/QQQ/SPY/Gold/CSI300**。BTC 输出 8 域 40+ 指标，权益/黄金/CSI300 输出 6 域面板含顶底检测和估值区间。支持 kNN 走势推演、DCA 定投回放、懒人组合配置、多资产回测。**不输出交易指令。**
 
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **免责声明**：观复输出的是历史分位 + 模式参考，**不是投资建议**。BTC 价格高度波动，过去的指标 pattern 不保证未来重现。任何决策请结合自己的风险承受能力、持仓周期和资金状况，盈亏自负。
+```bash
+guanfu                    # BTC 8域面板
+guanfu btc --verdict      # BTC + 读盘结论
+guanfu qqq --verdict      # QQQ 纳斯达克100
+guanfu spy --verdict      # SPY 标普500
+guanfu gold --verdict     # 伦敦金 (DBnomics 1968+)
+guanfu hs300              # 沪深300 (AkShare 2002+)
+guanfu dca                # DCA定投策略对比
+guanfu allocate           # 懒人组合偏离检测
+guanfu market             # 多资产一览+共识
+guanfu backtest all       # 全资产kNN回测
+guanfu status             # 数据诊断
+```
+
+## 数据架构
+
+26 个数据集，`~/.guanfu/prices/` JSON 日频存档。来源：CoinMetrics / Yahoo / FRED / AkShare / CFTC / Shiller。
+
+| 类别 | 数据集 | 来源 |
+|------|--------|------|
+| 价格 | btc/qqq/spy/gold/hs300 | CoinMetrics/Yahoo/AkShare |
+| 链上 | btc_mvrv/txcnt/hashrate | CoinMetrics |
+| 宏观 | fred_dfii10/dgs10/dxy/yield_curve | FRED |
+| 黄金 | gold_cot | CFTC COT |
+| 中国 | hs300_pmi/m2/cpi/retail/cny/northbound | AkShare |
+| 估值 | spx_cape | Shiller (1871+) |
+
+## kNN 预测引擎 (v3)
+
+方向命中率（170+ 次回测验证）：
+
+| 资产 | 命中率 | 最优方法 |
+|------|--------|---------|
+| QQQ | 73.6% | 状态匹配 |
+| SPY | 71.4% | 状态匹配 |
+| Gold | 68.8% | 多周期集成+COT |
+| BTC | 66.2% | 集成+链上+动态K |
+| CSI300 | 49.1% | 状态+动态K+宏观 |
+| **ENSEMBLE** | **65.6%** | |
 
 ## 设计哲学
 
-guanfu 出自《道德经》第十六章："致虚极，守静笃。万物并作，吾以观复。"
-
-**三层分离**是核心设计决策：
-
-```
-┌──────────────────────────────────────────┐
-│  决策层 (Human + Claude / ChatGPT)        │
-│  8 域 40+ 指标 × q 分位 × 组合 pattern   │
-│  → 概率性判断，不输出确定性结论            │
-├──────────────────────────────────────────┤
-│  解读层 (SKILL.md)                         │
-│  每个指标的语义、历史阈值、失效情形、联动   │
-├──────────────────────────────────────────┤
-│  盘面层 (guanfu 二进制)                    │
-│  多数据源 → 指标计算 → 历史分位 → JSON     │
-└──────────────────────────────────────────┘
+**三层分离**：盘面层（guanfu 二进制）→ 解读层（SKILL.md）→ 决策层（人+AI）
 ```
 
 **为什么不是评分系统**：v1 (CoinMan) 曾用一个 0-100 总分 + 6 类 action 试图替代综合判断。把 40+ 个指标压成 1 个数字必然丢失信息——总分永远停在 50 附近，无法区分"杠杆过热导致的上涨"和"机构买入驱动的上涨"。v2 更名为"观复"：不输出评分，只输出原始指标 + 历史分位，由人和 AI 完成综合判断。
@@ -78,6 +100,11 @@ guanfu
 # JSON 输出 → 喂 Claude / ChatGPT
 guanfu --json | jq
 
+# 历史相似盘面走势推演（概率分布，不是确定性价格目标）
+guanfu --forecast --plain
+guanfu --forecast-only --pretty
+guanfu --forecast --forecast-horizons 30,90,180 --forecast-top 21
+
 # 只看关心的域
 guanfu --domain valuation    # 估值
 guanfu --domain technical    # 技术指标
@@ -116,6 +143,12 @@ guanfu --json > ~/.guanfu/panels/$(date -u +%F).json
 ```
 
 archive 攒满 30+ 天后，`guanfu-similar` 给出的"今天与历史最相似的盘面"才有统计意义。相似度只比较双方都有 `q` 的指标，方法见 [docs/backtest-methodology.md](docs/backtest-methodology.md)。公开文案里的历史收益数字必须由该流程生成，并披露样本数量、窗口和反例。
+
+**走势推演（v1）**：
+
+`guanfu --forecast` 使用 BTC 全历史日线缓存做 historical analogue / kNN：把当前 BTC 的价格动量、90d 回撤、Mayer Multiple、200wSMA 偏离、30d 波动率、RSI、压缩 AHR999、减半周期相位等特征，与历史日期做加权距离匹配，再统计相似样本之后 30/90/180 天的前向收益分布。
+
+输出包括：情景概率（上行延续 / 区间震荡 / 下行压力）、收益分位数、隐含价格分布、相似历史样本、特征覆盖率和置信度。v1 只使用能全历史回放的 BTC 价格/周期特征；ETF/FRED/funding/mempool 等源需要长期 panel archive 后再进入训练样本。
 
 ## Demo
 
@@ -233,6 +266,17 @@ guanfu 设计为 AI 原生工具，可接入多种 AI 平台：
 
 基于 Binance Top 50 kline：90 日跑赢 BTC 的占比 × 100。**零外部 API 依赖**。
 
+### 历史相似盘面推演
+
+`internal/forecast` 将 BTC 全历史日线转成可回放特征向量，并用加权 kNN 输出前向收益分布：
+
+- 默认周期：30d / 90d / 180d
+- 默认样本：21 个相似历史状态，按 30 天窗口去重，减少同一阶段日频重复样本的权重
+- 特征：30/90/180d 动量、90d 回撤、Mayer、200wSMA 偏离、30d 波动率、RSI、压缩 AHR999、halving cycle sin/cos
+- 输出：收益分布、情景概率、相似样本、coverage/confidence
+
+该模块只做情景推演，不输出交易或仓位指令。
+
 ### MVRV Z-Score
 
 使用 rolling 1-year std(market_cap - realized_cap)，非全历史标准差。
@@ -289,6 +333,7 @@ guanfu/
 ├── internal/
 │   ├── client/          # 多数据源并发拉取 + BTC 全历史日线缓存 (CoinMetrics + Binance)
 │   ├── engine/          # 指标计算 + 8 域盘面构建 + verdict 引擎
+│   ├── forecast/        # BTC 历史相似盘面走势推演 (kNN + forward return distribution)
 │   ├── history/         # SQLite 历史分位 (15 个非价格指标)
 │   ├── model/           # 数据类型
 │   ├── mathutil/        # 技术指标 (MA/EMA/MACD/RSI/BB)
