@@ -1,18 +1,23 @@
-# 观复 AI 集成方案
+# 观复 v2 AI 集成方案
 
 ## 现状
 
-guanfu 已经可以通过 Claude Code skill 使用：
+guanfu v2 支持三种 AI 集成方式：
 
 ```
-用户: "BTC 现在估值如何？"
-  → btc-guanfu skill 触发
-  → Claude 运行 bin/guanfu --json
-  → Claude 读取 JSON + SKILL.md 知识库
-  → 输出综合分析
-```
+1. Claude Code Skill (btc-guanfu)
+   用户: "QQQ 现在估值如何？"
+     → btc-guanfu skill 触发
+     → Claude 运行 guanfu qqq --verdict --json
+     → 输出综合分析
 
-这个链路**只适用于 Claude Code**（桌面端/IDE 端）。要覆盖更多 AI 应用，需要标准化接口。
+2. MCP Server (guanfu-mcp)
+   任何 MCP 客户端直接调用 get_btc_panel / get_btc_verdict 等 tools
+   支持 asset 参数: btc/qqq/spy/gold/hs300
+
+3. CLI JSON (通用)
+   guanfu btc --json | jq → 任意 AI 应用消费
+```
 
 ---
 
@@ -103,8 +108,15 @@ import (
 // 参数: name (e.g. "ahr999", "hash_ribbons")
 // 返回: 单个指标值 + q + label
 
+// Tool: get_btc_forecast
+// 参数: horizons (optional, e.g. [30, 90, 180]), top_k (optional)
+// 返回: 历史相似盘面走势推演 JSON（情景概率 + 前向收益分布）
+
 // Resource: guanfu://panel/latest
 // 返回: 缓存的最新盘面 JSON
+
+// Resource: guanfu://forecast/latest
+// 返回: 缓存盘面的走势推演 JSON
 ```
 
 ### 部署
@@ -145,6 +157,7 @@ api.guanfu.dev (Cloudflare Workers / Fly.io)
      ├── GET  /v1/panel        → 完整盘面 JSON
      ├── GET  /v1/panel/{domain} → 单域
      ├── GET  /v1/indicator/{name} → 单指标
+     ├── GET  /v1/forecast     → 历史相似盘面走势推演 JSON
      └── GET  /v1/health
 ```
 
