@@ -18,11 +18,13 @@ package client
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net"
 	"os"
+	"os/exec"
 	"sort"
 	"sync"
 	"time"
@@ -445,11 +447,17 @@ func encodeGetSnapshot(symbol string) []byte {
 func parseFutuSymbol(symbol string) (market int32, code string, err error) {
 	// US.QQQ → market=11, code="QQQ"
 	// HK.00700 → market=1, code="00700"
+	// SH.000300 → market=2, code="000300" (Shanghai A-share)
+	// SZ.159919 → market=3, code="159919" (Shenzhen A-share)
 	switch {
 	case len(symbol) > 3 && symbol[:3] == "US.":
 		return 11, symbol[3:], nil
 	case len(symbol) > 3 && symbol[:3] == "HK.":
 		return 1, symbol[3:], nil
+	case len(symbol) > 3 && symbol[:3] == "SH.":
+		return 2, symbol[3:], nil
+	case len(symbol) > 3 && symbol[:3] == "SZ.":
+		return 3, symbol[3:], nil
 	case len(symbol) > 4 && symbol[:4] == "USNY":
 		return 11, symbol[4:], nil
 	default:
@@ -522,6 +530,19 @@ type CrossAssetFutuPrices struct {
 	OilPriceSource string
 	VIXYHistory    []float64
 	VIXYPriceAsOf  string
+	// New ETFs for Part D 懒人组合
+	BILPrice       float64 // 1-3 Month T-Bill ETF
+	BILHistory     []float64
+	BILPriceAsOf   string
+	SHYPrice       float64 // 1-3 Year Treasury ETF
+	SHYHistory     []float64
+	SHYPriceAsOf   string
+	BNDPrice       float64 // Total Bond Market ETF
+	BNDHistory     []float64
+	BNDPriceAsOf   string
+	VTIPrice       float64 // Total US Stock Market ETF
+	VTIHistory     []float64
+	VTIPriceAsOf   string
 	Warnings       []string
 }
 
@@ -592,4 +613,125 @@ func klToFloat64(kl []FutuKLPoint) []float64 {
 		out[i] = k.Close
 	}
 	return out
+}
+
+// ─── Security Snapshot (PE/PB) ─────────────────────────
+
+// FutuSnapshot holds basic fundamental data from Qot_GetSecuritySnapshot.
+type FutuSnapshot struct {
+	Symbol    string
+	PE        float64
+	PB        float64
+	MarketCap float64
+	AsOf      string
+}
+
+// GetSecuritySnapshot fetches PE/PB/market cap for a single symbol.
+// cmd = 3101 = Qot_GetSecuritySnapshot
+func (c *futuConn) GetSecuritySnapshot(symbol string) (*FutuSnapshot, error) {
+	body := encodeGetSnapshot(symbol)
+	resp, err := c.sendAndRecv(3101, body)
+	if err != nil {
+		return nil, err
+	}
+	return decodeSnapshotResponse(resp, symbol), nil
+}
+
+// decodeSnapshotResponse decodes Qot_GetSecuritySnapshot.Response.
+//
+//	Response { repeated Snapshot snapshotList = 5; }
+//	Snapshot { BasicInfo basic = 1; }
+//	BasicInfo { double pe = 2; double pb = 3; double marketVal = 4; ... }
+func decodeSnapshotResponse(body []byte, symbol string) *FutuSnapshot {
+	snapBlocks := pbGetRepeated(body, 5)
+	if len(snapBlocks) == 0 {
+		return nil
+	}
+	// First snapshot's basic info
+	basic := pbGetNested(snapBlocks[0], 1)
+	if basic == nil {
+		return nil
+	}
+
+	s := &FutuSnapshot{Symbol: symbol}
+	s.PE = pbGetDouble(basic, 2)
+	s.PB = pbGetDouble(basic, 3)
+	s.MarketCap = pbGetDouble(basic, 4)
+	return s
+}
+
+// FutuEquityValuation holds PE/PB for QQQ and SPY from Futu snapshot.
+type FutuEquityValuation struct {
+	QQQPE float64
+	QQQPB float64
+	SPYPE float64
+	SPYPB float64
+}
+
+// FetchEquityValuationFromFutu fetches QQQ and SPY PE/PB via Qot_GetSecuritySnapshot.
+// Falls back to Python bridge when direct Go connection fails.
+func FetchEquityValuationFromFutu() (*FutuEquityValuation, error) {
+	c, err := futuConnect(futuAddr())
+	if err != nil {
+		// Try Python bridge
+		return futuBridgeValuation()
+	}
+	defer c.Close()
+
+	out := &FutuEquityValuation{}
+	if snap, err := c.GetSecuritySnapshot("US.QQQ"); err == nil && snap != nil {
+		out.QQQPE = snap.PE
+		out.QQQPB = snap.PB
+	}
+	if snap, err := c.GetSecuritySnapshot("US.SPY"); err == nil && snap != nil {
+		out.SPYPE = snap.PE
+		out.SPYPB = snap.PB
+	}
+	return out, nil
+}
+
+// futuBridgeValuation fetches PE/PB via Python bridge.
+func futuBridgeValuation() (*FutuEquityValuation, error) {
+	script := futuBridgePath()
+	if _, err := os.Stat(script); err != nil {
+		return nil, fmt.Errorf("futu snapshot: bridge not available: %w", err)
+	}
+
+	input := map[string]interface{}{
+		"symbols":  []string{"US.QQQ", "US.SPY"},
+		"snapshot": true,
+	}
+	stdin, _ := json.Marshal(input)
+
+	cmd := exec.Command("python3", script)
+	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8")
+	w, _ := cmd.StdinPipe()
+	w.Write(stdin)
+	w.Close()
+
+	out2, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("futu snapshot bridge: %w", err)
+	}
+
+	var result map[string]struct {
+		PE        float64 `json:"pe"`
+		PB        float64 `json:"pb"`
+		MarketCap float64 `json:"market_cap"`
+		Error     string  `json:"error"`
+	}
+	if err := json.Unmarshal(out2, &result); err != nil {
+		return nil, fmt.Errorf("futu snapshot bridge JSON: %w", err)
+	}
+
+	out := &FutuEquityValuation{}
+	if r, ok := result["US.QQQ"]; ok && r.Error == "" {
+		out.QQQPE = r.PE
+		out.QQQPB = r.PB
+	}
+	if r, ok := result["US.SPY"]; ok && r.Error == "" {
+		out.SPYPE = r.PE
+		out.SPYPB = r.PB
+	}
+	return out, nil
 }

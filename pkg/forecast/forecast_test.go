@@ -12,11 +12,11 @@ import (
 func TestBuildForecastFromSyntheticHistory(t *testing.T) {
 	points := syntheticPoints(3200)
 
-	fc, err := Build(points, DefaultOptions())
+	fc, err := Build(points, testOpts())
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	if fc.Method != "historical_analogue_knn_v1" {
+	if fc.Method != "historical_analogue_knn_v2" {
 		t.Fatalf("unexpected method: %s", fc.Method)
 	}
 	if fc.Coverage.SelectedAnalogs < minSelectedAnalogs {
@@ -82,10 +82,58 @@ func TestPointsFromSnapshotReconstructsOldestFirstDates(t *testing.T) {
 }
 
 func TestBuildRejectsShortHistory(t *testing.T) {
-	_, err := Build(syntheticPoints(250), DefaultOptions())
+	_, err := Build(syntheticPoints(250), testOpts())
 	if err == nil {
 		t.Fatal("expected short history error")
 	}
+}
+
+func testOpts() Options {
+	opts := DefaultOptions()
+	opts.Extractors = []FeatureExtractor{
+		func(points []Point, i int) ([]FeatureValue, bool) {
+			if i < 30 { return nil, false }
+			r := points[i].Close/points[i-30].Close - 1
+			return []FeatureValue{{Name: "return_30d", Value: r * 100, Normalized: r / 0.30, Weight: 1.10}}, true
+		},
+		func(points []Point, i int) ([]FeatureValue, bool) {
+			if i < 90 { return nil, false }
+			r := points[i].Close/points[i-90].Close - 1
+			return []FeatureValue{{Name: "return_90d", Value: r * 100, Normalized: r / 0.60, Weight: 1.00}}, true
+		},
+		func(points []Point, i int) ([]FeatureValue, bool) {
+			if i < 180 { return nil, false }
+			r := points[i].Close/points[i-180].Close - 1
+			return []FeatureValue{{Name: "return_180d", Value: r * 100, Normalized: r / 1.00, Weight: 0.80}}, true
+		},
+		func(points []Point, i int) ([]FeatureValue, bool) {
+			if i < 14 { return nil, false }
+			gains, losses := 0.0, 0.0
+			for j := i - 13; j <= i; j++ {
+				diff := points[j].Close - points[j-1].Close
+				if diff > 0 { gains += diff } else { losses -= diff }
+			}
+			if losses == 0 { return []FeatureValue{{Name: "rsi_14", Value: 100, Normalized: 2.0, Weight: 0.80}}, true }
+			rsi := 100 - 100/(1+(gains/14)/(losses/14))
+			return []FeatureValue{{Name: "rsi_14", Value: rsi, Normalized: (rsi - 50) / 25, Weight: 0.80}}, true
+		},
+		func(points []Point, i int) ([]FeatureValue, bool) {
+			if i < 200 { return nil, false }
+			sum := 0.0
+			for j := i - 199; j <= i; j++ { sum += points[j].Close }
+			mayer := points[i].Close / (sum / 200)
+			return []FeatureValue{{Name: "mayer_multiple", Value: mayer, Normalized: mayer / 2.4, Weight: 1.20}}, true
+		},
+		func(points []Point, i int) ([]FeatureValue, bool) {
+			if i < 200 { return nil, false }
+			sum := 0.0
+			for j := i - 199; j <= i; j++ { sum += points[j].Close }
+			sma := sum / 200
+			dev := points[i].Close/sma - 1
+			return []FeatureValue{{Name: "sma_200_dev", Value: dev * 100, Normalized: dev / 0.50, Weight: 0.70}}, true
+		},
+	}
+	return opts
 }
 
 func syntheticPoints(n int) []Point {

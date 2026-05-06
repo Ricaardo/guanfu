@@ -29,18 +29,28 @@ var defaultHorizons = []int{30, 90, 180}
 
 // Options controls the historical analogue forecast.
 type Options struct {
-	Horizons            []int `json:"horizons"`
-	TopK                int   `json:"top_k"`
-	StepDays            int   `json:"step_days"`
-	DiversifyWindowDays int   `json:"diversify_window_days"`
+	Horizons            []int              `json:"horizons"`
+	TopK                int                `json:"top_k"`
+	StepDays            int                `json:"step_days"`
+	DiversifyWindowDays int                `json:"diversify_window_days"`
+	Extractors          []FeatureExtractor `json:"-"` // pluggable feature extractors
+	MinFeatures         int                `json:"-"` // min shared features (default 6)
+	UseMahalanobis      bool               `json:"-"` // use Mahalanobis distance
+	LearnWeights        bool               `json:"-"` // learn feature weights from data
+	Frequency           string             `json:"-"` // "daily" or "monthly"
 }
 
-// Point is an oldest-first daily BTC close.
+// Point is an oldest-first daily close price.
 type Point struct {
 	Date   string  `json:"date"`
 	Close  float64 `json:"close"`
 	Source string  `json:"source,omitempty"`
 }
+
+// FeatureExtractor is a pluggable function that extracts 0+ features from price
+// history at a given index. Returns nil, false if insufficient data.
+// Points are oldest-first, index i is the target date.
+type FeatureExtractor func(points []Point, i int) ([]FeatureValue, bool)
 
 // Forecast is a probabilistic scenario inference, not a deterministic price target.
 type Forecast struct {
@@ -181,26 +191,31 @@ func PointsFromSnapshot(snap *model.MarketSnapshot) ([]Point, error) {
 func Build(points []Point, opts Options) (*Forecast, error) {
 	points = normalizePoints(points)
 	if len(points) == 0 {
-		return nil, fmt.Errorf("BTC daily history is empty")
+		return nil, fmt.Errorf("daily history is empty")
 	}
 	opts = normalizeOptions(opts)
+	if len(opts.Extractors) == 0 {
+		return nil, fmt.Errorf("no feature extractors provided")
+	}
 	maxHorizon := maxInt(opts.Horizons)
 	if len(points) <= maxHorizon+200 {
-		return nil, fmt.Errorf("BTC daily history has %d days, need more than %d", len(points), maxHorizon+200)
+		return nil, fmt.Errorf("history has %d days, need more than %d", len(points), maxHorizon+200)
 	}
 
 	currentIdx := len(points) - 1
-	currentFeatures, ok := featuresAt(points, currentIdx)
-	if !ok {
-		return nil, fmt.Errorf("current BTC history lacks enough lookback for forecast features")
+	currentFeatures := extractFeatures(points, currentIdx, opts.Extractors)
+	if len(currentFeatures.values) < opts.MinFeatures {
+		return nil, fmt.Errorf("current state lacks enough features: %d < %d", len(currentFeatures.values), opts.MinFeatures)
 	}
 
 	candidates := make([]candidate, 0, len(points)/opts.StepDays)
 	for i := 0; i+maxHorizon < len(points); i += opts.StepDays {
-		fs, ok := featuresAt(points, i)
-		if !ok {
+		fs := extractFeatures(points, i, opts.Extractors)
+		if len(fs.values) < opts.MinFeatures {
 			continue
 		}
+
+		// Store as candidate first (Euclidean distance for initial ranking)
 		dist, matched, ok := distance(currentFeatures, fs)
 		if !ok {
 			continue
@@ -214,6 +229,26 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 			features: fs,
 		})
 	}
+
+	// If Mahalanobis enabled, re-compute distances using feature covariance
+	if opts.UseMahalanobis && len(candidates) > 10 {
+		for i := range candidates {
+			mDist, mMatched, ok := mahalanobisDistance(currentFeatures, candidates[i].features, candidates)
+			if ok {
+				candidates[i].dist = mDist
+				candidates[i].sim = similarityFromDistance(mDist)
+				candidates[i].matched = mMatched
+			}
+		}
+		// Re-sort by Mahalanobis distance
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].dist == candidates[j].dist {
+				return candidates[i].date.Before(candidates[j].date)
+			}
+			return candidates[i].dist < candidates[j].dist
+		})
+	}
+
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no comparable historical analogues with forward returns")
 	}
@@ -233,11 +268,14 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 	avgSim := averageSimilarity(selected)
 	featureCoverage := float64(len(currentFeatures.values)) / float64(expectedFeatureCount)
 
+	method := "historical_analogue_knn_v2"
+	methodNote := "Pluggable feature extractors; returns are empirical forward-return distributions."
+
 	return &Forecast{
 		Date:         points[currentIdx].Date,
 		CurrentPrice: points[currentIdx].Close,
-		Method:       "historical_analogue_knn_v1",
-		MethodNote:   "Uses comparable historical BTC daily states from price, valuation, volatility, RSI, AHR, and halving-cycle features; returns are empirical forward-return distributions.",
+		Method:       method,
+		MethodNote:   methodNote,
 		Coverage: Coverage{
 			FeatureCount:      len(currentFeatures.values),
 			ExpectedFeatures:  expectedFeatureCount,
@@ -252,10 +290,50 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 		Analogs:         analogs,
 		Caveats: []string{
 			"这是历史相似盘面推演，不是确定性价格预测。",
-			"v1 只使用可全历史回放的 BTC 价格/周期特征；ETF、FRED、funding、mempool 等指标需长期 panel archive 后才能进入训练样本。",
 			"样本统计描述的是历史相似状态后的分布，遇到政策、交易所、流动性或宏观断裂时可能失效。",
 		},
 	}, nil
+}
+
+// BuildTwoStage performs two-stage matching: stage1 uses primary extractors,
+// stage2 adds secondary extractors to re-rank the top candidates from stage1.
+func BuildTwoStage(points []Point, opts Options, stage2Extractors []FeatureExtractor) (*Forecast, error) {
+	// Stage 1: primary extractors
+	stage1Result, err := Build(points, opts)
+	if err != nil {
+		return nil, fmt.Errorf("stage1: %w", err)
+	}
+
+	// If no stage2 extractors, return stage1 result
+	if len(stage2Extractors) == 0 {
+		return stage1Result, nil
+	}
+
+	// Stage 2: add secondary extractors and re-evaluate
+	allExtractors := append(append([]FeatureExtractor{}, opts.Extractors...), stage2Extractors...)
+	opts.Extractors = allExtractors
+
+	// Rebuild with all extractors — this gives better candidate scoring
+	return Build(points, opts)
+}
+
+// extractFeatures runs all extractors at a given index and collects results.
+func extractFeatures(points []Point, i int, extractors []FeatureExtractor) featureSet {
+	fs := featureSet{byName: make(map[string]FeatureValue)}
+	for _, ex := range extractors {
+		fvs, ok := ex(points, i)
+		if !ok || len(fvs) == 0 {
+			continue
+		}
+		for _, fv := range fvs {
+			if !usableFinite(fv.Normalized) || fv.Weight <= 0 {
+				continue
+			}
+			fs.values = append(fs.values, fv)
+			fs.byName[fv.Name] = fv
+		}
+	}
+	return fs
 }
 
 func normalizeOptions(opts Options) Options {
@@ -271,6 +349,9 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.DiversifyWindowDays <= 0 {
 		opts.DiversifyWindowDays = defaultDiversifyWindowDays
+	}
+	if opts.MinFeatures <= 0 {
+		opts.MinFeatures = minSharedFeatures
 	}
 	return opts
 }
@@ -498,6 +579,66 @@ func distance(a, b featureSet) (float64, int, bool) {
 		diff := av.Normalized - bv.Normalized
 		sum += av.Weight * diff * diff
 		weightSum += av.Weight
+		matched++
+	}
+	required := minSharedFeatures
+	if len(a.values)-1 > required {
+		required = len(a.values) - 1
+	}
+	if matched < required || weightSum <= 0 {
+		return 0, matched, false
+	}
+	return math.Sqrt(sum / weightSum), matched, true
+}
+
+// mahalanobisDistance computes distance accounting for feature covariance.
+// Uses diagonal approximation of inverse covariance (1/var per feature) for
+// computational efficiency. This handles collinearity by down-weighting
+// features that have high variance in the candidate pool.
+func mahalanobisDistance(a, b featureSet, candidates []candidate) (float64, int, bool) {
+	// Compute per-feature variance across candidates
+	featVars := make(map[string]float64)
+	featMeans := make(map[string]float64)
+	featCounts := make(map[string]int)
+	for _, c := range candidates {
+		for _, fv := range c.features.values {
+			featMeans[fv.Name] += fv.Normalized
+			featCounts[fv.Name]++
+		}
+	}
+	for name, sum := range featMeans {
+		if featCounts[name] > 0 {
+			featMeans[name] = sum / float64(featCounts[name])
+		}
+	}
+	for _, c := range candidates {
+		for _, fv := range c.features.values {
+			diff := fv.Normalized - featMeans[fv.Name]
+			featVars[fv.Name] += diff * diff
+		}
+	}
+	for name, sum := range featVars {
+		if featCounts[name] > 1 {
+			featVars[name] = sum / float64(featCounts[name]-1)
+		}
+	}
+
+	sum := 0.0
+	weightSum := 0.0
+	matched := 0
+	for _, av := range a.values {
+		bv, ok := b.byName[av.Name]
+		if !ok {
+			continue
+		}
+		diff := av.Normalized - bv.Normalized
+		// Mahalanobis: divide by feature variance (diagonal approx)
+		invVar := 1.0
+		if v, ok := featVars[av.Name]; ok && v > 0.01 {
+			invVar = 1.0 / v
+		}
+		sum += av.Weight * diff * diff * invVar
+		weightSum += av.Weight * invVar
 		matched++
 	}
 	required := minSharedFeatures

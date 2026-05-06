@@ -47,6 +47,7 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/client"
 	"github.com/Ricaardo/guanfu/pkg/engine"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
+	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/history"
 	"github.com/Ricaardo/guanfu/pkg/model"
 	"github.com/Ricaardo/guanfu/pkg/version"
@@ -89,6 +90,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
+        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       }
     }
@@ -99,6 +101,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
+        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
@@ -110,6 +113,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
+        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
         "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数，默认 [30,90,180]"},
         "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21"},
@@ -123,6 +127,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
+        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
         "domain": {"type": "string", "enum": ["cycle","valuation","network","positioning","macro","flow","technical","cross_asset"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       },
@@ -135,6 +140,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
+        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
         "name": {"type": "string", "description": "指标 key 名称，如 ahr999, hash_ribbons, fear_greed"},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       },
@@ -255,13 +261,19 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 }
 
 func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
+	// Extract asset parameter (common to all tools)
+	asset := extractAsset(args)
+	if asset == "" {
+		asset = "btc"
+	}
+
 	switch name {
 	case "get_btc_panel":
 		timeout, rpcErr := timeoutFromArgs(args)
 		if rpcErr != nil {
 			return "", rpcErr
 		}
-		panel := getOrFetchPanel(timeout)
+		panel := getOrFetchPanel(asset, timeout)
 		b, _ := json.MarshalIndent(panel, "", "  ")
 		return string(b), nil
 
@@ -277,8 +289,8 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		if rpcErr != nil {
 			return "", rpcErr
 		}
-		panel := getOrFetchPanel(timeout)
-		b, _ := json.MarshalIndent(buildVerdictPayload(panel, p.IncludePanel), "", "  ")
+		panel := getOrFetchPanel(asset, timeout)
+		b, _ := json.MarshalIndent(buildVerdictPayload(asset, panel, p.IncludePanel), "", "  ")
 		return string(b), nil
 
 	case "get_btc_forecast":
@@ -308,12 +320,12 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		if rpcErr := validateForecastHorizons(opts.Horizons); rpcErr != nil {
 			return "", rpcErr
 		}
-		panel := getOrFetchPanel(timeout)
-		fc, err := buildForecast(timeout, opts)
+		panel := getOrFetchPanel(asset, timeout)
+		fc, err := buildForecast(asset, timeout, opts)
 		if err != nil {
 			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
 		}
-		b, _ := json.MarshalIndent(buildForecastPayload(panel, fc, p.IncludePanel), "", "  ")
+		b, _ := json.MarshalIndent(buildForecastPayload(asset, panel, fc, p.IncludePanel), "", "  ")
 		return string(b), nil
 
 	case "get_domain":
@@ -331,7 +343,7 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		if rpcErr != nil {
 			return "", rpcErr
 		}
-		panel := getOrFetchPanel(timeout)
+		panel := getOrFetchPanel(asset, timeout)
 		dom := getDomainJSON(panel, p.Domain)
 		b, _ := json.MarshalIndent(dom, "", "  ")
 		return string(b), nil
@@ -351,7 +363,7 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		if rpcErr != nil {
 			return "", rpcErr
 		}
-		panel := getOrFetchPanel(timeout)
+		panel := getOrFetchPanel(asset, timeout)
 		ind := findIndicator(panel, p.Name)
 		if ind != nil {
 			b, _ := json.MarshalIndent(ind, "", "  ")
@@ -373,24 +385,35 @@ func handleResourceRead(uri string) (string, *rpcError) {
 		}
 		return string(data), nil
 	case "guanfu://panel/latest":
-		panel := getOrFetchPanel(defaultPanelTimeout)
+		panel := getOrFetchPanel("btc", defaultPanelTimeout)
 		b, _ := json.MarshalIndent(panel, "", "  ")
 		return string(b), nil
 	case "guanfu://verdict/latest":
-		panel := getOrFetchPanel(defaultPanelTimeout)
-		b, _ := json.MarshalIndent(buildVerdictPayload(panel, false), "", "  ")
+		panel := getOrFetchPanel("btc", defaultPanelTimeout)
+		b, _ := json.MarshalIndent(buildVerdictPayload("btc", panel, false), "", "  ")
 		return string(b), nil
 	case "guanfu://forecast/latest":
-		panel := getOrFetchPanel(defaultPanelTimeout)
-		fc, err := buildForecast(defaultPanelTimeout, forecast.DefaultOptions())
+		panel := getOrFetchPanel("btc", defaultPanelTimeout)
+		fc, err := buildForecast("btc", defaultPanelTimeout, forecast.DefaultOptions())
 		if err != nil {
 			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
 		}
-		b, _ := json.MarshalIndent(buildForecastPayload(panel, fc, false), "", "  ")
+		b, _ := json.MarshalIndent(buildForecastPayload("btc", panel, fc, false), "", "  ")
 		return string(b), nil
 	default:
 		return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
 	}
+}
+
+// extractAsset parses the "asset" field from tool arguments.
+func extractAsset(args json.RawMessage) string {
+	var p struct {
+		Asset string `json:"asset"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil || p.Asset == "" {
+		return "btc"
+	}
+	return p.Asset
 }
 
 func resourceMimeType(uri string) string {
@@ -404,8 +427,15 @@ func resourceMimeType(uri string) string {
 	}
 }
 
-func buildVerdictPayload(panel *model.IndicatorPanel, includePanel bool) any {
-	verdict := engine.BuildVerdict(panel)
+func buildVerdictPayload(asset string, panel *model.IndicatorPanel, includePanel bool) any {
+	var verdict *engine.Verdict
+	if asset == "btc" {
+		verdict = engine.BuildVerdict(panel)
+	} else if a, err := engine.GetAsset(asset); err == nil {
+		verdict = a.BuildVerdict(panel)
+	} else {
+		verdict = &engine.Verdict{Date: panel.Date, Stance: "unknown asset"}
+	}
 	if !includePanel {
 		return verdict
 	}
@@ -418,7 +448,7 @@ func buildVerdictPayload(panel *model.IndicatorPanel, includePanel bool) any {
 	}
 }
 
-func buildForecastPayload(panel *model.IndicatorPanel, fc *forecast.Forecast, includePanel bool) any {
+func buildForecastPayload(asset string, panel *model.IndicatorPanel, fc *forecast.Forecast, includePanel bool) any {
 	if !includePanel {
 		return fc
 	}
@@ -431,29 +461,65 @@ func buildForecastPayload(panel *model.IndicatorPanel, fc *forecast.Forecast, in
 	}
 }
 
-func buildForecast(timeout time.Duration, opts forecast.Options) (*forecast.Forecast, error) {
+func buildForecast(asset string, timeout time.Duration, opts forecast.Options) (*forecast.Forecast, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	if asset != "btc" {
+		a, err := engine.GetAsset(asset)
+		if err != nil {
+			return nil, err
+		}
+		snap, err := a.FetchSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return a.BuildForecast(snap, opts)
+	}
+
+	// BTC flow
 	points, err := client.LoadOrUpdateBTCDailyHistory(ctx, "")
 	if err != nil {
 		return nil, err
 	}
+	opts.Extractors = features.CoreExtractors()
 	return forecast.Build(forecast.PointsFromBTCDaily(points), opts)
 }
 
 // ─── Panel fetch with cache ───────────────────────────
 
-func getOrFetchPanel(timeout time.Duration) *model.IndicatorPanel {
-	panelCacheMu.RLock()
-	if panelCache != nil && time.Since(panelCacheAt) < panelCacheTTL {
-		defer panelCacheMu.RUnlock()
-		return panelCache
+func getOrFetchPanel(asset string, timeout time.Duration) *model.IndicatorPanel {
+	// Only cache BTC panels (most frequently accessed)
+	if asset == "btc" || asset == "" {
+		panelCacheMu.RLock()
+		if panelCache != nil && time.Since(panelCacheAt) < panelCacheTTL {
+			defer panelCacheMu.RUnlock()
+			return panelCache
+		}
+		panelCacheMu.RUnlock()
 	}
-	panelCacheMu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// Equity assets use the Asset interface
+	if asset != "btc" && asset != "" {
+		a, err := engine.GetAsset(asset)
+		if err != nil {
+			return &model.IndicatorPanel{Date: "error", StaleWarnings: []string{err.Error()}}
+		}
+		snap, err := a.FetchSnapshot(ctx)
+		if err != nil {
+			return &model.IndicatorPanel{Date: "error", StaleWarnings: []string{err.Error()}}
+		}
+		panel, err := a.BuildPanel(snap)
+		if err != nil {
+			return &model.IndicatorPanel{Date: "error", StaleWarnings: []string{err.Error()}}
+		}
+		return panel
+	}
+
+	// BTC flow
 	provider := client.NewRealClient()
 	snap, err := provider.GetSnapshot(ctx)
 	if err != nil {

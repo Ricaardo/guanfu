@@ -442,6 +442,9 @@ func (c *RealClient) GetSnapshot(ctx context.Context) (*model.MarketSnapshot, er
 		}
 	}
 
+	// Sync cross-asset price data to PriceStore for incremental reuse
+	SyncSnapshotToPriceStore(snap)
+
 	return snap, nil
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/client"
 	"github.com/Ricaardo/guanfu/pkg/engine"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
+	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/history"
 	"github.com/Ricaardo/guanfu/pkg/model"
 	"github.com/Ricaardo/guanfu/pkg/version"
@@ -52,6 +53,23 @@ var domainNames = []struct {
 }
 
 func main() {
+	// Subcommand detection: first positional arg before any flags.
+	// For "backtest <asset>", captures the second positional arg as backtestAsset.
+	subcmd := ""
+	backtestAsset := "btc"
+	posArgs := []string{}
+	for _, arg := range os.Args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			posArgs = append(posArgs, arg)
+		}
+	}
+	if len(posArgs) > 0 {
+		subcmd = posArgs[0]
+	}
+	if subcmd == "backtest" && len(posArgs) > 1 {
+		backtestAsset = posArgs[1]
+	}
+
 	jsonOut := flag.Bool("json", false, "JSON 输出")
 	pretty := flag.Bool("pretty", false, "pretty JSON 输出")
 	verdict := flag.Bool("verdict", false, "输出综合判断（牛熊/顶底/读盘标签）")
@@ -60,6 +78,7 @@ func main() {
 	forecastOnly := flag.Bool("forecast-only", false, "仅输出 forecast（隐藏指标盘）")
 	forecastHorizons := flag.String("forecast-horizons", "30,90,180", "走势推演周期，逗号分隔天数，如 30,90,180")
 	forecastTop := flag.Int("forecast-top", 21, "走势推演使用的历史相似样本数")
+	forecastPath := flag.Bool("forecast-path", false, "输出历史相似盘面路径推演 (ASCII fan chart)")
 	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow/technical/cross_asset")
 	timeout := flag.Duration("timeout", 90*time.Second, "拉数据超时")
 	halfLife := flag.Int("halflife", 0, "AHR 拟合半衰期（天，默认 1460）")
@@ -69,23 +88,63 @@ func main() {
 	showVersion := flag.Bool("version", false, "打印版本并退出")
 	flag.Parse()
 
+	// Route subcommands
+	switch subcmd {
+	case "qqq", "spy", "gold":
+		runEquityAsset(subcmd, *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		return
+	case "market":
+		runMarketOverview(*jsonOut, *pretty, *plain || *noEmoji)
+		return
+	case "dca":
+		runDCA(*jsonOut, *pretty, *plain || *noEmoji)
+		return
+	case "allocate":
+		runAllocate(*jsonOut, *pretty, *plain || *noEmoji)
+		return
+	case "backtest":
+		if backtestAsset == "all" {
+			runBacktestAll(*jsonOut, *pretty, *plain || *noEmoji)
+		} else {
+			runBacktest(backtestAsset, *jsonOut, *pretty, *plain || *noEmoji)
+		}
+		return
+	case "status":
+		runStatus(*jsonOut, *pretty, *plain || *noEmoji)
+		return
+	case "hs300":
+		runEquityAsset("hs300", *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		return
+	case "btc", "":
+		// default: BTC panel (existing behavior)
+	default:
+		fmt.Fprintf(os.Stderr, "guanfu: unknown subcommand %q\n", subcmd)
+		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status\n")
+		os.Exit(1)
+	}
+
 	if *showVersion {
 		version.Print(os.Stdout, "guanfu")
 		return
 	}
 
+	runBTCPanel(*jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *halfLife, *historyDB, *domainFilter, *plain || *noEmoji, *forecastPath)
+}
+
+// runBTCPanel is the existing BTC panel flow (unchanged from v1).
+func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, halfLife int, historyDB, domainFilter string, plain bool, forecastPath bool) {
 	cfg := &model.Config{
 		Weights: model.Weights{Trend: 0.30, Reversal: 0.25, Valuation: 0.25, Structure: 0.20},
 		Thresholds: model.Thresholds{
 			BTCMAFast:       120,
 			BTCMASlow:       200,
 			TopCoinCount:    50,
-			AHRHalfLifeDays: *halfLife,
+			AHRHalfLifeDays: halfLife,
 		},
 		API: model.APIConfig{Timeout: "10s", Retries: 3, Mock: false},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	provider := client.NewRealClient()
@@ -97,7 +156,7 @@ func main() {
 
 	calc := engine.NewCalculator(cfg)
 	if os.Getenv("GUANFU_NO_HISTORY") != "1" {
-		store, err := history.Open(*historyDB)
+		store, err := history.Open(historyDB)
 		if err != nil {
 			log.Printf("history.Open failed (continuing without history quantiles): %v", err)
 		} else {
@@ -108,13 +167,13 @@ func main() {
 	panel := calc.BuildPanel(snap)
 
 	var v *engine.Verdict
-	if *verdict || *verdictOnly {
+	if verdict || verdictOnly {
 		v = engine.BuildVerdict(panel)
 	}
 
 	var fc *forecast.Forecast
-	if *forecastOut || *forecastOnly {
-		horizons, err := forecast.ParseHorizons(*forecastHorizons)
+	if forecastOut || forecastOnly {
+		horizons, err := forecast.ParseHorizons(forecastHorizonsArg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "parse forecast horizons failed: %v\n", err)
 			os.Exit(1)
@@ -126,7 +185,8 @@ func main() {
 		}
 		opts := forecast.DefaultOptions()
 		opts.Horizons = horizons
-		opts.TopK = *forecastTop
+		opts.TopK = forecastTop
+		opts.Extractors = features.CoreExtractors()
 		fc, err = forecast.Build(points, opts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "build forecast failed: %v\n", err)
@@ -134,17 +194,17 @@ func main() {
 		}
 	}
 
-	// JSON 输出
-	if *jsonOut || *pretty {
+	// JSON output
+	if jsonOut || pretty {
 		var out interface{} = panel
-		if *domainFilter != "" && !*verdict && !*verdictOnly && !*forecastOut && !*forecastOnly {
-			out = filterDomain(panel, *domainFilter)
+		if domainFilter != "" && !verdict && !verdictOnly && !forecastOut && !forecastOnly {
+			out = filterDomain(panel, domainFilter)
 		}
-		if *forecastOnly {
+		if forecastOnly {
 			out = fc
-		} else if *verdictOnly {
+		} else if verdictOnly {
 			out = v
-		} else if *verdict || *forecastOut {
+		} else if verdict || forecastOut {
 			out = struct {
 				Panel    *model.IndicatorPanel `json:"panel"`
 				Verdict  *engine.Verdict       `json:"verdict,omitempty"`
@@ -152,7 +212,7 @@ func main() {
 			}{Panel: panel, Verdict: v, Forecast: fc}
 		}
 		var b []byte
-		if *pretty {
+		if pretty {
 			b, _ = json.MarshalIndent(out, "", "  ")
 		} else {
 			b, _ = json.Marshal(out)
@@ -161,15 +221,144 @@ func main() {
 		return
 	}
 
-	// 人类盘面
-	if !*verdictOnly && !*forecastOnly {
-		printHumanPanel(panel, *domainFilter, *plain || *noEmoji)
+	// Human panel
+	if !verdictOnly && !forecastOnly {
+		printHumanPanel(panel, domainFilter, plain)
 	}
-	if v != nil && !*forecastOnly {
-		printHumanVerdict(v, *plain || *noEmoji)
+	if v != nil && !forecastOnly {
+		printHumanVerdict(v, plain)
 	}
 	if fc != nil {
-		printHumanForecast(fc, *plain || *noEmoji)
+		printHumanForecast(fc, plain)
+	}
+	if forecastPath && fc != nil {
+		fmt.Println(forecast.BuildPathProjection(fc, 180).ASCIIFan(70))
+	}
+}
+
+// runEquityAsset runs the equity flow for QQQ/SPY through the Asset interface.
+func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, plain bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	a, err := engine.GetAsset(assetKey)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
+	snap, err := a.FetchSnapshot(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fetch %s snapshot failed: %v\n", assetKey, err)
+		os.Exit(1)
+	}
+
+	panel, err := a.BuildPanel(snap)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build %s panel failed: %v\n", assetKey, err)
+		os.Exit(1)
+	}
+
+	var v *engine.Verdict
+	if verdict || verdictOnly {
+		v = a.BuildVerdict(panel)
+	}
+
+	var fc *forecast.Forecast
+	if forecastOut || forecastOnly {
+		horizons, err := forecast.ParseHorizons(forecastHorizonsArg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "parse forecast horizons failed: %v\n", err)
+			os.Exit(1)
+		}
+		opts := forecast.DefaultOptions()
+		opts.Horizons = horizons
+		opts.TopK = forecastTop
+		fc, err = a.BuildForecast(snap, opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "build forecast failed: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// JSON output
+	if jsonOut || pretty {
+		var out interface{} = panel
+		if forecastOnly {
+			out = fc
+		} else if verdictOnly {
+			out = v
+		} else if verdict || forecastOut {
+			out = struct {
+				Panel    *model.IndicatorPanel `json:"panel"`
+				Verdict  *engine.Verdict       `json:"verdict,omitempty"`
+				Forecast *forecast.Forecast    `json:"forecast,omitempty"`
+			}{Panel: panel, Verdict: v, Forecast: fc}
+		}
+		var b []byte
+		if pretty {
+			b, _ = json.MarshalIndent(out, "", "  ")
+		} else {
+			b, _ = json.Marshal(out)
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	// Human panel
+	if !verdictOnly && !forecastOnly {
+		printEquityPanel(panel, plain)
+	}
+	if v != nil && !forecastOnly {
+		printHumanVerdict(v, plain)
+	}
+	if fc != nil {
+		printHumanForecast(fc, plain)
+	}
+}
+
+// printEquityPanel prints a human-readable equity panel.
+func printEquityPanel(p *model.IndicatorPanel, plain bool) {
+	if plain {
+		fmt.Printf("guanfu equity panel (%s)   price: $%.2f\n", p.Date, p.Snapshot.SPYPrice+p.Snapshot.QQQPrice)
+	} else {
+		fmt.Printf("观复 · 权益 ETF 盘面 (%s)   价格: $%.2f\n", p.Date, p.Snapshot.SPYPrice+p.Snapshot.QQQPrice)
+	}
+	fmt.Println()
+
+	equityDomains := []struct {
+		Key   string
+		Title string
+		Icon  string
+	}{
+		{"technical", "Technical 技术指标", "📈"},
+		{"macro", "Macro 宏观", "🌍"},
+		{"positioning", "Sentiment 情绪", "📊"},
+		{"valuation", "Valuation 估值", "💰"},
+	}
+
+	for _, d := range equityDomains {
+		var indicators map[string]model.Indicator
+		switch d.Key {
+		case "technical":
+			indicators = p.Technical
+		case "macro":
+			indicators = p.Macro
+		case "positioning":
+			indicators = p.Positioning
+		case "valuation":
+			indicators = p.Valuation
+		}
+		if len(indicators) == 0 {
+			continue
+		}
+		if plain {
+			fmt.Println(d.Title)
+		} else {
+			fmt.Printf("%s %s\n", d.Icon, d.Title)
+		}
+		printDomainTable(indicators)
+		fmt.Println()
 	}
 }
 

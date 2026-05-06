@@ -1,0 +1,269 @@
+// CLI commands for allocate, market, DCA, and consensus.
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/Ricaardo/guanfu/pkg/allocate"
+	"github.com/Ricaardo/guanfu/pkg/dca"
+	"github.com/Ricaardo/guanfu/pkg/store"
+)
+
+func runDCA(jsonOut, pretty, plain bool) {
+	s := &store.PriceStore{}
+	pricePoints, err := s.Load("btc")
+	if err != nil || len(pricePoints) < 365 {
+		fmt.Fprintf(os.Stderr, "dca: need at least 365 days of BTC price data in PriceStore\n")
+		os.Exit(1)
+	}
+	points := make([]dca.Point, len(pricePoints))
+	for i, p := range pricePoints {
+		points[i] = dca.Point{Date: p.Date, Close: p.Close}
+	}
+
+	result, err := dca.RunComparison(points, 1000, 1460)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dca error: %v\n", err)
+		os.Exit(1)
+	}
+
+	zoneResult, _ := dca.ZoneReplay(points)
+
+	if jsonOut || pretty {
+		out := map[string]interface{}{
+			"comparison":  result,
+			"zone_replay": zoneResult,
+		}
+		var b []byte
+		if pretty {
+			b, _ = json.MarshalIndent(out, "", "  ")
+		} else {
+			b, _ = json.Marshal(out)
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	printDCAComparison(result, plain)
+	if zoneResult != nil {
+		printDCAZoneReplay(zoneResult, plain)
+	}
+}
+
+func printDCAComparison(cr *dca.ComparisonResult, plain bool) {
+	title := "观复 · DCA 定投策略对比"
+	if plain {
+		title = "DCA Strategy Comparison"
+	}
+	fmt.Printf("%s  (BTC: $%.0f)\n", title, cr.Price)
+	fmt.Println(strings.Repeat("=", 72))
+	fmt.Printf("%-12s %12s %10s %10s %9s %8s\n", "策略", "总投入", "持仓BTC", "现值", "ROI", "成本锚")
+	fmt.Println(strings.Repeat("-", 72))
+	for _, r := range cr.Results {
+		marker := ""
+		if r.Strategy == cr.Best {
+			marker = " *"
+		}
+		fmt.Printf("%-12s $%10.0f %9.4f $%9.0f %+8.1f%% $%7.0f%s\n",
+			r.Strategy, r.TotalInvested, r.TotalBTC,
+			r.CurrentValue, r.ROIPct, r.CostBasis, marker)
+	}
+	fmt.Println(strings.Repeat("-", 72))
+	fmt.Printf("Best: %s\n", cr.Best)
+	fmt.Println()
+	fmt.Println("Strategies:")
+	fmt.Println("  fixed - same amount every month")
+	fmt.Println("  ahr   - AHR999 < 0.8 accelerate (2x), > 1.2 decelerate (0.5x)")
+	fmt.Println("  mayer - Mayer < 0.8 accelerate (2x), > 1.5 decelerate (0.5x)")
+	fmt.Println()
+	fmt.Println("Not investment advice.")
+}
+
+func printDCAZoneReplay(zr *dca.ZoneReplayResult, plain bool) {
+	title := "Valuation Zone Historical Replay"
+	if !plain {
+		title = "估值区间历史回放"
+	}
+	fmt.Printf("\n%s: %s\n", title, zr.CurrentZone)
+	fmt.Println(strings.Repeat("-", 64))
+	fmt.Printf("%-8s %10s %10s %10s %10s\n", "Period", "Win Rate", "Median ROI", "Max DD", "Ann.")
+	fmt.Println(strings.Repeat("-", 64))
+	for _, p := range zr.Periods {
+		fmt.Printf("%4dy    %8.0f%% %+9.1f%% %+9.1f%% %+9.1f%%  (n=%d)\n",
+			p.Years, p.WinRate, p.MedianROI, p.MaxDrawdown, p.MedianAnnual, p.SampleCount)
+	}
+	fmt.Println(strings.Repeat("-", 64))
+	fmt.Printf("DCA entries in zone [%s] historical performance.\n", zr.CurrentZone)
+	fmt.Println("Not investment advice.")
+	fmt.Println()
+}
+
+func runAllocate(jsonOut, pretty, plain bool) {
+	pf := allocate.PortfolioAllWeather
+	status, err := allocate.Analyze(pf)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "allocate error: %v\n", err)
+		os.Exit(1)
+	}
+	if jsonOut || pretty {
+		var b []byte
+		if pretty {
+			b, _ = json.MarshalIndent(status, "", "  ")
+		} else {
+			b, _ = json.Marshal(status)
+		}
+		fmt.Println(string(b))
+		return
+	}
+	title := "Guanfu · Lazy Portfolio"
+	if !plain {
+		title = "观复 · 懒人组合配置"
+	}
+	fmt.Printf("%s  (%s)\n", title, status.Date)
+	fmt.Println(strings.Repeat("=", 72))
+	fmt.Printf("%-10s %8s %12s %s\n", "Asset", "Target%", "Price", "Hint")
+	fmt.Println(strings.Repeat("-", 72))
+	for _, a := range status.Assets {
+		fmt.Printf("%-10s %7.0f%% $%10.2f %s\n", a.Asset, a.TargetPct, a.CurrentPrice, a.Hint)
+	}
+	fmt.Println(strings.Repeat("-", 72))
+	fmt.Printf("Overall: %s", status.OverallZone)
+	if status.RebalanceNeeded {
+		fmt.Printf("  [!] rebalance threshold triggered")
+	}
+	fmt.Println()
+	fmt.Println()
+	fmt.Println("Not investment advice.")
+}
+
+func runMarketOverview(jsonOut, pretty, plain bool) {
+	ov, err := allocate.MultiAssetOverview()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "market overview error: %v\n", err)
+		os.Exit(1)
+	}
+
+	cs, _ := allocate.ConsensusScan()
+
+	if jsonOut || pretty {
+		out := map[string]interface{}{
+			"overview":  ov,
+			"consensus": cs,
+		}
+		var b []byte
+		if pretty {
+			b, _ = json.MarshalIndent(out, "", "  ")
+		} else {
+			b, _ = json.Marshal(out)
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	title := "Guanfu · Multi-Asset Overview"
+	if !plain {
+		title = "观复 · 多资产一览"
+	}
+	fmt.Printf("%s  (%s)\n", title, ov.Date)
+	fmt.Println(strings.Repeat("=", 56))
+	fmt.Printf("%-10s %12s %10s %s\n", "Asset", "Price", "History", "Freshness")
+	fmt.Println(strings.Repeat("-", 56))
+	for _, item := range ov.Items {
+		stale := ""
+		if item.StaleDays > 2 {
+			stale = fmt.Sprintf("! %dd", item.StaleDays)
+		}
+		fmt.Printf("%-10s $%10.2f %9dd %s\n", item.Asset, item.Price, item.HistoryDays, stale)
+	}
+	fmt.Println(strings.Repeat("-", 56))
+
+	if cs != nil && len(cs.Signals) > 0 {
+		fmt.Println()
+		conTitle := "Multi-Asset Consensus"
+		if !plain {
+			conTitle = "多资产共识"
+		}
+		fmt.Printf("%s: %s (confidence: %.0f%%)\n", conTitle, cs.Direction, cs.Confidence*100)
+		fmt.Printf("  %s\n", cs.Summary)
+		fmt.Println(strings.Repeat("-", 56))
+		fmt.Printf("%-8s %10s %10s %s\n", "Asset", "Price", "30d Mom.", "Signal")
+		for _, sig := range cs.Signals {
+			fmt.Printf("%-8s $%9.2f %+9.1f%% %s\n", sig.Asset, sig.Price, sig.Momentum, sig.Signal)
+		}
+		fmt.Println(strings.Repeat("-", 56))
+	}
+}
+
+func runStatus(jsonOut, pretty, plain bool) {
+	s := &store.PriceStore{}
+	assets, _ := s.ListAssets()
+
+	if jsonOut || pretty {
+		type statusItem struct {
+			Asset     string `json:"asset"`
+			Count     int    `json:"count"`
+			LastDate  string `json:"last_date"`
+			StaleDays int    `json:"stale_days"`
+		}
+		items := make([]statusItem, 0, len(assets))
+		for _, asset := range assets {
+			count, _ := s.Count(asset)
+			lastDate, _ := s.LastDate(asset)
+			stale := s.DaysSinceLastUpdate(asset)
+			items = append(items, statusItem{asset, count, lastDate, stale})
+		}
+		out := map[string]interface{}{
+			"status":       "ok",
+			"prices_dir":   store.DefaultPricesDir(),
+			"total_assets": len(assets),
+			"assets":       items,
+		}
+		var b []byte
+		if pretty {
+			b, _ = json.MarshalIndent(out, "", "  ")
+		} else {
+			b, _ = json.Marshal(out)
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	title := "Guanfu · Data Status"
+	if !plain {
+		title = "观复 · 数据状态"
+	}
+	fmt.Printf("%s\n", title)
+	fmt.Printf("  Data dir: %s\n", store.DefaultPricesDir())
+	fmt.Printf("  Tracked assets: %d\n", len(assets))
+	fmt.Println(strings.Repeat("=", 64))
+	fmt.Printf("%-10s %8s %12s %s\n", "Asset", "Days", "Last Date", "Freshness")
+	fmt.Println(strings.Repeat("-", 64))
+
+	allFresh := true
+	for _, asset := range assets {
+		count, _ := s.Count(asset)
+		lastDate, _ := s.LastDate(asset)
+		stale := s.DaysSinceLastUpdate(asset)
+		staleStr := "ok"
+		if stale > 2 {
+			staleStr = fmt.Sprintf("! %dd ago", stale)
+			allFresh = false
+		}
+		fmt.Printf("%-10s %7dd %12s %s\n", asset, count, lastDate, staleStr)
+	}
+	fmt.Println(strings.Repeat("-", 64))
+
+	if len(assets) == 0 {
+		fmt.Println()
+		fmt.Println("No data in PriceStore. To import:")
+		fmt.Println("  1. guanfu btc             # fetch BTC history (auto-import)")
+		fmt.Println("  2. Ensure Futu OpenD runs  # import QQQ/SPY/GLD etc.")
+		fmt.Println("  3. guanfu market           # view all imported assets")
+	} else if allFresh {
+		fmt.Println("All data fresh.")
+	}
+}

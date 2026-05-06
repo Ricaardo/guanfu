@@ -19,6 +19,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/Ricaardo/guanfu/pkg/store"
 )
 
 // yahooChartResp Yahoo Finance v8 chart API response
@@ -38,10 +40,10 @@ type yahooChartResp struct {
 	} `json:"chart"`
 }
 
-// FetchCrossAssetData 拉取黄金(Binance PAXG) + QQQ/SPY/GLD/UUP/VIXY(Futu>Yahoo) 的近期价格和历史。
+// FetchCrossAssetData 拉取黄金(London Gold > PAXG) + QQQ/SPY/GLD/UUP/VIXY(Futu>Yahoo) 的近期价格和历史。
 //
 // 数据源优先级:
-//   - 黄金: Binance PAXG/USDT (tokenized gold)
+//   - 黄金: London Gold (PriceStore, 1968+) > Binance PAXG/USDT (tokenized gold, 2019+)
 //   - QQQ/SPY: Futu OpenD (本地网关) > Yahoo Finance (公网备份)
 //   - 油价: Futu USO ETF proxy > Yahoo CL=F WTI futures
 //
@@ -56,8 +58,15 @@ func FetchCrossAssetData(ctx context.Context, targetDays int) (*CrossAssetPrices
 	hc := &http.Client{Timeout: 12 * time.Second}
 	out := &CrossAssetPrices{}
 
-	// 黄金: Binance PAXG/USDT klines
-	if err := fetchBinancePAXG(ctx, hc, targetDays, out); err != nil {
+	// 黄金: London Gold (PriceStore) > Binance PAXG/USDT klines
+	goldFromStore := fetchLondonGoldForCrossAsset(targetDays)
+	if goldFromStore != nil && len(goldFromStore) > 0 {
+		n := len(goldFromStore)
+		out.GoldPrice = goldFromStore[n-1]
+		out.GoldHistory = goldFromStore
+		// Mark that London gold is available
+		out.Warnings = append(out.Warnings, "gold: using London gold (PriceStore, 1968+)")
+	} else if err := fetchBinancePAXG(ctx, hc, targetDays, out); err != nil {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("Binance PAXG fetch failed: %v", err))
 	}
 
@@ -337,4 +346,19 @@ type CrossAssetPrices struct {
 	WTIPriceAsOf   string
 	OilPriceSource string
 	Warnings       []string
+}
+
+// fetchLondonGoldForCrossAsset reads London gold prices from PriceStore
+// for use as the primary gold source in cross-asset features.
+// Returns newest-first float64 slice, or nil if unavailable.
+func fetchLondonGoldForCrossAsset(targetDays int) []float64 {
+	s := &store.PriceStore{}
+	history, err := s.LoadHistory("gold")
+	if err != nil || len(history) == 0 {
+		return nil
+	}
+	if len(history) > targetDays {
+		history = history[:targetDays]
+	}
+	return history
 }
