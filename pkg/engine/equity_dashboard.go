@@ -42,24 +42,31 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	}
 
 	price := in.Price
+	snap := model.SnapshotData{
+		DataDate:  in.Date,
+		FearGreed: in.FearGreed,
+	}
+	switch in.Asset {
+	case "qqq":
+		snap.QQQPrice = price
+	case "spy":
+		snap.SPYPrice = price
+	case "gold":
+		snap.GoldPrice = price
+	case "hs300":
+		snap.HS300Price = price
+	}
+
 	panel := &model.IndicatorPanel{
-		Date: in.Date,
-		Snapshot: model.SnapshotData{
-			DataDate: in.Date,
-			FearGreed: in.FearGreed,
-		},
+		Asset:       in.Asset,
+		Date:        in.Date,
+		Snapshot:    snap,
 		Technical:   make(map[string]model.Indicator),
 		Valuation:   make(map[string]model.Indicator),
 		Positioning: make(map[string]model.Indicator),
 		Macro:       make(map[string]model.Indicator),
 		Flow:        make(map[string]model.Indicator),
 		Cycle:       make(map[string]model.Indicator),
-	}
-
-	if in.Asset == "qqq" {
-		panel.Snapshot.QQQPrice = price
-	} else {
-		panel.Snapshot.SPYPrice = price
 	}
 
 	history := in.PriceHistory

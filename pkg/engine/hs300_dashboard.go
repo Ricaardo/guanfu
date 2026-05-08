@@ -39,9 +39,11 @@ func BuildHS300Dashboard(in *HS300DashboardInput) *model.IndicatorPanel {
 
 	price := in.Price
 	panel := &model.IndicatorPanel{
-		Date: in.Date,
+		Asset: "hs300",
+		Date:  in.Date,
 		Snapshot: model.SnapshotData{
-			DataDate: in.Date,
+			HS300Price: price,
+			DataDate:   in.Date,
 		},
 		Technical:   make(map[string]model.Indicator),
 		Valuation:   make(map[string]model.Indicator),

@@ -86,12 +86,6 @@ func (a *GoldAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error)
 
 	panel := BuildEquityPanel(in)
 
-	// Override snapshot display
-	panel.Snapshot = model.SnapshotData{
-		GoldPrice: as.Price,
-		DataDate:  as.Date,
-	}
-
 	// ── Gold valuation domain ──
 	panel.Valuation = buildGoldValuation(as, panel.Macro["tlt_proxy"])
 

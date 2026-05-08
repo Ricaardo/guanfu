@@ -423,10 +423,11 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 
 // printEquityPanel prints a human-readable equity panel.
 func printEquityPanel(p *model.IndicatorPanel, plain bool) {
+	price, plainTitle, fancyTitle := equityPanelHeader(p)
 	if plain {
-		fmt.Printf("guanfu equity panel (%s)   price: $%.2f\n", p.Date, p.Snapshot.SPYPrice+p.Snapshot.QQQPrice)
+		fmt.Printf("guanfu %s (%s)   price: $%.2f\n", plainTitle, p.Date, price)
 	} else {
-		fmt.Printf("观复 · 权益 ETF 盘面 (%s)   价格: $%.2f\n", p.Date, p.Snapshot.SPYPrice+p.Snapshot.QQQPrice)
+		fmt.Printf("观复 · %s (%s)   价格: $%.2f\n", fancyTitle, p.Date, price)
 	}
 	fmt.Println()
 
@@ -463,6 +464,23 @@ func printEquityPanel(p *model.IndicatorPanel, plain bool) {
 		}
 		printDomainTable(indicators)
 		fmt.Println()
+	}
+}
+
+// equityPanelHeader picks the right Snapshot price field and title for an asset.
+func equityPanelHeader(p *model.IndicatorPanel) (price float64, plainTitle, fancyTitle string) {
+	switch p.Asset {
+	case "qqq":
+		return p.Snapshot.QQQPrice, "QQQ panel", "QQQ 盘面"
+	case "spy":
+		return p.Snapshot.SPYPrice, "SPY panel", "SPY 盘面"
+	case "gold":
+		return p.Snapshot.GoldPrice, "gold panel", "黄金盘面"
+	case "hs300":
+		return p.Snapshot.HS300Price, "HS300 panel", "沪深 300 盘面"
+	default:
+		// Legacy fallback: pre-A0 panels lacked Asset; prefer SPY+QQQ sum (one of them is 0).
+		return p.Snapshot.SPYPrice + p.Snapshot.QQQPrice, "equity panel", "权益 ETF 盘面"
 	}
 }
 

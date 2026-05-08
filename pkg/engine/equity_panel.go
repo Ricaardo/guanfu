@@ -49,26 +49,30 @@ func BuildEquityPanel(in *EquityPanelInput) *model.IndicatorPanel {
 		date = time.Now().UTC().Format("2006-01-02")
 	}
 
-	panel := &model.IndicatorPanel{
-		Date: date,
-		Snapshot: model.SnapshotData{
-			QQQPrice:     in.Price,
-			SPYPrice:     in.Price,
-			GoldPrice:    in.Gold,
-			DataDate:     date,
-			FearGreed:    in.FearGreed,
-		},
-		Technical:  make(map[string]model.Indicator),
-		Macro:      make(map[string]model.Indicator),
-		Positioning: make(map[string]model.Indicator),
-		Valuation:  make(map[string]model.Indicator),
+	snap := model.SnapshotData{
+		GoldPrice: in.Gold,
+		DataDate:  date,
+		FearGreed: in.FearGreed,
+	}
+	switch in.Asset {
+	case "qqq":
+		snap.QQQPrice = in.Price
+	case "spy":
+		snap.SPYPrice = in.Price
+	case "hs300":
+		snap.HS300Price = in.Price
+	case "gold":
+		snap.GoldPrice = in.Price
 	}
 
-	// Set the correct snapshot price field
-	if in.Asset == "spy" {
-		panel.Snapshot.QQQPrice = 0
-	} else {
-		panel.Snapshot.SPYPrice = 0
+	panel := &model.IndicatorPanel{
+		Asset:       in.Asset,
+		Date:        date,
+		Snapshot:    snap,
+		Technical:   make(map[string]model.Indicator),
+		Macro:       make(map[string]model.Indicator),
+		Positioning: make(map[string]model.Indicator),
+		Valuation:   make(map[string]model.Indicator),
 	}
 
 	// ── Technical domain ──
