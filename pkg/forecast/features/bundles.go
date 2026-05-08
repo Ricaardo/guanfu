@@ -16,7 +16,7 @@ import (
 
 // EquityExtractors returns the bundle for QQQ/SPY (US equities):
 // generic technicals + valuation (CAPE) + rates (DGS10) + USD (DXY)
-// + credit (HY spread) + curve (10Y-2Y).
+// + credit (HY spread) + curve (10Y-2Y) + risk (VIX).
 func EquityExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
 	exts := GenericTechnicalExtractors()
 	for _, ex := range []forecast.FeatureExtractor{
@@ -25,6 +25,7 @@ func EquityExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
 		DXYExtractor(s),
 		HYSpreadExtractor(s),
 		YieldCurveExtractor(s),
+		VIXExtractor(s),
 	} {
 		if ex != nil {
 			exts = append(exts, ex)
