@@ -64,6 +64,40 @@ func TestToolsListIncludesVerdictAndAvoidsFixedIndicatorCount(t *testing.T) {
 	}
 }
 
+// C2: get_stock_forecast must reject empty/missing ticker before any
+// network or store work. Catches dispatch-side validation regressions.
+func TestHandleToolCallGetStockForecastRequiresTicker(t *testing.T) {
+	cases := []string{
+		`{}`,
+		`{"ticker":""}`,
+		`{"ticker":"   "}`,
+	}
+	for _, args := range cases {
+		_, rpcErr := handleToolCall("get_stock_forecast", json.RawMessage(args))
+		if rpcErr == nil {
+			t.Errorf("get_stock_forecast(%s) expected error, got nil", args)
+			continue
+		}
+		if rpcErr.Code != -32602 || !strings.Contains(rpcErr.Message, "ticker") {
+			t.Errorf("get_stock_forecast(%s) unexpected error: %+v", args, rpcErr)
+		}
+	}
+}
+
+// C2: get_stock_forecast reuses the standard top_k floor and horizon range
+// validators. If those checks regress, ticker-bound calls would silently fall
+// through to the build step with bad params.
+func TestHandleToolCallGetStockForecastValidatesParams(t *testing.T) {
+	_, rpcErr := handleToolCall("get_stock_forecast", json.RawMessage(`{"ticker":"AAPL","top_k":1}`))
+	if rpcErr == nil || !strings.Contains(rpcErr.Message, "top_k") {
+		t.Fatalf("expected top_k floor error, got %+v", rpcErr)
+	}
+	_, rpcErr = handleToolCall("get_stock_forecast", json.RawMessage(`{"ticker":"AAPL","horizons":[731]}`))
+	if rpcErr == nil || !strings.Contains(rpcErr.Message, "horizons") {
+		t.Fatalf("expected horizons range error, got %+v", rpcErr)
+	}
+}
+
 // C1: alias names dispatch to the same handler as their get_btc_* counterparts.
 // Without this test, a future refactor can drop an alias case and clients break silently.
 func TestHandleToolCallAliasesDispatchSameAsBTCNames(t *testing.T) {

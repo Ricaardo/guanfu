@@ -43,6 +43,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +54,7 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/history"
 	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/store"
 	"github.com/Ricaardo/guanfu/pkg/version"
 )
 
@@ -137,6 +140,21 @@ var tools = json.RawMessage(`
     "name": "get_btc_forecast",
     "description": "[Deprecated alias of get_forecast] 旧版 BTC 专用名字，向后兼容保留。新代码请用 get_forecast。",
     "inputSchema": {"type": "object", "properties": {"asset": {"type": "string"}, "timeout_seconds": {"type": "integer"}, "horizons": {"type": "array", "items": {"type": "integer"}}, "top_k": {"type": "integer"}, "include_panel": {"type": "boolean"}}}
+  },
+  {
+    "name": "get_stock_forecast",
+    "description": "对任意美股 ticker 跑 kNN 走势推演。自动从 Yahoo 拉日频数据缓存到 PriceStore，使用 USStockExtractors（无 CAPE）做特征。Ticker 不能与核心资产 (btc/qqq/spy/gold/hs300) 或 feature data key (vixy/fred_*/...) 撞名。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ticker": {"type": "string", "description": "美股代码，如 AAPL / MSFT / NVDA"},
+        "days": {"type": "integer", "description": "拉历史天数，默认 3650 (~10y)；Yahoo 上限决定上界"},
+        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数，默认 [30,90,180]"},
+        "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21，最小 5"},
+        "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
+      },
+      "required": ["ticker"]
+    }
   },
   {
     "name": "get_domain",
@@ -345,6 +363,44 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		b, _ := json.MarshalIndent(buildForecastPayload(asset, panel, fc, p.IncludePanel), "", "  ")
 		return string(b), nil
 
+	case "get_stock_forecast":
+		var p struct {
+			Ticker         string `json:"ticker"`
+			Days           int    `json:"days,omitempty"`
+			Horizons       []int  `json:"horizons,omitempty"`
+			TopK           int    `json:"top_k,omitempty"`
+			TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+		}
+		if rpcErr := decodeArgs(args, &p); rpcErr != nil {
+			return "", rpcErr
+		}
+		if strings.TrimSpace(p.Ticker) == "" {
+			return "", &rpcError{Code: -32602, Message: "ticker is required"}
+		}
+		timeout, rpcErr := timeoutFromSeconds(p.TimeoutSeconds)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		opts := forecast.DefaultOptions()
+		if len(p.Horizons) > 0 {
+			opts.Horizons = p.Horizons
+		}
+		if rpcErr := validateForecastHorizons(opts.Horizons); rpcErr != nil {
+			return "", rpcErr
+		}
+		if p.TopK != 0 {
+			if p.TopK < minForecastTopK() {
+				return "", &rpcError{Code: -32602, Message: fmt.Sprintf("top_k must be >= %d", minForecastTopK())}
+			}
+			opts.TopK = p.TopK
+		}
+		fc, err := buildStockForecast(p.Ticker, p.Days, timeout, opts)
+		if err != nil {
+			return "", &rpcError{Code: -32603, Message: "stock forecast failed: " + err.Error()}
+		}
+		b, _ := json.MarshalIndent(fc, "", "  ")
+		return string(b), nil
+
 	case "get_domain":
 		var p struct {
 			Domain         string `json:"domain"`
@@ -476,6 +532,32 @@ func buildForecastPayload(asset string, panel *model.IndicatorPanel, fc *forecas
 		Forecast: fc,
 		Panel:    panel,
 	}
+}
+
+// buildStockForecast pulls a ticker via FetchAndCacheStock (D1)
+// and runs the kNN forecast through USStockExtractors (D2).
+func buildStockForecast(ticker string, days int, timeout time.Duration, opts forecast.Options) (*forecast.Forecast, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	s := &store.PriceStore{}
+	if days <= 0 {
+		days = 3650
+	}
+	raw, err := client.FetchAndCacheStock(ctx, s, ticker, days)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) < 200 {
+		return nil, fmt.Errorf("%s: only %d data points (need >= 200)", ticker, len(raw))
+	}
+	points := make([]forecast.Point, len(raw))
+	for i, p := range raw {
+		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: p.Source}
+	}
+	sort.Slice(points, func(i, j int) bool { return points[i].Date < points[j].Date })
+	opts.Extractors = features.USStockExtractors(s)
+	return forecast.Build(points, opts)
 }
 
 func buildForecast(asset string, timeout time.Duration, opts forecast.Options) (*forecast.Forecast, error) {
