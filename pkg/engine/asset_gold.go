@@ -46,6 +46,15 @@ func (a *GoldAsset) FetchSnapshot(ctx context.Context) (*AssetSnapshot, error) {
 	uup, _ := a.store.Latest("uup")
 	tlt, _ := a.store.Latest("tlt")
 
+	// A3: fall back to FRED trade-weighted USD when UUP ETF data is missing —
+	// keeps the existing "uup" key so BuildEquityPanel's dxy_proxy path still fires.
+	dxy := uup.Close
+	if dxy == 0 {
+		if fredDxy, ok := a.store.Latest("fred_dxy"); ok {
+			dxy = fredDxy.Close
+		}
+	}
+
 	as := &AssetSnapshot{
 		Asset:        "gold",
 		Date:         latest.Date,
@@ -54,11 +63,11 @@ func (a *GoldAsset) FetchSnapshot(ctx context.Context) (*AssetSnapshot, error) {
 		PriceHistory: history,
 		CrossAssetPrices: map[string]float64{
 			"vixy": vixy.Close,
-			"uup":  uup.Close,
+			"uup":  dxy,
 			"tlt":  tlt.Close,
 		},
 		RealYield10Y: 0, // populated if FRED data is available
-		DXY:          uup.Close,
+		DXY:          dxy,
 		VIX:          vixy.Close,
 	}
 
