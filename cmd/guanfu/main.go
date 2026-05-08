@@ -128,7 +128,19 @@ func main() {
 		if len(trailing) > 1 && !strings.HasPrefix(trailing[1], "-") {
 			ticker = strings.ToUpper(trailing[1])
 		}
-		readStock(ticker, *jsonOut, *pretty, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *plain || *noEmoji)
+		readStock(ticker, *jsonOut, *pretty, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		return
+	case "import-stock":
+		if len(trailing) < 2 || strings.HasPrefix(trailing[1], "-") {
+			fmt.Fprintln(os.Stderr, "usage: guanfu import-stock TICKER [DAYS]")
+			os.Exit(1)
+		}
+		ticker := strings.ToUpper(trailing[1])
+		days := 3650
+		if len(trailing) >= 3 {
+			fmt.Sscanf(trailing[2], "%d", &days)
+		}
+		runImportStock(ticker, days, *timeout)
 		return
 	case "market":
 		runMarketOverview(*jsonOut, *pretty, *plain || *noEmoji)
@@ -156,7 +168,7 @@ func main() {
 		// default: BTC panel (existing behavior)
 	default:
 		fmt.Fprintf(os.Stderr, "guanfu: unknown subcommand %q\n", subcmd)
-		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status\n")
+		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status\n")
 		os.Exit(1)
 	}
 
@@ -273,27 +285,52 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 	}
 }
 
-// readStock reads an arbitrary US stock by ticker.
-// Uses PriceStore data if available, else fetches from source on demand.
-// Shows technical panel + forecast if requested.
-func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, plain bool) {
-	key := strings.ToLower(ticker)
+// readStock reads an arbitrary US stock by ticker (D3 + A6).
+//
+// Auto-fetches via Yahoo (D1) when PriceStore has no cached data
+// or the cache is stale (>30h). Builds the equity panel via
+// BuildEquityPanel (A6: technical/macro indicators) and runs the
+// kNN forecast with USStockExtractors (D2).
+func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, plain bool) {
 	s := &store.PriceStore{}
-	raw, err := s.Load(key)
-	if err != nil || len(raw) < 200 {
-		fmt.Fprintf(os.Stderr, "stock %s: no cached data (%d points)\n", ticker, len(raw))
+	if err := client.ValidateStockTicker(s, ticker); err != nil {
+		fmt.Fprintf(os.Stderr, "stock %s: %v\n", ticker, err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	raw, err := client.FetchAndCacheStock(ctx, s, ticker, 3650)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stock %s: fetch failed: %v\n", ticker, err)
+		os.Exit(1)
+	}
+	if len(raw) < 200 {
+		fmt.Fprintf(os.Stderr, "stock %s: only %d data points (need ≥200)\n", ticker, len(raw))
 		os.Exit(1)
 	}
 
 	points := make([]forecast.Point, len(raw))
 	for i, p := range raw {
-		points[i] = forecast.Point{Date: p.Date, Close: p.Close}
+		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: p.Source}
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Date < points[j].Date })
-	if len(points) < 200 {
-		fmt.Fprintf(os.Stderr, "stock %s: only %d data points after dedup\n", ticker, len(points))
-		os.Exit(1)
+
+	// PriceHistory for BuildEquityPanel (newest-first, []float64).
+	history := make([]float64, len(points))
+	for i := range points {
+		history[i] = points[len(points)-1-i].Close
 	}
+	latest := points[len(points)-1]
+
+	panel := engine.BuildEquityPanel(&engine.EquityPanelInput{
+		Asset:        strings.ToLower(ticker),
+		Date:         latest.Date,
+		Price:        latest.Close,
+		PriceAsOf:    latest.Date,
+		PriceHistory: history,
+	})
 
 	horizons, err := forecast.ParseHorizons(forecastHorizonsArg)
 	if err != nil {
@@ -303,41 +340,71 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 	opts := forecast.DefaultOptions()
 	opts.Horizons = horizons
 	opts.TopK = forecastTop
-	opts.Extractors = features.GenericTechnicalExtractors()
+	opts.Extractors = features.USStockExtractors(s)
 
 	fc, err := forecast.Build(points, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "forecast failed for %s: %v\n", ticker, err)
-		// Try with just generic - fewer extractors
 		os.Exit(1)
 	}
 
 	if jsonOut || pretty {
+		out := struct {
+			Panel    *model.IndicatorPanel `json:"panel"`
+			Forecast *forecast.Forecast    `json:"forecast,omitempty"`
+		}{Panel: panel, Forecast: fc}
 		var b []byte
 		if pretty {
-			b, _ = json.MarshalIndent(fc, "", "  ")
+			b, _ = json.MarshalIndent(out, "", "  ")
 		} else {
-			b, _ = json.Marshal(fc)
+			b, _ = json.Marshal(out)
 		}
 		fmt.Println(string(b))
 		return
 	}
 
+	upper := strings.ToUpper(ticker)
 	if !plain {
-		fmt.Printf("观复 · %s  (%s)   价格: $%.2f\n\n", strings.ToUpper(ticker), points[len(points)-1].Date, points[len(points)-1].Close)
+		fmt.Printf("观复 · %s  (%s)   价格: $%.2f\n\n", upper, latest.Date, latest.Close)
 	} else {
-		fmt.Printf("guanfu stock %s (%s)   price: $%.2f\n\n", strings.ToUpper(ticker), points[len(points)-1].Date, points[len(points)-1].Close)
+		fmt.Printf("guanfu stock %s (%s)   price: $%.2f\n\n", upper, latest.Date, latest.Close)
 	}
 
-	// Show current features
-	fmt.Println("当前状态特征：")
-	for _, f := range fc.CurrentFeatures {
-		fmt.Printf("  %-25s value=%-12.4f norm=%+.4f  w=%.2f\n", f.Name, f.Value, f.Normalized, f.Weight)
+	if !forecastOnly {
+		printDomainTable(panel.Technical)
+		fmt.Println()
+		if len(panel.Macro) > 0 {
+			fmt.Println("🌍 Macro 宏观")
+			printDomainTable(panel.Macro)
+			fmt.Println()
+		}
 	}
-	fmt.Println()
 
-	// Show forecast
-	printHumanForecast(fc, plain)
+	if forecastOut || forecastOnly {
+		printHumanForecast(fc, plain)
+	}
+}
+
+// runImportStock implements the import-stock subcommand (D4):
+// triggers a Yahoo full-window fetch and persists to PriceStore.
+func runImportStock(ticker string, days int, timeout time.Duration) {
+	s := &store.PriceStore{}
+	if err := client.ValidateStockTicker(s, ticker); err != nil {
+		fmt.Fprintf(os.Stderr, "import-stock %s: %v\n", ticker, err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	points, err := client.FetchAndCacheStock(ctx, s, ticker, days)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "import-stock %s: %v\n", ticker, err)
+		os.Exit(1)
+	}
+	first, last := points[0].Date, points[len(points)-1].Date
+	fmt.Printf("✓ %s: %d days (%s → %s) saved to %s\n",
+		strings.ToUpper(ticker), len(points), first, last, client.StockKey(ticker))
 }
 
 // runEquityAsset runs the equity flow for QQQ/SPY through the Asset interface.
