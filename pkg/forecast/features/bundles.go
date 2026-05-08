@@ -69,3 +69,26 @@ func HS300Extractors(s *store.PriceStore) []forecast.FeatureExtractor {
 	}
 	return exts
 }
+
+// USStockExtractors returns the bundle for arbitrary US stocks (D2).
+// Same macro context as EquityExtractors but without CAPE — there's
+// no per-name CAPE proxy for an arbitrary single stock, only for
+// the broad indices that EquityExtractors targets.
+//
+// Bundle: generic technicals + DGS10 (rates) + DXY (USD)
+// + HY spread (credit) + 10Y-2Y curve + VIX (risk-off).
+func USStockExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
+	exts := GenericTechnicalExtractors()
+	for _, ex := range []forecast.FeatureExtractor{
+		DGS10Extractor(s),
+		DXYExtractor(s),
+		HYSpreadExtractor(s),
+		YieldCurveExtractor(s),
+		VIXExtractor(s),
+	} {
+		if ex != nil {
+			exts = append(exts, ex)
+		}
+	}
+	return exts
+}
