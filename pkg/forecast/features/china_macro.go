@@ -82,12 +82,6 @@ func NorthboundExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	if err != nil || len(pts) < 60 {
 		return nil
 	}
-	byDate := makeDateMap(pts)
-	// Build prefix sum for fast 30d window
-	dateOrder := make([]string, len(pts))
-	for i, p := range pts {
-		dateOrder[i] = p.Date
-	}
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
 		// Sum past 30 calendar days of northbound flow
 		targetDate := points[i].Date
@@ -100,7 +94,6 @@ func NorthboundExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 			}
 		}
 		if count < 5 {
-			_ = byDate
 			return nil, false
 		}
 		// Range typically -2000 to +2000 亿

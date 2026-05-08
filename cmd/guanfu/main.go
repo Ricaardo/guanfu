@@ -128,7 +128,7 @@ func main() {
 		if len(trailing) > 1 && !strings.HasPrefix(trailing[1], "-") {
 			ticker = strings.ToUpper(trailing[1])
 		}
-		readStock(ticker, *jsonOut, *pretty, *forecastOut, *forecastOnly, *verdict, *verdictOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		readStock(ticker, *jsonOut, *pretty, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *plain || *noEmoji)
 		return
 	case "market":
 		runMarketOverview(*jsonOut, *pretty, *plain || *noEmoji)
@@ -276,7 +276,7 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 // readStock reads an arbitrary US stock by ticker.
 // Uses PriceStore data if available, else fetches from source on demand.
 // Shows technical panel + forecast if requested.
-func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly, verdict, verdictOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, plain bool) {
+func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, plain bool) {
 	key := strings.ToLower(ticker)
 	s := &store.PriceStore{}
 	raw, err := s.Load(key)
@@ -313,15 +313,11 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly, verdic
 	}
 
 	if jsonOut || pretty {
-		out := fc
-		if !forecastOnly {
-			out = fc
-		}
 		var b []byte
 		if pretty {
-			b, _ = json.MarshalIndent(out, "", "  ")
+			b, _ = json.MarshalIndent(fc, "", "  ")
 		} else {
-			b, _ = json.Marshal(out)
+			b, _ = json.Marshal(fc)
 		}
 		fmt.Println(string(b))
 		return

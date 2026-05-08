@@ -132,7 +132,7 @@ func extractYear(points []forecast.Point, idx int) int {
 				y = y*10 + int(points[idx].Date[i]-'0')
 			}
 		}
-		if y >= 2009 && y <= 2100 {
+		if y >= 1900 && y <= 2100 {
 			return y
 		}
 	}
