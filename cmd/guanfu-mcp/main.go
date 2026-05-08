@@ -1,14 +1,16 @@
 // guanfu-mcp — 观复 MCP Server
 //
 // 通过 stdio 提供 MCP 协议接口，让 Claude Desktop / Cursor / 任何 MCP 客户端
-// 直接调用 guanfu 引擎获取 BTC 盘面数据，无需 Bash 权限。
+// 直接调用 guanfu 引擎获取多资产盘面数据，无需 Bash 权限。
 //
-// 提供的 Tools:
-//   get_btc_panel       — 完整 8 域盘面 (JSON)
-//   get_btc_verdict     — 结构化多域读盘 (JSON)
-//   get_btc_forecast    — 历史相似盘面走势推演 (JSON)
-//   get_domain          — 单个域 (cycle/valuation/network/...)
-//   get_indicator       — 单个指标 (ahr999, hash_ribbons, ...)
+// 提供的 Tools (传 asset=btc/qqq/spy/gold/hs300 切资产):
+//   get_panel / get_btc_panel          — 完整域盘面 (JSON)
+//   get_verdict / get_btc_verdict      — 结构化多域读盘 (JSON)
+//   get_forecast / get_btc_forecast    — 历史相似盘面走势推演 (JSON)
+//   get_domain                         — 单个域 (cycle/valuation/network/...)
+//   get_indicator                      — 单个指标 (ahr999, rsi_14, vix_level, ...)
+//
+// 旧的 get_btc_* 名字向后兼容保留 (alias 同 handler)；新代码用 get_*。
 //
 // 提供的 Resources:
 //   guanfu://knowledge/skill.md — SKILL.md 知识库
@@ -85,41 +87,56 @@ type toolDef struct {
 var tools = json.RawMessage(`
 [
   {
-    "name": "get_btc_panel",
-    "description": "获取 BTC 完整 8 域 40+ 指标盘面。包含周期/估值/网络/杠杆/宏观/资金流/技术/跨资产。每个指标含原始值、历史分位(q)、解读标签、数据源。",
+    "name": "get_panel",
+    "description": "获取完整指标盘面（多资产，传 asset 切资产）。BTC 走 8 域 40+ 指标；股票/ETF/黄金/沪深300 走 6 域。每个指标含原始值、历史分位(q)、解读标签、数据源。",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
+        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       }
     }
   },
   {
-    "name": "get_btc_verdict",
-    "description": "获取 BTC 结构化多域读盘。基于完整盘面输出域级一致性、覆盖率、风险状态、顶/底接近度、证据和失效条件；不输出交易指令或仓位指令。",
+    "name": "get_verdict",
+    "description": "获取结构化多域读盘（多资产，传 asset 切资产）。基于盘面输出域级一致性、覆盖率、风险状态、顶/底接近度、证据和失效条件；不输出交易指令或仓位指令。",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
+        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
     }
   },
   {
-    "name": "get_btc_forecast",
-    "description": "获取 BTC 历史相似盘面走势推演。输出 30/90/180 天等周期的前向收益分布、情景概率、相似样本和覆盖率；不是确定性价格预测，也不输出交易指令。",
+    "name": "get_forecast",
+    "description": "获取历史相似盘面走势推演（多资产，传 asset 切资产）。输出 30/90/180 天等周期的前向收益分布、情景概率、相似样本和覆盖率；不是确定性价格预测，也不输出交易指令。",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
+        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
         "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数，默认 [30,90,180]"},
         "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
     }
+  },
+  {
+    "name": "get_btc_panel",
+    "description": "[Deprecated alias of get_panel] 旧版 BTC 专用名字，向后兼容保留。新代码请用 get_panel。",
+    "inputSchema": {"type": "object", "properties": {"asset": {"type": "string"}, "timeout_seconds": {"type": "integer"}}}
+  },
+  {
+    "name": "get_btc_verdict",
+    "description": "[Deprecated alias of get_verdict] 旧版 BTC 专用名字，向后兼容保留。新代码请用 get_verdict。",
+    "inputSchema": {"type": "object", "properties": {"asset": {"type": "string"}, "timeout_seconds": {"type": "integer"}, "include_panel": {"type": "boolean"}}}
+  },
+  {
+    "name": "get_btc_forecast",
+    "description": "[Deprecated alias of get_forecast] 旧版 BTC 专用名字，向后兼容保留。新代码请用 get_forecast。",
+    "inputSchema": {"type": "object", "properties": {"asset": {"type": "string"}, "timeout_seconds": {"type": "integer"}, "horizons": {"type": "array", "items": {"type": "integer"}}, "top_k": {"type": "integer"}, "include_panel": {"type": "boolean"}}}
   },
   {
     "name": "get_domain",
@@ -268,7 +285,7 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 	}
 
 	switch name {
-	case "get_btc_panel":
+	case "get_panel", "get_btc_panel":
 		timeout, rpcErr := timeoutFromArgs(args)
 		if rpcErr != nil {
 			return "", rpcErr
@@ -277,7 +294,7 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		b, _ := json.MarshalIndent(panel, "", "  ")
 		return string(b), nil
 
-	case "get_btc_verdict":
+	case "get_verdict", "get_btc_verdict":
 		var p struct {
 			TimeoutSeconds int  `json:"timeout_seconds,omitempty"`
 			IncludePanel   bool `json:"include_panel,omitempty"`
@@ -293,7 +310,7 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		b, _ := json.MarshalIndent(buildVerdictPayload(asset, panel, p.IncludePanel), "", "  ")
 		return string(b), nil
 
-	case "get_btc_forecast":
+	case "get_forecast", "get_btc_forecast":
 		var p struct {
 			TimeoutSeconds int   `json:"timeout_seconds,omitempty"`
 			Horizons       []int `json:"horizons,omitempty"`

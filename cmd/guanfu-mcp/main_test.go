@@ -50,13 +50,57 @@ func TestToolsListIncludesVerdictAndAvoidsFixedIndicatorCount(t *testing.T) {
 		t.Fatalf("marshal tools/list response: %v", err)
 	}
 	body := string(b)
-	for _, want := range []string{"get_btc_verdict", "get_btc_forecast"} {
+	// Both new (preferred) and old (deprecated alias) tool names must be discoverable.
+	for _, want := range []string{
+		"get_panel", "get_verdict", "get_forecast",
+		"get_btc_panel", "get_btc_verdict", "get_btc_forecast",
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected %s in tools/list: %s", want, body)
 		}
 	}
 	if strings.Contains(body, "42 个指标") || strings.Contains(body, "44 指标") {
 		t.Fatalf("tools/list should not advertise stale fixed indicator counts: %s", body)
+	}
+}
+
+// C1: alias names dispatch to the same handler as their get_btc_* counterparts.
+// Without this test, a future refactor can drop an alias case and clients break silently.
+func TestHandleToolCallAliasesDispatchSameAsBTCNames(t *testing.T) {
+	setCachedPanelForTest(t, &model.IndicatorPanel{
+		Asset:       "btc",
+		Date:        "2026-05-09",
+		Cycle:       map[string]model.Indicator{"mayer_multiple": {Value: 0.7}},
+		Valuation:   map[string]model.Indicator{},
+		Network:     map[string]model.Indicator{},
+		Positioning: map[string]model.Indicator{},
+		Macro:       map[string]model.Indicator{},
+		Flow:        map[string]model.Indicator{},
+		Technical:   map[string]model.Indicator{},
+		CrossAsset:  map[string]model.Indicator{},
+	})
+
+	cases := []struct {
+		alias, legacy, expectKey string
+	}{
+		{"get_panel", "get_btc_panel", `"date"`},
+		{"get_verdict", "get_btc_verdict", `"net_direction"`},
+	}
+	for _, c := range cases {
+		aliasOut, rpcErr := handleToolCall(c.alias, json.RawMessage(`{}`))
+		if rpcErr != nil {
+			t.Fatalf("%s returned error: %+v", c.alias, rpcErr)
+		}
+		legacyOut, rpcErr := handleToolCall(c.legacy, json.RawMessage(`{}`))
+		if rpcErr != nil {
+			t.Fatalf("%s returned error: %+v", c.legacy, rpcErr)
+		}
+		if !strings.Contains(aliasOut, c.expectKey) {
+			t.Fatalf("%s output missing %s: %s", c.alias, c.expectKey, aliasOut)
+		}
+		if aliasOut != legacyOut {
+			t.Fatalf("%s and %s diverged:\nalias=%s\nlegacy=%s", c.alias, c.legacy, aliasOut, legacyOut)
+		}
 	}
 }
 

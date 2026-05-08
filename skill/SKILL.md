@@ -35,6 +35,63 @@ guanfu backtest all       # 全资产回测 + 对比报告
 guanfu status             # PriceStore数据状态诊断
 ```
 
+## MCP 工具 (`guanfu-mcp`)
+
+通过 stdio 暴露 MCP 协议接口；Claude Desktop / Cursor / 任何 MCP 客户端可直调，无需 Bash 权限。所有工具支持 `asset` 参数切换 BTC/QQQ/SPY/Gold/HS300。
+
+| 工具 | 说明 | 关键参数 | 输出 |
+|---|---|---|---|
+| `get_panel` | 完整盘面（多资产）。BTC = 8 域 40+ 指标；权益/黄金/HS300 = 6 域 | `asset` (默认 btc), `timeout_seconds` (默认 90) | `IndicatorPanel` JSON：`asset` / `date` / `snapshot` / 8 个 domain map / `source_health` |
+| `get_verdict` | 结构化多域读盘 | `asset`, `timeout_seconds`, `include_panel` (默认 false) | `Verdict` JSON：`net_direction` / `regime` / `domains` / `top_proximity` / `bottom_proximity` |
+| `get_forecast` | kNN 历史相似走势推演 | `asset`, `horizons` (默认 `[30,90,180]`), `top_k` (默认 21, 最小 5), `include_panel` | `Forecast` JSON：每个 horizon 的 PIT/dir-hit/quantiles + 邻居样本 |
+| `get_domain` | 单个域盘面 | `domain` (cycle/valuation/network/positioning/macro/flow/technical/cross_asset), `asset` | 该 domain 的 `map[string]Indicator` |
+| `get_indicator` | 单个指标 | `name` (如 ahr999, rsi_14, vix_level), `asset` | 单个 `Indicator` JSON |
+
+### 旧名向后兼容
+
+`get_btc_panel` / `get_btc_verdict` / `get_btc_forecast` 是 deprecated alias，dispatch 同新名相同 handler。新代码用 `get_panel` 等不带 `_btc_` 的名字；旧客户端不需迁移即可继续工作。
+
+### Resources
+
+| URI | 内容 |
+|---|---|
+| `guanfu://knowledge/skill.md` | 本文件（用于 AI 自取上下文） |
+| `guanfu://panel/latest` | 缓存最新 BTC 盘面 JSON |
+| `guanfu://verdict/latest` | 缓存盘面对应的 verdict |
+| `guanfu://forecast/latest` | 缓存盘面对应的 forecast |
+
+### 调用示例
+
+```jsonc
+// tools/call get_panel for QQQ
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+  "name":"get_panel",
+  "arguments":{"asset":"qqq","timeout_seconds":60}
+}}
+
+// tools/call get_forecast for HS300, custom horizons
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+  "name":"get_forecast",
+  "arguments":{"asset":"hs300","horizons":[30,90],"top_k":15}
+}}
+```
+
+### Claude Desktop / Cursor 配置
+
+```json
+{
+  "mcpServers": {
+    "guanfu": {
+      "command": "/path/to/guanfu-mcp",
+      "env": {
+        "GUANFU_HISTORY_DB": "/path/to/history.db",
+        "GUANFU_SKILL_PATH": "/path/to/skill/SKILL.md"
+      }
+    }
+  }
+}
+```
+
 ## 数据架构 (PriceStore)
 
 26 个数据集，~/.guanfu/prices/ JSON 日频存档：
