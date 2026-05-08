@@ -59,6 +59,23 @@ func (a *HS300Asset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error
 		if as.CrossAssetPrices != nil {
 			in.CNYUSD = as.CrossAssetPrices["cnyusd"]
 		}
+		// A4: pre-resolve China macro from PriceStore (zero values mean missing →
+		// dashboard writes "待接入" placeholder).
+		if pt, ok := a.store.Latest("hs300_cny"); ok && in.CNYUSD == 0 {
+			in.CNYUSD = pt.Close
+		}
+		if pt, ok := a.store.Latest("hs300_pmi"); ok {
+			in.PMI = pt.Close
+		}
+		if pt, ok := a.store.Latest("hs300_m2"); ok {
+			in.M2YoY = pt.Close
+		}
+		if pt, ok := a.store.Latest("hs300_lpr"); ok {
+			in.LPR1Y = pt.Close
+		}
+		if pt, ok := a.store.Latest("hs300_northbound"); ok {
+			in.Northbound = pt.Close
+		}
 		return BuildHS300Dashboard(in), nil
 	}
 

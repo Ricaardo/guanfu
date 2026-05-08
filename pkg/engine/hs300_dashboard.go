@@ -27,8 +27,15 @@ type HS300DashboardInput struct {
 	PriceHistory []float64 // newest-first, min 200 days
 	PE           float64   // from Futu snapshot or AkShare
 	PB           float64
-	CNYUSD       float64   // CNY/USD rate proxy (inverted UUP or direct)
+	CNYUSD       float64   // CNY/USD rate (e.g. 7.10)
 	Volume       []float64 // optional
+
+	// China macro (A4): pre-resolved by asset_hs300.go BuildPanel from PriceStore.
+	// Zero values mean missing → dashboard writes "待接入" placeholder.
+	PMI        float64 // China manufacturing PMI level (>50 = expansion)
+	M2YoY      float64 // China M2 YoY growth (%)
+	LPR1Y      float64 // 1-year LPR rate (%)
+	Northbound float64 // 30d cumulative northbound net inflow (亿 RMB)
 }
 
 // BuildHS300Dashboard constructs the full CSI300 panel.
@@ -136,6 +143,58 @@ func BuildHS300Dashboard(in *HS300DashboardInput) *model.IndicatorPanel {
 	} else {
 		panel.Macro["cny_usd"] = model.Indicator{
 			Missing: true, Label: "待接入 (需CNY/USD数据源)",
+			Source: "待接入",
+		}
+	}
+
+	if in.PMI > 0 {
+		panel.Macro["pmi"] = model.Indicator{
+			Value: math.Round(in.PMI*100) / 100,
+			Label: hs300PMILabel(in.PMI),
+			Source: "price_store:hs300_pmi",
+		}
+	} else {
+		panel.Macro["pmi"] = model.Indicator{
+			Missing: true, Label: "待接入 (需 hs300_pmi 数据)",
+			Source: "待接入",
+		}
+	}
+
+	if in.M2YoY > 0 {
+		panel.Macro["m2_yoy"] = model.Indicator{
+			Value: math.Round(in.M2YoY*100) / 100,
+			Label: hs300M2Label(in.M2YoY),
+			Source: "price_store:hs300_m2",
+		}
+	} else {
+		panel.Macro["m2_yoy"] = model.Indicator{
+			Missing: true, Label: "待接入 (需 hs300_m2 数据)",
+			Source: "待接入",
+		}
+	}
+
+	if in.LPR1Y > 0 {
+		panel.Macro["lpr_1y"] = model.Indicator{
+			Value: math.Round(in.LPR1Y*100) / 100,
+			Label: hs300LPRLabel(in.LPR1Y),
+			Source: "price_store:hs300_lpr",
+		}
+	} else {
+		panel.Macro["lpr_1y"] = model.Indicator{
+			Missing: true, Label: "待接入 (需 hs300_lpr 数据)",
+			Source: "待接入",
+		}
+	}
+
+	if in.Northbound != 0 {
+		panel.Macro["northbound_30d"] = model.Indicator{
+			Value: math.Round(in.Northbound*10) / 10,
+			Label: hs300NorthboundLabel(in.Northbound),
+			Source: "price_store:hs300_northbound",
+		}
+	} else {
+		panel.Macro["northbound_30d"] = model.Indicator{
+			Missing: true, Label: "待接入 (需 hs300_northbound 数据)",
 			Source: "待接入",
 		}
 	}
@@ -290,6 +349,60 @@ func hs300CNYLabel(dev, rate float64) string {
 		return fmt.Sprintf("CNY升值 %.2f (A股利好)", rate)
 	default:
 		return fmt.Sprintf("CNY稳定 %.2f", rate)
+	}
+}
+
+func hs300PMILabel(pmi float64) string {
+	switch {
+	case pmi >= 52:
+		return fmt.Sprintf("PMI %.1f 强扩张", pmi)
+	case pmi >= 50:
+		return fmt.Sprintf("PMI %.1f 弱扩张", pmi)
+	case pmi >= 48:
+		return fmt.Sprintf("PMI %.1f 弱收缩", pmi)
+	default:
+		return fmt.Sprintf("PMI %.1f 强收缩", pmi)
+	}
+}
+
+func hs300M2Label(m2 float64) string {
+	switch {
+	case m2 >= 12:
+		return fmt.Sprintf("M2 %.1f%% 强宽松", m2)
+	case m2 >= 9:
+		return fmt.Sprintf("M2 %.1f%% 中性偏宽", m2)
+	case m2 >= 7:
+		return fmt.Sprintf("M2 %.1f%% 中性", m2)
+	default:
+		return fmt.Sprintf("M2 %.1f%% 偏紧", m2)
+	}
+}
+
+func hs300LPRLabel(lpr float64) string {
+	switch {
+	case lpr <= 3.2:
+		return fmt.Sprintf("LPR %.2f%% 极宽松", lpr)
+	case lpr <= 3.6:
+		return fmt.Sprintf("LPR %.2f%% 偏宽松", lpr)
+	case lpr <= 4.0:
+		return fmt.Sprintf("LPR %.2f%% 中性", lpr)
+	default:
+		return fmt.Sprintf("LPR %.2f%% 偏紧", lpr)
+	}
+}
+
+func hs300NorthboundLabel(flow float64) string {
+	switch {
+	case flow >= 500:
+		return fmt.Sprintf("北向 +%.0f 亿 强流入", flow)
+	case flow >= 100:
+		return fmt.Sprintf("北向 +%.0f 亿 流入", flow)
+	case flow >= -100:
+		return fmt.Sprintf("北向 %+.0f 亿 中性", flow)
+	case flow >= -500:
+		return fmt.Sprintf("北向 %.0f 亿 流出", flow)
+	default:
+		return fmt.Sprintf("北向 %.0f 亿 强流出", flow)
 	}
 }
 

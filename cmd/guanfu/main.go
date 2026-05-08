@@ -737,6 +737,8 @@ func formatValue(key string, v float64) string {
 		return fmt.Sprintf("%+7.2f%%", v)
 	case strings.Contains(key, "days_"):
 		return fmt.Sprintf("%7.0f", v)
+	case key == "cny_usd":
+		return fmt.Sprintf("%7.4f", v)
 	case strings.Contains(key, "_usd"):
 		return fmt.Sprintf("$%.2fM", v/1e6)
 	case strings.Contains(key, "ratio") || strings.Contains(key, "multiple") || strings.Contains(key, "ahr") || strings.Contains(key, "nupl") || strings.Contains(key, "skew"):
