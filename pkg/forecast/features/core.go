@@ -36,6 +36,22 @@ func CoreExtractors() []forecast.FeatureExtractor {
 	}
 }
 
+// GenericTechnicalExtractors returns the asset-agnostic price features that
+// work for any series with 200+ days of history. Excludes BTC-only quirks
+// (AHR999 fair-price, halving cycle, 200-week SMA — designed for BTC's
+// 13-year secular trend).
+func GenericTechnicalExtractors() []forecast.FeatureExtractor {
+	return []forecast.FeatureExtractor{
+		Return30d,
+		Return90d,
+		Return180d,
+		Drawdown90d,
+		MayerMultiple, // price / 200d SMA — generic trend extension proxy
+		RealizedVol30d,
+		RSI14,
+	}
+}
+
 func Return30d(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
 	r, ok := returnOver(points, i, 30)
 	if !ok {

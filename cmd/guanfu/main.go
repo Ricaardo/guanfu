@@ -32,6 +32,7 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/history"
+	"github.com/Ricaardo/guanfu/pkg/store"
 	"github.com/Ricaardo/guanfu/pkg/model"
 	"github.com/Ricaardo/guanfu/pkg/version"
 )
@@ -53,23 +54,6 @@ var domainNames = []struct {
 }
 
 func main() {
-	// Subcommand detection: first positional arg before any flags.
-	// For "backtest <asset>", captures the second positional arg as backtestAsset.
-	subcmd := ""
-	backtestAsset := "btc"
-	posArgs := []string{}
-	for _, arg := range os.Args[1:] {
-		if !strings.HasPrefix(arg, "-") {
-			posArgs = append(posArgs, arg)
-		}
-	}
-	if len(posArgs) > 0 {
-		subcmd = posArgs[0]
-	}
-	if subcmd == "backtest" && len(posArgs) > 1 {
-		backtestAsset = posArgs[1]
-	}
-
 	jsonOut := flag.Bool("json", false, "JSON 输出")
 	pretty := flag.Bool("pretty", false, "pretty JSON 输出")
 	verdict := flag.Bool("verdict", false, "输出综合判断（牛熊/顶底/读盘标签）")
@@ -88,10 +72,63 @@ func main() {
 	showVersion := flag.Bool("version", false, "打印版本并退出")
 	flag.Parse()
 
+	// Subcommand detection from trailing (non-flag) args.
+	// Supports both "guanfu qqq --forecast" and "guanfu --forecast qqq".
+	trailing := flag.Args()
+	subcmd := ""
+	backtestAsset := "btc"
+	if len(trailing) > 0 {
+		subcmd = trailing[0]
+		if subcmd == "backtest" && len(trailing) > 1 {
+			backtestAsset = trailing[1]
+		}
+	}
+
+	// Re-parse trailing flags that came after the subcommand
+	// (flag.Parse stops at first non-flag arg, so these are unparsed).
+	if len(trailing) > 1 {
+		for i := 1; i < len(trailing); i++ {
+			arg := trailing[i]
+			switch {
+			case arg == "--forecast" || arg == "-forecast":
+				*forecastOut = true
+			case arg == "--forecast-only" || arg == "-forecast-only":
+				*forecastOnly = true
+			case arg == "--forecast-path" || arg == "-forecast-path":
+				*forecastPath = true
+			case arg == "--verdict" || arg == "-verdict":
+				*verdict = true
+			case arg == "--verdict-only" || arg == "-verdict-only":
+				*verdictOnly = true
+			case arg == "--json" || arg == "-json":
+				*jsonOut = true
+			case arg == "--pretty" || arg == "-pretty":
+				*pretty = true
+			case arg == "--plain" || arg == "-plain":
+				*plain = true
+			case arg == "--no-emoji" || arg == "-no-emoji":
+				*noEmoji = true
+			case strings.HasPrefix(arg, "--domain="):
+				*domainFilter = strings.TrimPrefix(arg, "--domain=")
+			case strings.HasPrefix(arg, "-domain="):
+				*domainFilter = strings.TrimPrefix(arg, "-domain=")
+			case strings.HasPrefix(arg, "--forecast-top="):
+				fmt.Sscanf(strings.TrimPrefix(arg, "--forecast-top="), "%d", forecastTop)
+			}
+		}
+	}
+
 	// Route subcommands
 	switch subcmd {
 	case "qqq", "spy", "gold":
 		runEquityAsset(subcmd, *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		return
+	case "stock":
+		ticker := "AAPL"
+		if len(trailing) > 1 && !strings.HasPrefix(trailing[1], "-") {
+			ticker = strings.ToUpper(trailing[1])
+		}
+		readStock(ticker, *jsonOut, *pretty, *forecastOut, *forecastOnly, *verdict, *verdictOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
 		return
 	case "market":
 		runMarketOverview(*jsonOut, *pretty, *plain || *noEmoji)
@@ -234,6 +271,77 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 	if forecastPath && fc != nil {
 		fmt.Println(forecast.BuildPathProjection(fc, 180).ASCIIFan(70))
 	}
+}
+
+// readStock reads an arbitrary US stock by ticker.
+// Uses PriceStore data if available, else fetches from source on demand.
+// Shows technical panel + forecast if requested.
+func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly, verdict, verdictOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, plain bool) {
+	key := strings.ToLower(ticker)
+	s := &store.PriceStore{}
+	raw, err := s.Load(key)
+	if err != nil || len(raw) < 200 {
+		fmt.Fprintf(os.Stderr, "stock %s: no cached data (%d points)\n", ticker, len(raw))
+		os.Exit(1)
+	}
+
+	points := make([]forecast.Point, len(raw))
+	for i, p := range raw {
+		points[i] = forecast.Point{Date: p.Date, Close: p.Close}
+	}
+	sort.Slice(points, func(i, j int) bool { return points[i].Date < points[j].Date })
+	if len(points) < 200 {
+		fmt.Fprintf(os.Stderr, "stock %s: only %d data points after dedup\n", ticker, len(points))
+		os.Exit(1)
+	}
+
+	horizons, err := forecast.ParseHorizons(forecastHorizonsArg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse horizons: %v\n", err)
+		os.Exit(1)
+	}
+	opts := forecast.DefaultOptions()
+	opts.Horizons = horizons
+	opts.TopK = forecastTop
+	opts.Extractors = features.GenericTechnicalExtractors()
+
+	fc, err := forecast.Build(points, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "forecast failed for %s: %v\n", ticker, err)
+		// Try with just generic - fewer extractors
+		os.Exit(1)
+	}
+
+	if jsonOut || pretty {
+		out := fc
+		if !forecastOnly {
+			out = fc
+		}
+		var b []byte
+		if pretty {
+			b, _ = json.MarshalIndent(out, "", "  ")
+		} else {
+			b, _ = json.Marshal(out)
+		}
+		fmt.Println(string(b))
+		return
+	}
+
+	if !plain {
+		fmt.Printf("观复 · %s  (%s)   价格: $%.2f\n\n", strings.ToUpper(ticker), points[len(points)-1].Date, points[len(points)-1].Close)
+	} else {
+		fmt.Printf("guanfu stock %s (%s)   price: $%.2f\n\n", strings.ToUpper(ticker), points[len(points)-1].Date, points[len(points)-1].Close)
+	}
+
+	// Show current features
+	fmt.Println("当前状态特征：")
+	for _, f := range fc.CurrentFeatures {
+		fmt.Printf("  %-25s value=%-12.4f norm=%+.4f  w=%.2f\n", f.Name, f.Value, f.Normalized, f.Weight)
+	}
+	fmt.Println()
+
+	// Show forecast
+	printHumanForecast(fc, plain)
 }
 
 // runEquityAsset runs the equity flow for QQQ/SPY through the Asset interface.

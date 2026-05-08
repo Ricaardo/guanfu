@@ -24,7 +24,9 @@ func CAPEExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
 		v := lookupDate(capePts, capeByDate, points[i].Date)
-		if v <= 0 {
+		// Sanity bound: real CAPE has been 5-50 since 1871. Anything outside
+		// signals corrupted source data — drop the feature rather than feed garbage.
+		if v < 5 || v > 80 {
 			return nil, false
 		}
 		// Log-normalize: log(CAPE/20) / 0.6
@@ -87,6 +89,173 @@ func DXYExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 			Name: "dxy_30d", Value: math.Round((now/past-1)*10000) / 100,
 			Normalized: math.Round(clipE(-chg, 3)*1000) / 1000,
 			Weight: 0.45, Note: "USD 30d trend (inverted)",
+		}}, true
+	}
+}
+
+// ─── Equity macro: credit + curve ───────────────────────
+
+// HYSpreadExtractor returns the credit spread 30d change (inverted).
+// Uses BAA10Y (Moody's BAA - 10Y Treasury, 1986+) for long history,
+// with ICE BofA HY OAS overlay (fred_hy_spread, 2023+) when available.
+func HYSpreadExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	hyPts, _ := s.Load("fred_hy_spread")
+	baaPts, _ := s.Load("baa10y")
+	if len(baaPts) < 60 && len(hyPts) < 60 {
+		return nil
+	}
+	var hyByDate map[string]float64
+	if len(hyPts) >= 60 {
+		hyByDate = makeDateMap(hyPts)
+	}
+	baaByDate := makeDateMap(baaPts)
+	minHYDate := ""
+	if len(hyPts) > 0 {
+		minHYDate = hyPts[0].Date
+	}
+
+	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		if i < 30 {
+			return nil, false
+		}
+		target := points[i].Date
+		pastTarget := points[i-30].Date
+
+		// Prefer HY OAS if it covers this date
+		var now, past float64
+		label := "BAA10Y spread 30d change (inverted)"
+		normalizer := 1.5
+		if minHYDate != "" && target >= minHYDate {
+			now = lookupDate(hyPts, hyByDate, target)
+			past = lookupDate(hyPts, hyByDate, pastTarget)
+			label = "HY spread 30d change (inverted)"
+			normalizer = 2.0
+		}
+		if now <= 0 || past <= 0 {
+			now = lookupDate(baaPts, baaByDate, target)
+			past = lookupDate(baaPts, baaByDate, pastTarget)
+		}
+		if now <= 0 || past <= 0 {
+			return nil, false
+		}
+		chg := -(now - past) / normalizer
+		return []forecast.FeatureValue{{
+			Name: "hy_spread_30d", Value: math.Round((now-past)*100) / 100,
+			Normalized: math.Round(clipE(chg, 3)*1000) / 1000,
+			Weight:     0.55, Note: label,
+		}}, true
+	}
+}
+
+// YieldCurveExtractor returns the 10Y-2Y spread level. Negative = inversion.
+func YieldCurveExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	pts, err := s.Load("fred_yield_curve")
+	if err != nil || len(pts) < 60 {
+		return nil
+	}
+	byDate := makeDateMap(pts)
+	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		v := lookupDate(pts, byDate, points[i].Date)
+		if v == 0 {
+			return nil, false
+		}
+		// Normalize around 0.5 with ±2% range
+		return []forecast.FeatureValue{{
+			Name: "yield_curve", Value: math.Round(v*100) / 100,
+			Normalized: math.Round(clipE(v/2.0, 3)*1000) / 1000,
+			Weight:     0.45, Note: "10Y-2Y Treasury spread",
+		}}, true
+	}
+}
+
+// ─── Gold macro ────────────────────────────────────────
+
+// RealYield10YExtractor returns DFII10 (10Y TIPS real yield) level.
+// Real yield rising = bearish gold; falling = bullish gold.
+func RealYield10YExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	pts, err := s.Load("fred_dfii10")
+	if err != nil || len(pts) < 60 {
+		return nil
+	}
+	byDate := makeDateMap(pts)
+	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		v := lookupDate(pts, byDate, points[i].Date)
+		if v == 0 {
+			return nil, false
+		}
+		// Range typically -1.5 to +2.5; center 0.5
+		return []forecast.FeatureValue{{
+			Name: "real_yield_10y", Value: math.Round(v*100) / 100,
+			Normalized: math.Round(clipE((v-0.5)/2.0, 3)*1000) / 1000,
+			Weight:     0.65, Note: "10Y TIPS real yield",
+		}}, true
+	}
+}
+
+// BreakevenExtractor returns 10Y breakeven inflation expectations.
+// Higher breakeven = inflation hedge bid for gold.
+func BreakevenExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	pts, err := s.Load("fred_breakeven")
+	if err != nil || len(pts) < 60 {
+		return nil
+	}
+	byDate := makeDateMap(pts)
+	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		v := lookupDate(pts, byDate, points[i].Date)
+		if v == 0 {
+			return nil, false
+		}
+		// Center around 2.2%, range 1-3.5
+		return []forecast.FeatureValue{{
+			Name: "breakeven_10y", Value: math.Round(v*100) / 100,
+			Normalized: math.Round(clipE((v-2.2)/1.5, 3)*1000) / 1000,
+			Weight:     0.45, Note: "10Y breakeven inflation",
+		}}, true
+	}
+}
+
+// GoldCOTExtractor returns Managed Money net long contracts in gold futures.
+// Extreme net long = crowded; extreme net short = washout.
+func GoldCOTExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	pts, err := s.Load("gold_cot")
+	if err != nil || len(pts) < 60 {
+		return nil
+	}
+	byDate := makeDateMap(pts)
+	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		v := lookupDate(pts, byDate, points[i].Date)
+		if v == 0 {
+			return nil, false
+		}
+		// Typical 0-300k contracts; normalize against 150k
+		return []forecast.FeatureValue{{
+			Name: "gold_cot_net", Value: math.Round(v),
+			Normalized: math.Round(clipE((v-150000)/100000, 3)*1000) / 1000,
+			Weight:     0.40, Note: "Gold COT managed-money net long",
+		}}, true
+	}
+}
+
+// ─── Generic risk: VIX ─────────────────────────────────
+
+// VIXExtractor returns the VIX level via VIXY ETF proxy.
+// VIX > 30 = risk-off (benefits gold, hurts equities).
+// VIX < 15 = complacency (hurts gold, benefits equities).
+func VIXExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	pts, err := s.Load("vixy")
+	if err != nil || len(pts) < 60 {
+		return nil
+	}
+	byDate := makeDateMap(pts)
+	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		v := lookupDate(pts, byDate, points[i].Date)
+		if v == 0 {
+			return nil, false
+		}
+		return []forecast.FeatureValue{{
+			Name: "vixy_level", Value: math.Round(v*100) / 100,
+			Normalized: math.Round(clipE((v-20)/15, 3)*1000) / 1000,
+			Weight:     0.55, Note: "VIX proxy level (VIXY ETF)",
 		}}, true
 	}
 }

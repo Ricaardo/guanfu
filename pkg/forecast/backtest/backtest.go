@@ -104,7 +104,7 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 			hm.CRPSSum += crps
 
 			// Year breakdown
-			year := 2020 // simplified — extract from points date
+			year := extractYear(points, idx)
 			ym := r.ByYear[year]
 			if ym == nil {
 				ym = &YearMetrics{Year: year}
@@ -117,6 +117,26 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 	}
 
 	return r, nil
+}
+
+// extractYear parses the year from a point's date string "2006-01-02".
+func extractYear(points []forecast.Point, idx int) int {
+	if idx < 0 || idx >= len(points) {
+		return 0
+	}
+	// Fast parse without time library
+	if len(points[idx].Date) >= 4 {
+		y := 0
+		for i := 0; i < 4; i++ {
+			if i < len(points[idx].Date) && points[idx].Date[i] >= '0' && points[idx].Date[i] <= '9' {
+				y = y*10 + int(points[idx].Date[i]-'0')
+			}
+		}
+		if y >= 2009 && y <= 2100 {
+			return y
+		}
+	}
+	return 2020
 }
 
 // calcPIT returns a simplified PIT (Probability Integral Transform) value.

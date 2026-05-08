@@ -109,21 +109,21 @@ func (a *QQAsset) BuildVerdict(panel *model.IndicatorPanel) *Verdict {
 }
 
 func (a *QQAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*forecast.Forecast, error) {
-	if len(as.PriceHistory) < 200 {
-		return nil, fmt.Errorf("qqq forecast: need at least 200 days, got %d", len(as.PriceHistory))
+	raw, err := a.store.Load("qqq")
+	if err != nil {
+		return nil, fmt.Errorf("qqq forecast: load price store: %w", err)
 	}
-	points := make([]forecast.Point, len(as.PriceHistory))
-	for i, p := range as.PriceHistory {
-		points[len(as.PriceHistory)-1-i] = forecast.Point{
-			Date:  as.Date,
-			Close: p,
-			Source: "price_store:qqq",
-		}
+	if len(raw) < 200 {
+		return nil, fmt.Errorf("qqq forecast: need at least 200 days, got %d", len(raw))
+	}
+	points := make([]forecast.Point, len(raw))
+	for i, p := range raw {
+		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: "price_store:qqq"}
 	}
 	if len(opts.Horizons) == 0 {
 		opts = forecast.DefaultOptions()
 	}
-	opts.Extractors = features.CoreExtractors()
+	opts.Extractors = features.EquityExtractors(a.store)
 	return forecast.Build(points, opts)
 }
 

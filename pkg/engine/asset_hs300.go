@@ -74,21 +74,21 @@ func (a *HS300Asset) BuildVerdict(panel *model.IndicatorPanel) *Verdict {
 }
 
 func (a *HS300Asset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*forecast.Forecast, error) {
-	if len(as.PriceHistory) < 200 {
-		return nil, fmt.Errorf("hs300 forecast: need at least 200 days, got %d", len(as.PriceHistory))
+	raw, err := a.store.Load("hs300")
+	if err != nil {
+		return nil, fmt.Errorf("hs300 forecast: load price store: %w", err)
 	}
-	points := make([]forecast.Point, len(as.PriceHistory))
-	for i, p := range as.PriceHistory {
-		points[len(as.PriceHistory)-1-i] = forecast.Point{
-			Date:  as.Date,
-			Close: p,
-			Source: "price_store:hs300",
-		}
+	if len(raw) < 200 {
+		return nil, fmt.Errorf("hs300 forecast: need at least 200 days, got %d", len(raw))
+	}
+	points := make([]forecast.Point, len(raw))
+	for i, p := range raw {
+		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: "price_store:hs300"}
 	}
 	if len(opts.Horizons) == 0 {
 		opts = forecast.DefaultOptions()
 	}
-	opts.Extractors = features.CoreExtractors()
+	opts.Extractors = features.HS300Extractors(a.store)
 	return forecast.Build(points, opts)
 }
 
