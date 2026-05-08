@@ -724,7 +724,7 @@ func formatValue(key string, v float64) string {
 	case strings.Contains(key, "ratio") || strings.Contains(key, "multiple") || strings.Contains(key, "ahr") || strings.Contains(key, "nupl") || strings.Contains(key, "skew"):
 		return fmt.Sprintf("%7.4f", v)
 	case strings.Contains(key, "sma") && strings.Contains(key, "_dev"):
-		return fmt.Sprintf("%+7.2f%%", v*100)
+		return fmt.Sprintf("%+7.2f%%", v)
 	case strings.Contains(key, "sma"):
 		return fmt.Sprintf("$%.0f", v)
 	default:
