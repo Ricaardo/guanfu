@@ -34,7 +34,7 @@ func CAPEExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 		return []forecast.FeatureValue{{
 			Name: "cape", Value: math.Round(v*100) / 100,
 			Normalized: math.Round(clipE(normalized, 3)*1000) / 1000,
-			Weight: 0.55, Note: "Shiller CAPE (monthly)",
+			Weight: 0.80, Note: "Shiller CAPE (monthly)",
 		}}, true
 	}
 }
