@@ -223,6 +223,7 @@ type SnapshotData struct {
 	GoldPrice           float64 `json:"gold_price,omitempty"`
 	QQQPrice            float64 `json:"qqq_price,omitempty"`
 	SPYPrice            float64 `json:"spy_price,omitempty"`
+	HS300Price          float64 `json:"hs300_price,omitempty"`
 	BTCDominance        float64 `json:"btc_dominance"`
 	TotalMarketCap      float64 `json:"total_market_cap"`
 	StablecoinMarketCap float64 `json:"stablecoin_market_cap"`
@@ -242,6 +243,7 @@ type SourceHealth struct {
 
 // IndicatorPanel CoinMan v2 主输出
 type IndicatorPanel struct {
+	Asset    string       `json:"asset,omitempty"` // qqq/spy/gold/hs300/btc; printers and verdict logic dispatch on this
 	Date     string       `json:"date"`
 	Snapshot SnapshotData `json:"snapshot"`
 
