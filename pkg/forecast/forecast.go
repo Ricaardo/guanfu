@@ -18,7 +18,11 @@ const (
 	defaultDiversifyWindowDays = 30
 	minSelectedAnalogs         = 5
 	minSharedFeatures          = 6
-	expectedFeatureCount       = 11
+	// expectedProbeWindowDays bounds how far back probeExpectedFeatures scans
+	// to find the maximum achievable feature count / weight. 60 days covers
+	// the typical ingestion gap for monthly macro series (CAPE, PMI) without
+	// adding meaningful cost versus the O(days/step) candidate loop.
+	expectedProbeWindowDays = 60
 
 	ahrLegacyLogSlope      = 5.84
 	ahrLegacyLogIntercept  = -17.01
@@ -65,6 +69,19 @@ type Options struct {
 	// per-asset reliability lookups. Empty means "no asset claim" — Build
 	// will skip writing ReliabilityNote on each HorizonForecast.
 	Asset string `json:"-"`
+	// RecencyWeighted (G5): when true, analogs from the recent window
+	// (default 5 years) receive a 1.25× effective weight in candidate
+	// ranking. This partially addresses the concern that pre-2024
+	// analogs may not generalize to the post-ETF / post-rate-regime
+	// BTC market. When false (default), every era is treated equally.
+	RecencyWeighted bool `json:"-"`
+	// RecencyWindowYears is the cutoff for RecencyWeighted. Zero → 5.
+	RecencyWindowYears int `json:"-"`
+	// RegimeGate (G2): when true, analogs whose local regime (bull/bear/
+	// fracture) differs from the current regime have their distance
+	// penalized (×1.2). Directly addresses Gold's 2017-2022 / 2023-2025
+	// regime-splitting walk-forward observation. Cheap & additive.
+	RegimeGate bool `json:"-"`
 }
 
 // Point is an oldest-first daily close price.
@@ -135,6 +152,32 @@ type HorizonForecast struct {
 	// historically poor or untested directional accuracy. Empty when reliable
 	// or no historical data is recorded. Sourced from forecast/reliability.go.
 	ReliabilityNote string `json:"reliability_note,omitempty"`
+	// HardBlocked is true when dir_hit ≤ 0.50 (at or below coin-flip). Numeric
+	// predictions in this struct (median/p10/p90/expected_price) are still
+	// populated for debugging but consumers should not render them as
+	// actionable. Display layers should surface ReliabilityNote instead.
+	HardBlocked bool `json:"hard_blocked,omitempty"`
+
+	// Baseline comparison fields (H3/J14). All in percent. Populated by
+	// AnnotateBaselines (caller-driven); absent when no baseline provider
+	// is wired. See pkg/forecast/baseline.go.
+	RiskFreeReturnPct    float64 `json:"risk_free_return_pct,omitempty"`
+	PassiveReturnPct     float64 `json:"passive_return_pct,omitempty"`
+	RiskAdjustedDeltaPct float64 `json:"risk_adjusted_delta_pct,omitempty"`
+	BaselineNote         string  `json:"baseline_note,omitempty"`
+
+	// Conformal interval fields (G1). Empirical p10/p90 above are quantile
+	// estimates — they have no statistical coverage guarantee, especially
+	// with small analog samples. These fields expose a finite-sample-
+	// corrected split-conformal interval at the specified alpha level.
+	// Under analog exchangeability, the interval [ConformalLow, ConformalHigh]
+	// contains a future observation with probability ≥ 1-α. See conformal.go.
+	ConformalLowPct     float64 `json:"conformal_low_pct,omitempty"`     // % return, lower bound
+	ConformalHighPct    float64 `json:"conformal_high_pct,omitempty"`    // % return, upper bound
+	ConformalAlpha      float64 `json:"conformal_alpha,omitempty"`       // e.g. 0.20 for 80% interval
+	ConformalCoverage   float64 `json:"conformal_coverage,omitempty"`    // finite-sample achievable coverage ∈ [0,1]
+	ConformalLowPrice   float64 `json:"conformal_low_price,omitempty"`
+	ConformalHighPrice  float64 `json:"conformal_high_price,omitempty"`
 }
 
 type Analog struct {
@@ -283,6 +326,36 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no comparable historical analogues with forward returns")
 	}
+	// G5: recency weighting. Shrinks distances on recent analogs so they
+	// bubble up in the sort. 0.8× on distance = ~1.25× effective weight
+	// without touching the kNN math elsewhere.
+	if opts.RecencyWeighted {
+		years := opts.RecencyWindowYears
+		if years <= 0 {
+			years = 5
+		}
+		today := mustParseDate(points[currentIdx].Date)
+		cutoff := today.AddDate(-years, 0, 0)
+		for i := range candidates {
+			if candidates[i].date.After(cutoff) {
+				candidates[i].dist *= 0.8
+				candidates[i].sim = similarityFromDistance(candidates[i].dist)
+			}
+		}
+	}
+	// G2: regime gating. Candidates whose local regime (rough bull/bear
+	// bucket from Mayer + 90d drawdown) differs from the current state
+	// get a 1.2× distance penalty. Cheap approximation of regime-aware
+	// kNN without running DetectRegime for every candidate.
+	if opts.RegimeGate {
+		currentRegime := regimeBucket(points, currentIdx)
+		for i := range candidates {
+			if regimeBucket(points, candidates[i].index) != currentRegime {
+				candidates[i].dist *= 1.2
+				candidates[i].sim = similarityFromDistance(candidates[i].dist)
+			}
+		}
+	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].dist == candidates[j].dist {
 			return candidates[i].date.Before(candidates[j].date)
@@ -301,10 +374,26 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 	if opts.Asset != "" {
 		for i := range horizons {
 			horizons[i].ReliabilityNote = HorizonCaveat(opts.Asset, horizons[i].Days)
+			horizons[i].HardBlocked = IsHardBlocked(opts.Asset, horizons[i].Days)
 		}
 	}
 	avgSim := averageSimilarity(selected)
-	featureCoverage := float64(len(currentFeatures.values)) / float64(expectedFeatureCount)
+
+	// Weight-based coverage: compare observed feature weight to the max
+	// weight any extractor bundle was ever able to achieve in the recent
+	// window. This survives adding features (old fixed=11 saturated any
+	// bundle with ≥11 features to 100%, losing discrimination).
+	expectedCount, expectedWeight := probeExpectedFeatures(points, currentIdx, opts.Extractors)
+	observedWeight := 0.0
+	for _, fv := range currentFeatures.values {
+		observedWeight += fv.Weight
+	}
+	var featureCoverage float64
+	if expectedWeight > 0 {
+		featureCoverage = observedWeight / expectedWeight
+	} else if expectedCount > 0 {
+		featureCoverage = float64(len(currentFeatures.values)) / float64(expectedCount)
+	}
 
 	method := "historical_analogue_knn_v2"
 	methodNote := "Pluggable feature extractors; returns are empirical forward-return distributions."
@@ -316,7 +405,7 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 		MethodNote:   methodNote,
 		Coverage: Coverage{
 			FeatureCount:      len(currentFeatures.values),
-			ExpectedFeatures:  expectedFeatureCount,
+			ExpectedFeatures:  expectedCount,
 			FeatureCoverage:   clamp01(featureCoverage),
 			CandidateCount:    len(candidates),
 			SelectedAnalogs:   len(selected),
@@ -353,6 +442,64 @@ func BuildTwoStage(points []Point, opts Options, stage2Extractors []FeatureExtra
 
 	// Rebuild with all extractors — this gives better candidate scoring
 	return Build(points, opts)
+}
+
+// regimeBucket is a cheap 3-state classifier (bull / bear / fracture)
+// used for regime gating. This is a lightweight sibling of DetectRegime
+// that can be called once per candidate without dominating kNN cost.
+//
+// Buckets:
+//   - fracture: Mayer < 0.6 AND 90d drawdown < -35% (crisis-like)
+//   - bull:     price > 200d SMA OR (Mayer > 1.0 AND dd_90 > -15%)
+//   - bear:     otherwise
+//
+// Falls back to "bull" when history is too short to judge, so very early
+// candidates don't get penalized for insufficient signal.
+func regimeBucket(points []Point, i int) int {
+	if i < 200 {
+		return 0 // treat as bull / neutral when history is thin
+	}
+	mayer, ok := mayerMultiple(points, i)
+	if !ok {
+		return 0
+	}
+	dd, _ := drawdown(points, i, 90)
+	if mayer < 0.6 && dd < -0.35 {
+		return 2 // fracture
+	}
+	if mayer > 1.0 {
+		return 0 // bull
+	}
+	return 1 // bear
+}
+
+// probeExpectedFeatures scans the last `expectedProbeWindowDays` indices and
+// returns the maximum achievable feature count and weight sum for the given
+// extractor bundle. Used for weight-based coverage so that adding features
+// doesn't saturate the metric at 100% (old fixed-11 behavior). Monthly macro
+// series (CAPE, PMI) may only tick once per month — 60-day window is enough
+// to catch them on their most recent refresh.
+func probeExpectedFeatures(points []Point, currentIdx int, extractors []FeatureExtractor) (int, float64) {
+	lo := currentIdx - expectedProbeWindowDays
+	if lo < 0 {
+		lo = 0
+	}
+	maxCount := 0
+	maxWeight := 0.0
+	for i := lo; i <= currentIdx; i++ {
+		fs := extractFeatures(points, i, extractors)
+		if len(fs.values) > maxCount {
+			maxCount = len(fs.values)
+		}
+		w := 0.0
+		for _, fv := range fs.values {
+			w += fv.Weight
+		}
+		if w > maxWeight {
+			maxWeight = w
+		}
+	}
+	return maxCount, maxWeight
 }
 
 // extractFeatures runs all extractors at a given index and collects results.
@@ -767,7 +914,9 @@ func buildHorizonForecasts(currentPrice float64, points []Point, selected []cand
 		if len(returns) == 0 {
 			continue
 		}
-		out = append(out, summarizeHorizon(currentPrice, h, returns))
+		hf := summarizeHorizon(currentPrice, h, returns)
+		annotateHorizonConformal(&hf, returns, currentPrice)
+		out = append(out, hf)
 	}
 	return out
 }

@@ -6,18 +6,59 @@ import (
 )
 
 func TestHorizonCaveatFlagsWeakHistory(t *testing.T) {
-	// Gold 180d at 49% / 51 tests → must caveat
+	// Gold 180d at 49% / 51 tests → hard-block caveat (dir_hit < 0.50)
 	c := HorizonCaveat("gold", 180)
 	if c == "" {
 		t.Errorf("gold/180d expected caveat, got empty")
 	}
-	if !strings.Contains(c, "49") {
-		t.Errorf("gold/180d caveat should mention 49%% dir hit, got: %s", c)
+	if !strings.Contains(c, "低于随机") {
+		t.Errorf("gold/180d (49%%) should hit hard-block caveat, got: %s", c)
 	}
 
-	// HS300 30d at 47% — also weak
-	if HorizonCaveat("hs300", 30) == "" {
-		t.Error("hs300/30d expected caveat, got empty")
+	// Gold 30d at 51% → within [0.50, 0.55): "approaching random" caveat
+	c30 := HorizonCaveat("gold", 30)
+	if c30 == "" {
+		t.Errorf("gold/30d expected caveat, got empty")
+	}
+	if !strings.Contains(c30, "接近随机") {
+		t.Errorf("gold/30d (51%%) should hit approaching-random caveat, got: %s", c30)
+	}
+
+	// HS300 at every horizon (46.8%, 44.7%, 48.9%) all < 0.50 → hard-block
+	for _, h := range []int{30, 90, 180} {
+		c := HorizonCaveat("hs300", h)
+		if c == "" {
+			t.Errorf("hs300/%dd expected caveat, got empty", h)
+		}
+		if !strings.Contains(c, "低于随机") {
+			t.Errorf("hs300/%dd should hit hard-block caveat, got: %s", h, c)
+		}
+	}
+}
+
+func TestIsHardBlocked(t *testing.T) {
+	// HS300 every horizon dir_hit < 0.50 → blocked
+	for _, h := range []int{30, 90, 180} {
+		if !IsHardBlocked("hs300", h) {
+			t.Errorf("hs300/%dd dir_hit < 0.50 should be hard-blocked", h)
+		}
+	}
+	// Gold 180d at 0.49 → blocked; 30d at 0.51 → not blocked
+	if !IsHardBlocked("gold", 180) {
+		t.Error("gold/180 at 49%% should be hard-blocked")
+	}
+	if IsHardBlocked("gold", 30) {
+		t.Error("gold/30 at 51%% should NOT be hard-blocked (only above-random caveat)")
+	}
+	// QQQ reliable → never blocked
+	for _, h := range []int{30, 90, 180} {
+		if IsHardBlocked("qqq", h) {
+			t.Errorf("qqq/%dd should not be hard-blocked", h)
+		}
+	}
+	// Unknown cell → not blocked (no evidence)
+	if IsHardBlocked("nope", 30) {
+		t.Error("unknown asset should not be hard-blocked")
 	}
 }
 

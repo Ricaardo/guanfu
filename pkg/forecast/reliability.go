@@ -31,6 +31,12 @@ type HorizonReliability struct {
 // 0.55 = ~5pp better than coin flip — anything weaker is treated as noise.
 const reliabilityThreshold = 0.55
 
+// hardBlockThreshold is the dir_hit cutoff below which we refuse to emit
+// numeric forecast summaries at all — only a "signal strength below random"
+// warning. 0.50 = no better than a coin flip; pretending a prediction is
+// meaningful at this level is dishonest to the user.
+const hardBlockThreshold = 0.50
+
 // minSamplesForClaim is the minimum n_tests we need before reporting any
 // reliability number. Below this, we say "untested" instead of pretending
 // the dir_hit means something.
@@ -93,9 +99,30 @@ func HorizonCaveat(asset string, days int) string {
 	if r.NTests < minSamplesForClaim {
 		return fmt.Sprintf("⚠ 仅 %d 个回测样本，可靠性不足", r.NTests)
 	}
+	if r.DirHit < hardBlockThreshold {
+		return fmt.Sprintf("⚠ 历史命中率 %.0f%% (n=%d, 截至 %s)，信号强度低于随机阈值，请忽略数值预测，仅参考原始指标",
+			r.DirHit*100, r.NTests, r.AsOf)
+	}
 	if r.DirHit < reliabilityThreshold {
 		return fmt.Sprintf("⚠ 历史命中率 %.0f%% (n=%d, 截至 %s)，接近随机",
 			r.DirHit*100, r.NTests, r.AsOf)
 	}
 	return ""
+}
+
+// IsHardBlocked reports whether the (asset, horizon) cell's dir_hit is at or
+// below the coin-flip threshold. Consumers that display numeric predictions
+// should suppress or visually dim them when true — emitting a specific
+// "90d p10 -5% / p90 +12%" on a 45% dir_hit horizon invites users to treat
+// noise as signal. Untested cells (no entry) return false: we don't have
+// evidence to block them.
+func IsHardBlocked(asset string, days int) bool {
+	r, ok := ReliabilityFor(asset, days)
+	if !ok {
+		return false
+	}
+	if r.NTests < minSamplesForClaim {
+		return false
+	}
+	return r.DirHit < hardBlockThreshold
 }
