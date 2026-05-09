@@ -144,3 +144,4 @@ MarketSnapshot  (BTC cache)   — serialized to cache/market_cache.json
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v1 | 2026-05-09 | 首版,覆盖 I3 weight 归一化 / I4 BTC ad-hoc 源 / I5 schema 演化 3 个隐式约定 |
+| v2 | 2026-05-09 | I6 追加:`pkg/engine/calculator.go` 有 ~500 行 v1 死代码待清理(`Calculate()` 方法 + `ScoreResult` 类型 + 11 个仅它用的 calc helper,全部 v1 NewsEngine Discord/Feishu 推送遗留)。零外部引用,不阻塞运行。下一轮维护时单独 commit 清理 |

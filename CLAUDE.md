@@ -186,7 +186,7 @@ Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/l
 | `go vet ./...` | 静态检查 |
 | `make build` / `make mcp` / `make all` | 二进制构建 |
 
-**回归预算**（来自 `docs/guanfu-v2-todo.md`）：
+**回归预算**(来自 `docs/guanfu-v3-todo.md`):
 - 任一 horizon dir hit 下降 ≥ 3pp → 回滚改动单独 review
 - PIT 偏离 0.5 加大 ≥ 0.05 → 回滚或调权重
 - backtest panic / 失败 → 立即回滚
@@ -232,14 +232,16 @@ Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/l
 | 文档 | 内容 |
 |---|---|
 | `README.md` | 用户视角的功能 + 安装 |
-| `skill/SKILL.md` | **skill 消费方文档**（AI 用 guanfu 数据回答用户的问题，不是改 guanfu） |
-| `docs/guanfu-v2-todo.md` | **当前 roadmap + 改动审计**——本文件 + roadmap 是 AI coder 的两大上下文 |
-| `docs/forecast-roadmap.md` | v2 历史决策（已完成的 50 任务） |
-| `docs/btcdca-credibility-and-guanfu-lessons.md` | 为什么 guanfu 不输出 0-100 总分 / 不给"今日定投 x 倍"指令 |
-| `docs/btcdca-data-source-and-algorithm.md` | btcdca.me 因子框架对照（可借鉴的视角） |
-| `docs/ai-native-design.md` | AI 调用 guanfu 的设计哲学 |
-| `docs/DATA-SOURCES.md` | 数据源一览 + 来源可信度 |
-| `docs/mcp-setup.md` | MCP 部署 |
+| `skill/SKILL.md` | **skill 消费方文档**(AI 用 guanfu 数据回答用户的问题,不是改 guanfu) |
+| `skill/tier1.md` / `tier2.md` | MCP 分层必载上下文(tier1 数据契约,tier2 决策框架 + 行为护栏) |
+| `docs/guanfu-v3-todo.md` | **当前 roadmap + 改动审计**——本文件 + roadmap 是 AI coder 的两大上下文 |
+| `docs/v4-thinking.md` | v4 方向 decision log(不是 roadmap,等 90d 实测再拍板) |
+| `docs/audience.md` | 用户画像 Primary/Secondary/Tertiary + 设计优先级 |
+| `docs/DATA-SOURCES.md` | 30+ 数据源一览 + refresh 框架 |
+| `docs/backtest-methodology.md` | 回测口径 + walk-forward 矩阵 |
+| `docs/internals.md` | 隐式约定:weight 归一化 / BTC ad-hoc 源 / schema 演化 |
+| `docs/deployment.md` | 部署 + MCP 集成 + cron 定时 |
+| `docs/archive/v2/` | v2 历史文档 + 调研(btcdca / forecast-roadmap 等) |
 
 ## 文件索引（quick jump）
 
