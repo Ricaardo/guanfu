@@ -1,0 +1,240 @@
+# guanfu — AI 维护者 / coder 上下文
+
+> 此文件面向**修改 guanfu 代码的 AI / 维护者**，不是给最终消费方。最终消费方（"我该不该买 BTC"类问题）看 `skill/SKILL.md`。
+>
+> 致虚极，守静笃。万物并作，吾以观复。
+
+---
+
+## 项目一句话
+
+多资产投资盘面 CLI + MCP 服务。覆盖 **BTC / QQQ / SPY / Gold / HS300 + 任意美股**。**不输出单一评分、不输出交易指令**——输出 8 域 40+ 指标的原始值 + 历史分位 + kNN 历史相似走势推演。
+
+## 二进制入口
+
+| 路径 | 用途 |
+|---|---|
+| `cmd/guanfu` | 主 CLI。子命令：`btc`(默认) / `qqq` / `spy` / `gold` / `hs300` / `stock TICKER` / `import-stock TICKER` / `market` / `dca` / `allocate` / `backtest [ASSET\|all]` / `status` |
+| `cmd/guanfu-mcp` | MCP stdio server。Claude Desktop / Cursor 可直调 |
+| `cmd/guanfu-similar` | 历史相似度独立工具 |
+| `cmd/guanfu-backtest` | 回测 CLI（独立于 `guanfu backtest` 子命令） |
+
+`cmd/guanfu/*_backtest.go` 大多带 `// +build ignore`，是 ad-hoc 调参脚本，不是产品代码。`akshare_import.go` 同理（CSI300 一次性导入）。
+
+## 核心抽象
+
+### `engine.Asset` 接口（`pkg/engine/asset.go`）
+
+每个资产实现 4 个方法：
+
+```go
+Key() string
+Name() string
+FetchSnapshot(ctx) (*AssetSnapshot, error)        // 拉所有需要的数据
+BuildPanel(snap) (*model.IndicatorPanel, error)   // 数据 → 8 域指标盘
+BuildVerdict(panel) *Verdict                       // 盘面 → 结构化读盘
+BuildForecast(snap, opts) (*forecast.Forecast, error)  // kNN 历史相似推演
+```
+
+注册在 `init()` 里通过 `engine.Register(NewXAsset(...))`。CLI / MCP 通过 `engine.GetAsset(key)` 解析。
+
+**接口里没有的**：评分函数、交易信号、仓位建议。**不要加**——v1 (CoinMan) 试过，把多维信息压缩成 0-100 总分必然丢失，已弃。
+
+### `forecast.FeatureExtractor`（`pkg/forecast/forecast.go`）
+
+```go
+type FeatureExtractor func(points []Point, i int) ([]FeatureValue, bool)
+```
+
+输入：oldest-first 价格序列 + 当前 index；输出：0+ 个 normalized feature。返回 `false` 表示数据不够（自动 skip）。
+
+**Bundles**（`pkg/forecast/features/bundles.go`）：
+- `CoreExtractors()` — BTC 专用（halving cycle / AHR999）
+- `EquityExtractors(s)` — QQQ/SPY（CAPE + DGS10 + DXY + HY + curve + VIX）
+- `GoldExtractors(s)` — Gold（real yield + breakeven + DXY + COT + VIX）
+- `HS300Extractors(s)` — HS300（PMI + M2 + LPR + Northbound）
+- `USStockExtractors(s)` — 任意美股（同 Equity 但**无 CAPE**——单股没有 per-name CAPE）
+
+### `store.PriceStore`（`pkg/store/price.go`）
+
+JSON 日频文件：`~/.guanfu/prices/<key>.json`。**Namespace 约定**：
+
+| 前缀 / 形态 | 含义 | 示例 |
+|---|---|---|
+| 无前缀核心资产 | 5 个核心资产价格 | `btc.json` `qqq.json` `spy.json` `gold.json` `hs300.json` |
+| 无前缀链上 / 估值 | BTC 链上 + Shiller CAPE | `btc_mvrv.json` `spx_cape.json` |
+| `fred_*` | FRED 宏观 | `fred_dxy.json` `fred_dgs10.json` `fred_dfii10.json` `fred_yield_curve.json` |
+| `hs300_*` | A 股宏观 | `hs300_pmi.json` `hs300_m2.json` `hs300_lpr.json` `hs300_northbound.json` `hs300_cny.json` |
+| `gold_*` | 黄金附加 | `gold_cot.json` |
+| 其他 ETF | Futu/Yahoo 拉取 | `vixy.json` `tlt.json` `uup.json` |
+| `stock_<ticker>` | 任意美股（D1 namespace） | `stock_aapl.json` `stock_msft.json` |
+
+**任意美股必须走 `client.FetchAndCacheStock`**（`pkg/client/fetch_stock.go`），它做：
+1. `ValidateStockTicker` 防撞名（用 `s.ListAssets()` 动态查，**不要硬编码**核心资产列表）
+2. `StockKey` 加 `stock_` 前缀
+3. 30h TTL（覆盖周末 gap）
+
+**不要 bypass `FetchAndCacheStock` 直接 `s.Save("aapl", ...)`**——会污染核心资产 namespace。
+
+## 数据流
+
+```
+FetchSnapshot → AssetSnapshot          (cmd/guanfu/main.go 或 cmd/guanfu-mcp/main.go 入口调用)
+              ↓
+         BuildPanel    → IndicatorPanel  (原始指标 + 历史分位)
+              ↓
+         BuildVerdict  → Verdict         (结构化读盘，不带交易指令)
+              ↓
+         BuildForecast → Forecast        (kNN 历史相似 + 前向收益分布)
+```
+
+`AssetSnapshot` 是泛型容器（`pkg/engine/asset.go:47`），每个 asset 只填自己需要的字段。`BTCMarketSnapshot` 是 BTC 独占；`CrossAssetPrices` 是 map，让权益类资产装 DXY/VIX 等代理。
+
+## kNN forecast 流水线
+
+1. 每个 extractor 在每个历史 index 计算 `[]FeatureValue`（`Name`/`Value`/`Normalized`/`Weight`）。
+2. 对每个候选历史日，距离 = `Σ weight_i × (norm_today - norm_hist)²`（或 Mahalanobis，若 `UseMahalanobis=true`）。
+3. 取距离最近 `TopK` 个，按 `DiversifyWindowDays` 去重相邻日。
+4. 对每个 horizon `h`，统计 analogs 在 `+h` 天的前向收益 → quantiles + 概率桶 + dominant scenario label。
+
+**关键 invariant**：feature 数量 = `len(opts.Extractors)`，不是固定 11。`expectedFeatureCount` 是 BTC 历史值，不要拿来当全局校验。
+
+## 每资产 horizons（B5）
+
+`forecast.HorizonsForAsset(asset)` 返回 per-asset 默认 horizons：
+
+| Asset | Horizons |
+|---|---|
+| QQQ / SPY | `30, 63, 90, 180, 252`（季度 + 年度） |
+| Gold | `30, 60, 90, 120, 180`（动量反转中段加密） |
+| BTC / HS300 / 任意 stock | `30, 90, 180`（默认） |
+
+**DefaultOptions 陷阱**（B5 fix）：旧代码里 `if len(opts.Horizons) == 0 { opts = forecast.DefaultOptions() }` 会**整个替换 opts**，clobber 掉调用方设置的 `Extractors`/`TopK`。新代码必须只补字段：
+
+```go
+if len(opts.Horizons) == 0 {
+    opts.Horizons = forecast.HorizonsForAsset("qqq")  // 只补 Horizons
+}
+opts.Extractors = features.EquityExtractors(a.store)   // 这行不会被 clobber 了
+```
+
+CLI flag `--forecast-horizons` 默认 `auto` → 走 per-asset；显式传 `30,90,180` 覆盖默认。MCP `get_forecast` 同理：缺 `horizons` 参数时 → 资产默认。
+
+## MCP 工具
+
+`cmd/guanfu-mcp/main.go` 通过 stdio 实现 MCP（无外部 SDK，自己解析 JSON-RPC）。
+
+| 工具名 | 别名 | 说明 |
+|---|---|---|
+| `get_panel` | `get_btc_panel`（旧名向后兼容） | 完整盘面 |
+| `get_verdict` | `get_btc_verdict` | 结构化读盘 |
+| `get_forecast` | `get_btc_forecast` | kNN 推演 |
+| `get_stock_forecast` | — | 任意美股 ticker（自动 Yahoo fetch） |
+| `get_domain` | — | 单 domain |
+| `get_indicator` | — | 单指标 |
+
+Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/latest/{...}` `guanfu://forecast/latest/{...}` + `guanfu://knowledge/skill.md`。
+
+**别名维护规则**：alias case 必须在 `main_test.go: TestHandleToolCallAliasesDispatchSameAsBTCNames` 里有断言。**不要悄悄删**——deprecated 但保留至少一个版本。
+
+## 测试 / 回测
+
+| 命令 | 用途 |
+|---|---|
+| `go test ./...` | 全套（store 包有日期敏感 fixture，2026 年偶尔会假阳性失败） |
+| `go test ./pkg/engine -run TestBacktestBundles -v` | **核心回归基线**，5 资产 × 3 horizons 方向命中率 + PIT |
+| `go test ./pkg/forecast/features -run TestUSStockExtractors_AcceptanceAAPL` | D2 任意 stock 路径验收 |
+| `go vet ./...` | 静态检查 |
+| `make build` / `make mcp` / `make all` | 二进制构建 |
+
+**回归预算**（来自 `docs/guanfu-v2-todo.md`）：
+- 任一 horizon dir hit 下降 ≥ 3pp → 回滚改动单独 review
+- PIT 偏离 0.5 加大 ≥ 0.05 → 回滚或调权重
+- backtest panic / 失败 → 立即回滚
+
+权重总和**目前不归一化**——kNN 距离里的归一化是隐式的，weight 只控制 feature 间相对权。Wave 0 加 VIX (0.55) 后总和 ~3.25，回测仍稳，所以暂不引规一化层；如未来加 feature 把回测打穿再走 RFC。
+
+## 加新资产 checklist
+
+1. `pkg/engine/asset_<key>.go`：实现 `Asset` 接口 4 方法 + `init()` `Register(...)`。
+2. `pkg/forecast/features/bundles.go`：写一个 `<Key>Extractors(s *PriceStore)` 函数。
+3. `pkg/model/types.go`：如果 `IndicatorPanel.Asset` 字段需要新值，加 const；如果 `SnapshotData` 需要新价格字段，加上去（**不要 bump SchemaVersion**——`SnapshotData` 不是落盘类型）。
+4. `cmd/guanfu/main.go`：在 subcommand switch 加分支，复用 `runEquityAsset` 或写专用 runner。
+5. `cmd/guanfu/main.go: equityPanelHeader`：加 case 处理标题 + price 字段映射。
+6. `pkg/forecast/forecast.go: assetHorizons`：如果该资产想要 per-asset horizons，加 entry。
+7. `pkg/engine/backtest_bundles_test.go`：加 baseline 测试 case。
+8. `cmd/guanfu-mcp/main.go`：tool description 的 `enum` 列表加新 key；resources/list 加 per-asset URI。
+9. `skill/SKILL.md` + `README.md`：消费方文档。
+
+`cmd/guanfu-mcp/main_test.go` 现有断言会自动覆盖 alias / per-asset URI 等。
+
+## 加新 feature extractor checklist
+
+1. `pkg/forecast/features/{enhanced,china_macro,cross_asset}.go` 任一里写 `func XExtractor(s *PriceStore) FeatureExtractor`。
+2. extractor 内部如果数据缺失 **必须返回 `nil, false`**——bundles.go 会自动 skip 而不是 panic。
+3. 加进对应资产的 bundle 函数。
+4. 跑 `TestBacktestBundles`，看回测有没有恶化超预算。
+
+## 已知陷阱（写代码前先看）
+
+| 陷阱 | 后果 | 出处 |
+|---|---|---|
+| `opts = forecast.DefaultOptions()` 替换整个 opts | clobber 掉 `Extractors` / `TopK` | B5 fix |
+| 用硬编码核心资产列表防撞名（btc/qqq/...） | 新加核心资产时 stock 校验脱节 | D1 设计 |
+| `SnapshotData` ≠ `MarketSnapshot`，前者改字段不要 bump SchemaVersion | bump 会触发 history.db 重建，浪费 | A0 review |
+| `printEquityPanel` 标题硬编码 | 用 `panel.Asset` switch | A1 fix |
+| sma_200_dev 在 BuildEquityPanel 已 ×100，display 层不能再 ×100 | 双重缩放 | A2 fix |
+| `--forecast-horizons "30,90,180"` 当默认 → per-asset 默认永远不生效 | B5 引入 `auto` sentinel | B5 fix |
+| `pkg/store/price_test.go: TestIncrementalFetchDays` 依赖 today 距离 fixture date | 时间漂移会假失败，**不是回归** | 历史遗留 |
+| 任何 v1 backwards-compat shim（如 `// removed` 占位、再导出已删类型） | 增加心智负担，没有消费方 | global rule |
+
+## 文档 / 决策参考
+
+| 文档 | 内容 |
+|---|---|
+| `README.md` | 用户视角的功能 + 安装 |
+| `skill/SKILL.md` | **skill 消费方文档**（AI 用 guanfu 数据回答用户的问题，不是改 guanfu） |
+| `docs/guanfu-v2-todo.md` | **当前 roadmap + 改动审计**——本文件 + roadmap 是 AI coder 的两大上下文 |
+| `docs/forecast-roadmap.md` | v2 历史决策（已完成的 50 任务） |
+| `docs/btcdca-credibility-and-guanfu-lessons.md` | 为什么 guanfu 不输出 0-100 总分 / 不给"今日定投 x 倍"指令 |
+| `docs/btcdca-data-source-and-algorithm.md` | btcdca.me 因子框架对照（可借鉴的视角） |
+| `docs/ai-native-design.md` | AI 调用 guanfu 的设计哲学 |
+| `docs/DATA-SOURCES.md` | 数据源一览 + 来源可信度 |
+| `docs/mcp-setup.md` | MCP 部署 |
+
+## 文件索引（quick jump）
+
+| 文件 | 责任 |
+|---|---|
+| `pkg/engine/asset.go` | Asset 接口 + 注册表 |
+| `pkg/engine/asset_{btc,qqq,spy,gold,hs300}.go` | 5 个核心资产实现 |
+| `pkg/engine/equity_panel.go` / `equity_dashboard.go` / `equity_valuation.go` | 权益类共用 panel 构造 |
+| `pkg/engine/hs300_dashboard.go` | HS300 专用 panel 构造（含中国宏观字段） |
+| `pkg/engine/calculator.go` | 各类指标计算（MA / RSI / Mayer / drawdown ...） |
+| `pkg/engine/verdict.go` | BTC verdict 构造 |
+| `pkg/engine/backtest.go` / `backtest_bundles_test.go` | 回测引擎 + 基线测试 |
+| `pkg/forecast/forecast.go` | kNN 主流程 + Options + HorizonsForAsset |
+| `pkg/forecast/features/bundles.go` | 每资产 extractor bundle |
+| `pkg/forecast/features/{core,enhanced,china_macro,cross_asset,positioning}.go` | extractor 实现 |
+| `pkg/forecast/projection.go` | ASCII fan chart 路径推演 |
+| `pkg/forecast/regime.go` | regime classification |
+| `pkg/forecast/backtest/backtest.go` | 独立回测引擎（vs `pkg/engine/backtest.go`） |
+| `pkg/client/btc_history.go` | BTC 历史拉取（CoinMetrics + Binance） |
+| `pkg/client/fetch_stock.go` | 任意美股 Yahoo fetch + namespace（D1） |
+| `pkg/client/fred.go` `gold.go` `hs300.go` `cross_asset.go` | 各数据源专用 |
+| `pkg/store/price.go` | PriceStore JSON 持久化 |
+| `pkg/model/types.go` | `MarketSnapshot` / `IndicatorPanel` / `Indicator` / `SnapshotData` |
+| `pkg/history/` | history.db SQLite（指标历史归档） |
+| `cmd/guanfu/main.go` | CLI 入口 + subcommand routing |
+| `cmd/guanfu/cli_backtest.go` `cli_commands.go` | 子命令实现 |
+| `cmd/guanfu-mcp/main.go` | MCP server |
+| `scripts/import_cape.py` | Shiller CAPE 一次性导入 |
+
+## 风格 / 写代码默认
+
+- **不写没必要的注释**。函数名 + 类型已表达 what；只在 *why* 非显著时才加（隐藏约束 / workaround / 反直觉的 invariant）。
+- **不写 v1 backwards-compat shim**。删的就删干净，包括 `// removed` 占位。
+- **不写 defensive validation 给内部代码**——只在系统边界（用户输入、外部 API）校验。
+- **不要批量并行调多个功能重叠的 skill**（这是 skill 消费方规则，对维护者写代码也有提醒意义：抽象重叠会导致改动扩散）。
+- 优先**编辑现有文件**，不要新建小文件加重 cognitive load。
+- 测试加在最近的 `_test.go` 里；若该资产还没 test 文件，新建 `pkg/<dir>/<key>_test.go`。
