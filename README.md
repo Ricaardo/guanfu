@@ -1,63 +1,146 @@
-# 观复 v2 (guanfu) — 多资产投资盘面
+# 观复 v3 (guanfu) — 多资产投资决策辅助工具
 
-> 致虚极，守静笃。**万物并作，吾以观复。** ——《道德经》第十六章
+> 致虚极,守静笃。**万物并作,吾以观复。** ——《道德经》第十六章
 
-guanfu 是一个**多资产**投资盘面 CLI 工具，覆盖 **BTC/QQQ/SPY/Gold/CSI300**。BTC 输出 8 域 40+ 指标，权益/黄金/CSI300 输出 6 域面板含顶底检测和估值区间。支持 kNN 走势推演、DCA 定投回放、懒人组合配置、多资产回测。**不输出交易指令。**
+**guanfu 是面向有经验个人投资者的多资产决策辅助 CLI + MCP**。覆盖 **BTC / QQQ / SPY / Gold / HS300 + 任意美股**。输出**原始指标 + 历史分位 + 前向收益分布 + 可靠性标注 + 数据源健康**,让人和 AI 在清楚每条证据可信度的前提下做综合判断。
+
+**我们给建议** — 但用概率、区间、条件表达。所有建议落 claim ledger 定期回归校准,接受历史检验。**我们知道自己不适用的情景会明说** — 如 HS300 在 kNN 框架下是弱信号,工具会直接打 "信号强度低于随机" 而不是伪装成预测。
 
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ```bash
-guanfu                    # BTC 8域面板
-guanfu btc --verdict      # BTC + 读盘结论
-guanfu qqq --verdict      # QQQ 纳斯达克100
-guanfu spy --verdict      # SPY 标普500
-guanfu gold --verdict     # 伦敦金 (DBnomics 1968+)
-guanfu hs300              # 沪深300 (AkShare 2002+)
-guanfu dca                # DCA定投策略对比
+guanfu                    # 默认:10 行摘要(读盘 + TOP3 支持 + TOP2 反证 + 失效条件)
+guanfu --full             # 完整 8 域 40+ 指标
+guanfu btc --verdict      # BTC + 结构化读盘
+guanfu qqq --forecast     # QQQ + kNN 历史相似推演
+guanfu spy --verdict      # SPY 6 域面板
+guanfu gold --verdict     # 黄金面板(实际利率 / DXY / COT)
+guanfu hs300              # 沪深 300(附中国宏观 PMI/M2/LPR)
+guanfu stock AAPL         # 任意美股(Yahoo 自动拉取 + kNN)
+guanfu import-stock MSFT  # 手动导入美股历史
+guanfu refresh            # 统一刷新 23 个数据源(首次全量 / 后续增量)
+guanfu dca                # DCA 定投策略对比
 guanfu allocate           # 懒人组合偏离检测
-guanfu market             # 多资产一览+共识
-guanfu backtest all       # 全资产kNN回测
+guanfu market             # 多资产一览 + 共识/分歧信号
+guanfu backtest all       # 全资产 kNN 回测
 guanfu status             # 数据诊断
 ```
 
-## 数据架构
+## 为什么用 guanfu(与同类项目的关键差异)
 
-26 个数据集，`~/.guanfu/prices/` JSON 日频存档。来源：CoinMetrics / Yahoo / FRED / AkShare / CFTC / Shiller。
+同类项目(btcdca.me / LookIntoBitcoin / Fear & Greed / Rainbow Chart)多数共用三个模式:单一 0-100 总分 × 线性 DCA 倍数 × 黑盒回测数字。guanfu 故意不做这些,原因和对应的差异化:
 
-| 类别 | 数据集 | 来源 |
-|------|--------|------|
-| 价格 | btc/qqq/spy/gold/hs300 | CoinMetrics/Yahoo/AkShare |
-| 链上 | btc_mvrv/txcnt/hashrate | CoinMetrics |
-| 宏观 | fred_dfii10/dgs10/dxy/yield_curve | FRED |
-| 黄金 | gold_cot | CFTC COT |
-| 中国 | hs300_pmi/m2/cpi/retail/cny/northbound | AkShare |
-| 估值 | spx_cape | Shiller (1871+) |
+| 同类常见做法 | guanfu 的选择 | 为什么 |
+|---|---|---|
+| 把 40 指标压缩成 0-100 总分 | 输出原始值 + 历史分位 | 压缩必然丢失条件性;总分停在 50 附近无法区分 "杠杆过热上涨" 和 "机构买入上涨" |
+| 所有 horizon 同等可信 | 每个 (资产, horizon) 独立打可靠性 caveat | QQQ 180d dir_hit 80% 和 Gold 180d 49% 不应该用同一套置信度 |
+| 预测区间 = 经验分位 | (规划中 G1) Conformal 给统计覆盖下限 | p10/p90 在小样本下可能远不到 90% 覆盖率 |
+| 数据源隐形降级 | `source_health` 显式标 ok/partial/stale/missing + fallback_used | 用 fallback 做强结论容易自欺 |
+| 回测只报全历史汇总 | Walk-forward 按 year × horizon 矩阵 | Gold 有强 regime 依赖、HS300 全 regime 弱信号,汇总数字会掩盖这些 |
+| "BTC 必将突破 $X" | 概率化 / 条件化:"基于 A/B/C 三条证据,倾向积累,概率约 60%,若 X 指标突破 Y 则结论失效" | 过于肯定的话术是使用者的负担 |
+| 无问责 | (规划中 Track K) Claim + Intent ledger 定期校准 | 给建议就要接受历史检验 |
+| 没有"我不知道"按钮 | (已落地 v3.1) `dir_hit < 0.50` 时拒绝输出数值,只给 "信号低于随机" | A 股 kNN 全 regime 弱信号不伪装成预测 |
 
-## kNN 预测引擎 (v3)
+## 可靠性标注 + 校准回归(v3)
 
-方向命中率（170+ 次回测验证）：
+### 静态 Reliability 表(load-time,零延迟)
 
-| 资产 | 命中率 | 最优方法 |
-|------|--------|---------|
-| QQQ | 73.6% | 状态匹配 |
-| SPY | 71.4% | 状态匹配 |
-| Gold | 68.8% | 多周期集成+COT |
-| BTC | 66.2% | 集成+链上+动态K |
-| CSI300 | 49.1% | 状态+动态K+宏观 |
-| **ENSEMBLE** | **65.6%** | |
+每次 forecast 输出的 `HorizonForecast` 带 `reliability_note` + `hard_blocked` 字段。表格静态存在 `pkg/forecast/reliability.go`:
 
-## 设计哲学
+- `dir_hit < 0.55` → caveat "接近随机"
+- `dir_hit < 0.50` → **hard-block**,不输出数值
+- `n < 10` → caveat "样本不足"
 
-**三层分离**：盘面层（guanfu 二进制）→ 解读层（SKILL.md）→ 决策层（人+AI）
+### 动态 Calibration(run-time,校准实际历史)
+
+`guanfu calibrate` 读 claim ledger,筛到期 claim,查 PriceStore 实际价,算四指标:
+
+```
+guanfu calibrate
+
+ASSET           HRZN    N  DIR_HIT   INTERVAL% MED_ABS_E BRIER_UP
+-----           ----    -  -------   --------- --------- --------
+BTC               30   48    64.6%  77% (t=80%)     6.20   0.2100
+BTC               90   32    65.6%  82% (t=80%)    11.50   0.1980
+QQQ              180   11    81.8%  90% (t=80%)     7.10   0.1500
+GOLD              90   20    55.0%  75% (t=80%)     5.40   0.2500
+  ...
+
+  DIR_HIT     方向命中率
+  INTERVAL%   实际落入声明 [p10,p90] 区间的比例
+  MED_ABS_E   median(|expected - actual|) 百分点
+  BRIER_UP    P(up) vs 实际上行的 Brier score
 ```
 
-**为什么不是评分系统**：v1 (CoinMan) 曾用一个 0-100 总分 + 6 类 action 试图替代综合判断。把 40+ 个指标压成 1 个数字必然丢失信息——总分永远停在 50 附近，无法区分"杠杆过热导致的上涨"和"机构买入驱动的上涨"。v2 更名为"观复"：不输出评分，只输出原始指标 + 历史分位，由人和 AI 完成综合判断。
+如果连续 2-3 个月 `DIR_HIT` 掉超过回归预算(≥ 3pp),就是需要 RFC 的信号。详见 [`docs/guanfu-v3-todo.md`](docs/guanfu-v3-todo.md) 回归预算节。
 
-三层映射关系：
-- **万物并作** → 8 域 40+ 指标同时呈现
-- **观复** → 在 q 分位中观察每个指标的往复回归
-- **致虚守静** → 工具守"静"，不替代主人的判断
+`guanfu calibrate --json` 输出结构化,方便接入 CI / 自动监控。
+
+## 已知失效情景(诚实的边界)
+
+guanfu 明确不适用以下场景。不是它"可能"不适用,是它**结构上**不适用。
+
+| 情景 | 为什么失效 | 建议行动 |
+|---|---|---|
+| **Regime shift / 结构断裂** | kNN 假设"历史分布可回归",2024+ BTC ETF / 2022+ Gold 央行购金改变主导变量,老样本的信号在新机制下不再成立。walk-forward 会率先看到(某年 dir_hit 剧降) | 用 `--forecast-recency-weighted` / `--forecast-regime-gate`;关注 `guanfu calibrate` 的趋势下降 |
+| **黑天鹅 / 监管事件** | 脱锚 / 交易所暴雷 / 美国 SEC 行政令,事件本身超出指标覆盖范围;F&G / funding / mempool 等都会被污染 | 停用 guanfu,切到 news-dashboard;事件过去 30 天再回来重读 |
+| **极端宏观 dislocation** | VIX > 35 / HY 利差 +100bp / 实际利率 > 3% 这种极端位置,历史样本稀疏,kNN 距离变得噪声 | 读 `skill/kb/09-crisis-playbook.md`,优先风险控制不是方向判断 |
+| **HS300 任何 horizon** | 回测全 regime dir_hit 45-49%,接近随机 | 工具已 hard-block 数值预测;仅用原始指标 + 中国宏观域定性解读 |
+| **Gold 180d** | 回测 49% dir_hit,强 regime 依赖 | 已从默认 horizon 移除;用 30/60/90 horizon |
+| **小样本美股**(< 5 年历史) | kNN 需要至少 ~500 个候选样本;新 IPO 不够 | `guanfu import-stock` 前先看上市日期,< 3 年直接用 generic 技术指标 |
+| **Altcoin / memecoin** | guanfu 只覆盖 BTC + ETH/BTC 比率,山寨币没有 ETF 流入 / 链上 / 宏观 proxy | 用 cmc-mcp / okx-dex,不用 guanfu |
+| **单股基本面** | guanfu 用宏观 + 技术,无 per-name earnings / 管理层 / 行业周期 | 基本面研究用 octagon-mcp / SEC EDGAR |
+
+**基本原则**:guanfu 是统计工具,不是新闻工具、不是基本面工具、不是风险管理工具。它知道自己不知道什么。
+
+## 数据架构
+
+30+ 数据集,`~/.guanfu/prices/` JSON 日频存档。来源:CoinMetrics / Binance / Yahoo / FRED / AkShare / DefiLlama / CFTC / Shiller / SoSoValue / CoinGecko / mempool.space / alternative.me。
+
+统一 `guanfu refresh` 刷新框架(23 个 Source 实现):首次全量,后续增量(`last_date` ≤ 24h 跳过;月频 CAPE 28d TTL)。
+
+| 类别 | 数据集 | 来源 |
+|---|---|---|
+| 价格 | btc / qqq / spy / gold / hs300 / stock_* | CoinMetrics+Binance / Yahoo / AkShare |
+| BTC 链上 | btc_mvrv / txcnt / hashrate | CoinMetrics |
+| 宏观 | fred_dfii10 / dgs10 / dxy / dfii10 / yield_curve / breakeven / hy_spread | FRED |
+| 黄金 | gold_cot | CFTC COT |
+| 中国 | hs300_pmi / m2 / cpi / lpr / northbound / cny | AkShare |
+| 估值 | spx_cape | Shiller (1871+) |
+
+## kNN 预测引擎 + 可靠性标注(post-refresh v6 baseline,2026-05-09)
+
+| 资产 | 30d dir_hit | 90d dir_hit | 180d dir_hit | 数据起始 | 备注 |
+|---|---:|---:|---:|---|---|
+| BTC | 61% | 65% | 63% | 2010-07-18 (n=46) | 稳 |
+| QQQ | 70% | 75% | **80%** | 2015-05-26 (n=20) | 长 horizon 最强 |
+| SPY | 60% | 75% | **85%** | 2015-05-26 (n=20) | 长 horizon 最强 |
+| Gold | 51% | 55% | 49% | 2000-08-30 (n=51) | **强 regime 依赖**,180d 已从默认 horizon 移除 |
+| HS300 | 47% | 45% | 49% | 2002-01-04 (n=47) | **全 regime 弱信号,工具拒绝输出数值预测** |
+
+可靠性机制(`pkg/forecast/reliability.go`):
+- `dir_hit < 0.55` + `n ≥ 10` → 打 caveat "接近随机"
+- `dir_hit < 0.50` + `n ≥ 10` → **hard block**,拒绝输出数值,只说 "信号强度低于随机阈值,请忽略数值预测,仅参考原始指标"
+- `n < 10` → 打 caveat "样本不足"
+- 新资产 / 未测 horizon → 无 caveat(不制造警告,也不假装可靠)
+
+## 设计哲学(v3.1)
+
+1. **给建议,不给指令**。用概率 / 区间 / 条件表达,不用"一定 / 必然"。过于肯定的话术是使用者的负担。
+2. **基线对比强制**(规划中)。所有收益预期附 vs 3m T-bill、vs 60/40 组合。孤立的 "+5% 预期" 没意义。
+3. **建议落盘回归校准**(规划中 Track K)。给建议就要接受历史检验。
+4. **组合上下文驱动**(规划中 Track L)。`portfolio.yaml` 让同一盘面对 15% 仓位和 35% 仓位的投资者给不同结论。
+5. **行为护栏**(规划中 J13)。投资失败 80% 是行为错误(FOMO / 恐慌 / 锚定),SKILL 会主动干预。
+6. **诚实降级**。不适用的资产 / horizon 直接说,不伪装。
+7. **MCP 原生**(规划中 Track M)。SKILL 分层加载不挤占其他 skill 的 context。
+8. **默认简,详情要 `--full`**。`guanfu` 裸跑只出摘要。
+
+**三层分离保持不变**:盘面层(guanfu 二进制)→ 解读层(SKILL.md)→ 决策层(人 + AI)。
+
+**用户画像**:见 [`docs/audience.md`](docs/audience.md)。Primary = 有经验 + 5y+ 期限 + 10k-1M USD 的个人投资者;Secondary = AI 重度用户(MCP 优先);Tertiary = 普通人通过 skill 分发触达。设计优先级 Secondary > Primary > Tertiary。
+
+**演进路径**:当前在 v3.1,完整 roadmap 见 [`docs/guanfu-v3-todo.md`](docs/guanfu-v3-todo.md)。
 
 ## 安装
 

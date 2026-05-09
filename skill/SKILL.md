@@ -13,27 +13,50 @@ optional_tools:
   - python3       # AkShare/Futu 桥接
 ---
 
-# 观复 v2 (btc-guanfu): 多资产投资盘面 + 解读手册
+# 观复 v3 (btc-guanfu): 多资产投资盘面 + 解读手册
 
-> 致虚极，守静笃。**万物并作，吾以观复。** ——《道德经》第十六章
+> 致虚极,守静笃。**万物并作,吾以观复。** ——《道德经》第十六章
+
+## 分层加载(v3 新增,推荐给 MCP / AI 客户端)
+
+**这份 SKILL.md 是完整版(~900 行)**。日常读盘不必全量加载,按需拉取分层 resource:
+
+| URI | 内容 | 何时读 |
+|---|---|---|
+| `guanfu://skill/tier1` | ~200 行数据契约 + 关键阈值 + 可靠性标注 + 必出规则 | **每次读盘都先读** |
+| `guanfu://skill/tier2` | 读盘流程 / 域级方向 / 输出模板 / 行为护栏 | 做判断 / 给建议时读 |
+| `guanfu://skill/tier3`(同本文件) | 指标定义细节 / 因果机制 / 历史类比 | 用户追问原理 / 历史时读 |
+| `guanfu://knowledge/skill.md`(本文件) | 完整版,含所有节 | 向后兼容别名,新客户端优先用 tier1/2/3 |
+
+**推荐加载序列**:tier1(必载)→ tier2(决策时)→ 本文件特定章节(追问细节时)→ `kb/XX-*.md`(深度因果 / 类比 / 危机)
 
 ## CLI 命令
 
 ```bash
-guanfu                    # BTC 8域40+指标盘面（默认）
-guanfu btc --verdict      # BTC + 读盘结论 + 顶底检测
+guanfu                    # 默认 10 行摘要(读盘口径 + TOP3 支持 + TOP2 反证 + 失效 + source_health)
+guanfu --full             # 完整 8 域 40+ 指标盘面
+guanfu btc --verdict      # BTC + 结构化读盘 + 顶底检测
 guanfu btc --forecast     # BTC kNN 历史相似走势推演
-guanfu qqq --verdict      # QQQ 6域面板（技术/估值/宏观/情绪）
-guanfu spy --verdict      # SPY 6域面板
-guanfu gold --verdict     # 黄金面板（估值：实际利率/DXY/VIX）
-guanfu hs300              # 沪深300面板（中国宏观：PMI/CPI/M2/CNY）
-guanfu dca                # DCA定投策略对比（Fixed/AHR/Mayer）
+guanfu qqq --verdict      # QQQ 6 域面板(技术/估值/宏观/情绪)
+guanfu spy --verdict      # SPY 6 域面板
+guanfu gold --verdict     # 黄金面板(估值:实际利率 / DXY / VIX)
+guanfu hs300              # 沪深 300 面板(中国宏观:PMI/CPI/M2/CNY)
+guanfu stock AAPL         # 任意美股(Yahoo 自动拉取 + kNN)
+guanfu import-stock MSFT 3650  # 手动导入美股全量历史
+guanfu refresh            # 统一刷新 23 个数据源(首次全量 / 后续增量)
+guanfu refresh --dry-run  # 列出将刷新的 source,不真正拉数据
+guanfu dca                # DCA 定投策略对比(Fixed/AHR/Mayer)
 guanfu allocate           # 全天候懒人组合偏离检测
 guanfu market             # 多资产一览 + 共识/分歧信号
-guanfu backtest btc       # kNN回测（单资产）
+guanfu backtest btc       # kNN 回测(单资产)
 guanfu backtest all       # 全资产回测 + 对比报告
-guanfu status             # PriceStore数据状态诊断
+guanfu status             # PriceStore 数据状态诊断
 ```
+
+**`--brief` vs `--full`**(v3 新默认):
+- 裸跑 `guanfu` / `guanfu qqq` → 默认 10 行摘要(brief mode)
+- `--full` / `--verdict` / `--forecast` / `--domain` 任一显式指定 → 走完整盘面
+- `--json` / `--pretty` → 结构化输出,不走 brief
 
 ## MCP 工具 (`guanfu-mcp`)
 
@@ -41,9 +64,10 @@ guanfu status             # PriceStore数据状态诊断
 
 | 工具 | 说明 | 关键参数 | 输出 |
 |---|---|---|---|
-| `get_panel` | 完整盘面（多资产）。BTC = 8 域 40+ 指标；权益/黄金/HS300 = 6 域 | `asset` (默认 btc), `timeout_seconds` (默认 90) | `IndicatorPanel` JSON：`asset` / `date` / `snapshot` / 8 个 domain map / `source_health` |
-| `get_verdict` | 结构化多域读盘 | `asset`, `timeout_seconds`, `include_panel` (默认 false) | `Verdict` JSON：`net_direction` / `regime` / `domains` / `top_proximity` / `bottom_proximity` |
-| `get_forecast` | kNN 历史相似走势推演 | `asset`, `horizons` (默认 `[30,90,180]`), `top_k` (默认 21, 最小 5), `include_panel` | `Forecast` JSON：每个 horizon 的 PIT/dir-hit/quantiles + 邻居样本 |
+| `get_panel` | 完整盘面(多资产)。BTC = 8 域 40+ 指标;权益/黄金/HS300 = 6 域 | `asset` (默认 btc), `timeout_seconds` (默认 90) | `IndicatorPanel` JSON:`asset` / `date` / `snapshot` / 8 个 domain map / `source_health` |
+| `get_verdict` | 结构化多域读盘 | `asset`, `timeout_seconds`, `include_panel` (默认 false) | `Verdict` JSON:`net_direction` / `regime` / `domains` / `top_proximity` / `bottom_proximity` |
+| `get_forecast` | kNN 历史相似走势推演 | `asset`, `horizons` (默认 auto = 资产专属),  `top_k` (默认 21,最小 5),`include_panel` | `Forecast` JSON:每个 horizon 的 reliability_note / hard_blocked / quantiles + 邻居 |
+| **`get_stock_forecast`** | **任意美股 kNN 推演**(Yahoo 自动拉取 + `USStockExtractors`) | `ticker` (必填,如 AAPL/MSFT), `horizons`, `top_k`, `days` (默认 3650) | 同 `get_forecast`,但 asset 为 `stock_<ticker>` |
 | `get_domain` | 单个域盘面 | `domain` (cycle/valuation/network/positioning/macro/flow/technical/cross_asset), `asset` | 该 domain 的 `map[string]Indicator` |
 | `get_indicator` | 单个指标 | `name` (如 ahr999, rsi_14, vix_level), `asset` | 单个 `Indicator` JSON |
 
@@ -55,10 +79,14 @@ guanfu status             # PriceStore数据状态诊断
 
 | URI | 内容 |
 |---|---|
-| `guanfu://knowledge/skill.md` | 本文件（用于 AI 自取上下文） |
-| `guanfu://panel/latest` | 缓存最新 BTC 盘面 JSON |
-| `guanfu://verdict/latest` | 缓存盘面对应的 verdict |
-| `guanfu://forecast/latest` | 缓存盘面对应的 forecast |
+| `guanfu://skill/tier1` | **必载**:数据契约 + 关键阈值 + 可靠性规则(~200 行) |
+| `guanfu://skill/tier2` | 决策框架 + 行为护栏(做判断时读) |
+| `guanfu://skill/tier3`(当前同下) | 深度细节(追问原理时读) |
+| `guanfu://knowledge/skill.md` | 完整版 SKILL.md(向后兼容,新客户端优先 tier) |
+| `guanfu://panel/latest` | BTC 盘面(deprecated alias,= `/latest/btc`) |
+| `guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` | 每资产盘面 |
+| `guanfu://verdict/latest/{asset}` | 每资产 verdict |
+| `guanfu://forecast/latest/{asset}` | 每资产 forecast |
 
 ### 调用示例
 
@@ -107,15 +135,49 @@ guanfu status             # PriceStore数据状态诊断
 
 ## kNN 预测引擎
 
-11 核心价格特征 + 6 跨资产特征 + 3 仓位特征。架构 v3：Mahalanobis 距离 + 状态匹配 + 多周期集成 + 动态 TopK。
+Pluggable feature extractors(per-asset bundle:Core / Equity / Gold / HS300 / USStock),Mahalanobis 距离,状态匹配,动态 TopK。
 
-| 资产 | 方向命中率 | 最优方法 |
-|------|----------|---------|
-| QQQ | 73.6% | 状态匹配 |
-| SPY | 71.4% | 状态匹配 |
-| Gold | 68.8% | 多周期集成+COT |
-| BTC | 66.2% | 集成+链上+动态K |
-| CSI300 | 49.1% | 状态匹配+动态K+宏观 |
+**方向命中率(v6 baseline,2026-05-09 post-refresh)**:
+
+| 资产 | 30d | 90d | 180d | 数据起始 | 备注 |
+|---|---:|---:|---:|---|---|
+| BTC | 61% ✓ | 65% ✓ | 63% ✓ | 2010-07-18 (n=46) | 稳 |
+| QQQ | 70% ✓ | 75% ✓ | **80%** ✓ | 2015-05-26 (n=20) | 长 horizon 最强 |
+| SPY | 60% ✓ | 75% ✓ | **85%** ✓ | 2015-05-26 (n=20) | 长 horizon 最强 |
+| Gold | 51% ⚠ | 55% ✓ | **49% ✗** | 2000-08-30 (n=51) | **180d hard-block**,强 regime 依赖 |
+| HS300 | 47% ✗ | 45% ✗ | 49% ✗ | 2002-01-04 (n=47) | **所有 horizon hard-block**,全 regime 弱信号 |
+
+✓ = 可用 | ⚠ = 接近随机需附 caveat | ✗ = hard-block,工具拒绝输出数值预测
+
+## 可靠性标注机制(v3 核心差异化)
+
+guanfu 相对同类项目最大的差异之一:**敢于说"我不知道"**,显式标注每个 (资产, horizon) 的历史可信度。
+
+Forecast 输出每个 `HorizonForecast` 附带两个字段:
+
+| 字段 | 含义 |
+|---|---|
+| `reliability_note` | 非空字符串 = 需附 caveat("样本不足" / "接近随机" / "信号强度低于随机阈值") |
+| `hard_blocked` | `dir_hit < 0.50` 时为 true;**true 时不要展示 median / p10 / p90 数值**,只展示 reliability_note |
+
+### 三档规则(`pkg/forecast/reliability.go`)
+
+| 条件 | 行为 |
+|---|---|
+| `n < 10` | caveat "仅 N 个回测样本,可靠性不足"(不 hard-block,让用户自己权衡) |
+| `0.50 ≤ dir_hit < 0.55` | caveat "接近随机",数值预测仍展示但附提醒 |
+| `dir_hit < 0.50` | **hard-block**,数值不展示,只说 "信号强度低于随机阈值,请忽略数值预测,仅参考原始指标" |
+| 未测 horizon | 无 caveat,不制造警告也不假装可靠(例如 Gold 60d / 120d 近期才加,未入表) |
+
+### AI 读盘时的正确行为
+
+- 看到 `hard_blocked=true` 的 horizon → **不复述 median / p10 / p90 数值**;说 "该 horizon 在历史回测中方向命中率低于随机,不给数值预测,建议仅参考原始指标"
+- 看到 `reliability_note` 非空但非 hard-block → 复述数值,但引用时附 "(历史命中率 X%,接近随机)"
+- 看到 BTC / QQQ / SPY 各 horizon 无 caveat → 正常使用数值预测
+
+### 与同类项目的对比
+
+btcdca.me / LookIntoBitcoin / Fear & Greed 等同类项目默认假定所有 horizon 同等可信,把 Gold 180d(49%)和 QQQ 180d(80%)用同一套置信度呈现。guanfu 显式标注后,AI 就不会误导用户。
 
 ---
 
@@ -553,6 +615,235 @@ v1 使用 BTC 全历史日线中可完整回放的特征：
 ---
 
 ## 读盘框架（Claude 输出情景化结论时遵循）
+
+> 完整的读盘流程 + 行为护栏菜单在 `guanfu://skill/tier2`;本节给出骨架 + 组合感知 + 案例。
+
+## 组合感知(J9,v3 新增,当 `verdict.portfolio_context` 存在时必用)
+
+当 verdict JSON 带有 `portfolio_context` 字段(用户配置了 `~/.guanfu/portfolio.json` 时自动注入),读盘结论**必须**按用户画像适配,不能给通用结论。
+
+字段含义:
+
+| 字段 | 含义 | 在结论中如何使用 |
+|---|---|---|
+| `current_weight_pct` | 用户当前 asset 持仓占组合比例 | 决定"继续加仓 / 保持观察 / 减仓讨论"的起点 |
+| `ceiling_pct` | 用户自定上限(0 = 未设) | 超出时即使 verdict 偏积累也**不建议追加** |
+| `overweight` | bool,是否超上限 | true → 结论主语从"加仓"变为"是否维持" |
+| `room_to_ceiling_pct` | 距上限剩余空间 | 回答"还能加多少"的上限 |
+| `horizon_match` | "ok" / "mismatch" / "unknown" | mismatch → 提醒用户 horizon 不匹配 |
+| `risk_budget` | conservative / moderate / aggressive | 调整给建议的强度 |
+| `notes` | 预计算的提醒文本 | 直接引用,不要重新生成 |
+
+### 读盘分层模板(必用)
+
+当有 `portfolio_context` 时,回复首段按以下模板给**个性化**建议:
+
+```
+## 📍 当前判断(针对你的组合)
+
+- 你当前 [ASSET] 权重 X%(上限 Y%,[剩余空间 Z% / 已超出 Δ%]),horizon 声明 Nyr,风险预算 [...]
+- verdict 核心:[基础结论]
+- **对你的建议**:
+  - [若 overweight]即使倾向偏积累,**本次不建议追加**,优先保留剩余现金 / 监控触发条件
+  - [若未 overweight 且有空间]在 [X% 剩余空间] 内,若 [具体触发] 满足可考虑小幅补仓;不满足保持观察
+  - [若 horizon_match="mismatch"]你声明的期限与当前 verdict 主导信号时间尺度不一致;请**优先读长 horizon** / 忽略 30d 噪声
+```
+
+### 关键不变量
+
+- **portfolio_context 存在时,绝不给 "买 / 卖" 等无画像的结论**
+- **ceiling 超出时,即使 net_direction ≥ +5,也不建议追加**(组合风险已超用户自定预算,是硬约束不是信号)
+- **风险预算冲突时主动点名**:如 verdict 偏积累 + conservative → "即使倾向积累,conservative 预算下不必全额追进";verdict 偏防守 + aggressive → "注意这与你声明的 aggressive 风格不一致,评估是否调整"
+- **portfolio_context 为 nil 时,不能假装知道用户组合**,按一般情况给分层结论即可(长期持有者 / 中期配置者 / 短期交易者)
+
+### 示例(有 portfolio 时)
+
+用户 btc 30% 仓位、上限 25%、horizon 5y、moderate。verdict 输出 "偏积累倾向 +4/8"。
+
+**错误结论**(v2 风格):
+> "BTC 偏积累,建议加仓"
+
+**正确结论**(v3 portfolio-aware):
+> "你当前 BTC 权重 30%,**已超上限 25%**(超出 5%),horizon 5y,moderate。
+> verdict 偏积累 +4/8,但对你而言**本次不建议追加**——组合风险已超自定预算。
+> 建议监控 [具体失效条件] 保持当前仓位;若触发减仓条件 [如 Mayer>2.4 + funding>0.08%],考虑回归上限内。
+> 反证:[TOP2 反证]。失效条件:[...]。"
+
+## 行为护栏(J13,必出 ≥3 条)
+
+tier2 菜单列出了完整护栏库,这里放**最常触发的 5 条**,读盘时从中按场景选。**投资失败 80% 是行为错误,不干预就是失职**。
+
+### 冷静期检查
+若用户同一资产 < 4h 内多次问 → "行情波动驱动反复读盘是过度反应的信号,建议等 15 分钟情绪平复再读"
+
+### 对立论证(强制)
+bull 结论必附 "最强反方论点";bear 结论必附 "最强正方论点"。不得省略。
+
+### 锚定偏差(决策型问题必出)
+"**忽略你当前的成本基础**,如果你今天有和持仓等值的现金,你还会买吗?"
+
+### FOMO 检查(价格 30d 涨 > 20% 且用户不在持仓)
+"追涨是统计上的负期望行为;请先读 J6 触发条件,未满足不追"
+
+### 恐慌检查(价格 30d 跌 > 20% 且用户满仓)
+"恐慌卖是锁定亏损;请先读触发条件,验证是否真正突破失效阈值"
+
+### 示例输出末尾
+
+```
+## ⚠ 行为护栏
+- **对立论证**:如果你要反对本次"偏积累"结论,最强论点会是:[宏观 real_yield > 2.5% 且连续 1m 上行,估值锚抬升使所有风险资产承压]
+- **锚定检查**:忽略成本基础,手里等值现金你还会现在买吗?若答案是"不会",考虑:你的继续持有其实是锚定,不是信心
+- **冷静期**:若你 4h 内已读过这份盘面,当前再读是情绪触发,等 15 分钟再决定
+```
+
+---
+
+## 用户向输出模板(J1-J7,v3 核心交付物)
+
+以下是 **SKILL 消费方读盘时必用**的完整输出模板。顺序严格,不能调换或省略。
+
+### J1 通俗总结段(读盘首段必出,3-5 句人话)
+
+```
+## 📍 当前判断
+[资产] 目前大致处在"[周期阶段]、[估值位置]、[杠杆状态]、[流入方向]"的组合。
+[如果有 portfolio_context] 对你的 X% 仓位 / Ny 期限 / [风险预算] 而言,证据偏向 [结论方向];[最强反证] 是近期最值得警惕的边际变化。
+短期(1-4 周)关注 [短期指标 + 阈值];中期(3-6 月)关注 [中期指标 + 阈值]。
+```
+
+**规则**:
+- 绝不以 "BTC 看涨" 这种无条件断言开头,必须以 "目前处在 X 组合" 的描述开头
+- "对你的" 分句仅在 portfolio_context 存在时出现,不要伪造
+- 短期 + 中期两个指标要具体到变量名 + 方向 + 阈值
+
+### J2 投资者问答模板(按 profile 分层)
+
+```
+## 🎯 投资者问答
+- **长期持有者 (5y+)**:倾向 [方向] — 支持:[2-3 条域级证据] — 反证:[1-2 条] — 失效条件:[if-then]
+- **中期配置者 (6-18m)**:倾向 [方向] — 触发观察点:[等 X 连续 N 周满足再考虑加仓]
+- **短期交易者 (< 3m)**:[信号清晰度评估] — 不建议 / 可关注 [具体短期指标]
+```
+
+**规则**:
+- 3 种 profile 都要出,即使当前 verdict 对其中一种明显不适用(也要解释为何不适用)
+- 不给具体仓位百分比 / 止损价 / 入场价
+- 失效条件必须可量化(指标名 + 阈值 + 时间窗口)
+
+### J3 风险雷达(必出,读盘倒数第二段)
+
+```
+## ⚠️ 风险雷达(当前最值得警惕的 3-5 件事)
+1. **[风险描述]**(概率 X%)→ [影响路径] → 观察 [具体指标 + 阈值]
+2. ...
+```
+
+**规则**:
+- 概率用数字(30% / 20%)而不是 "可能 / 或许"
+- 每条 3 要素齐全:触发条件、影响路径、观察指标
+- 风险按概率 × 影响排序,最紧迫的在前
+
+### J4 叙事化情景推演
+
+在 forecast 输出数值的基础上,**把 quantile 翻译成叙事路径**:
+
+```
+## 🔮 概率情景(基于 kNN n=? 个历史类比)
+- **情景 A (40%) 温和延续**:假设 [宏观条件 X + Y + Z] → [触发链] → 3m 预期价区间 [$L, $H] (类比 YYYY-MM-DD,当时接下来 90d +X%)
+- **情景 B (30%) 区间震荡**:假设 [条件] → [触发链] → 3m 区间 [$L, $H]
+- **情景 C (30%) 下行压力**:假设 [条件] → [触发链] → 3m 下探 [$L, $H]
+```
+
+**规则**:
+- 3-5 条叙事路径,概率加总 = 100%
+- 每条带:(1) 假设条件(2) 触发链(3) 预期价格区间(4) 历史类比(锚定到具体日期)
+- **若 hard_blocked=true,跳过数值,改成定性叙事**:"情景 A(估算 X%)...条件满足时可能走向,但历史样本方向命中率低于随机,不给具体价位"
+- **优先用 conformal 区间**(`conformal_low_price/high_price`)而不是 empirical p10/p90 — conformal 带统计覆盖保证,小样本下更可信
+
+### J5 合理估值区间推演
+
+```
+## 📏 合理估值区间
+基于 3 条锚 —— [锚1 Mayer 历史中位] / [锚2 200wSMA 偏离] / [锚3 kNN 隐含价格分布] —— 合理区间 [$L, $H]。
+当前 $P,处于区间 X% 位置 ([偏低/合理/偏高])。
+**失效条件**:若 [Mayer > 2.4] 或 [sma_200w_dev < -10%],本区间作废,需重新读估值域。
+```
+
+**规则**:
+- 必须给出 3 条独立锚,不能只用 1 条
+- 区间是指标与历史分布衍生,**不是目标价**
+- 必带失效条件
+
+### J6 买卖触发条件清单(用指标不用价位)
+
+```
+## 🎯 触发条件(不是建议,是自查清单)
+- **考虑减仓 / 减少加仓速度的条件**:
+  - funding_rate_pct > 0.08% 连续 7 天
+  - OR pi_cycle_top_ratio ≥ 1.0
+  - OR mayer_multiple > 2.4
+- **考虑加仓的条件**:
+  - mayer_multiple < 0.8 AND hash_ribbons 上行修复
+  - OR ahr999_compressed < 0.549
+  - OR [ETF 连续 4 周净流入 > $1B + 美元 DXY 60d < -1%]
+- **考虑暂停观察的条件**:
+  - source_health 有 ≥ 2 个 stale / missing
+  - OR 极端宏观事件(VIX > 35 / HY 利差 +100bp / 脱锚)
+```
+
+**规则**:
+- **绝不写 "$120k 减仓" 这种价位级指令**
+- 用指标 + 阈值 + 时间窗口
+- 给 "加仓 / 减仓 / 暂停" 3 类条件而不是 2 类(观察窗口同样重要)
+
+### J7 跨资产比较(`market` 命令 AI 解读专用)
+
+用户问 "现在有 1 块闲钱,BTC / QQQ / Gold 哪个证据更充分?":
+
+```
+## 🔗 跨资产证据对比(不是推荐,是证据梳理)
+
+| 资产 | 核心支持 (TOP 2) | 最强反证 (TOP 1) | Reliability | source_health |
+|---|---|---|---|---|
+| BTC | [指标 X、指标 Y] | [指标 Z] | 90d 65% ✓ | ok |
+| QQQ | [...] | [...] | 180d 80% ✓ | ok |
+| Gold | [...] | [...] | 90d 55% ⚠ 接近随机 | fallback_used |
+
+**对比总结**:
+- QQQ 的 180d 证据链最完整(reliability 80%+、source 无 stale、3 条支持 / 0 条反证)
+- BTC 是次强选择,但 ETF 流入最近放缓需持续观察
+- Gold 可靠性偏弱,若用户已有黄金配置可维持,新仓位不推荐从 guanfu 这一侧新增
+
+[若 portfolio_context 存在] 结合你组合当前 [X% BTC、Y% QQQ、Z% cash],在 [ceiling 约束下] 优先考虑 [有空间且证据最强者]。
+```
+
+**规则**:
+- **不打分,不排序**(只列各自证据)
+- 必出 reliability 列和 source_health 列
+- 对比总结不替用户选哪个,只陈述"哪个证据链更完整"
+- portfolio-aware 的结论分句只在 portfolio_context 存在时出现
+
+---
+
+## 完整输出骨架(合并 J1-J13)
+
+```
+## 📍 当前判断(J1, 3-5 句)
+## 🎯 投资者问答(J2, 按 profile 分层 或 portfolio-aware)
+## 🔮 概率情景推演(J4, 叙事路径 + 历史锚定 + conformal 区间)
+## 📏 合理估值区间(J5)
+## 🎯 触发条件清单(J6, 指标不价位)
+## 组合上下文(J9, 仅当 portfolio_context 存在)
+## ⚠️ 风险雷达(J3, 3-5 条)
+## ⚠ 行为护栏(J13, ≥3 条)
+## 📚 类似历史时刻 — 读 claim ledger 或 forecast 的 analogs
+## ✅ 下单前自查清单(J10, 决策型回答必出)
+```
+
+任何缺失对应字段的节可跳过,但**必出节不能省**:J1 / J2 / J3 / J13 / J10。
+
+---
 
 ### 域级方向规则
 
