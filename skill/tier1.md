@@ -42,6 +42,7 @@ tier: 1
 - `hard_blocked`(bool):`dir_hit < 0.50` 时 true
   - **true 时不要输出 median / p10 / p90 的具体数值**
   - 只说 "该 horizon 在历史回测中方向命中率低于随机,不给数值预测" + 附 reliability_note
+  - ⚠ **契约提示**:即使 `hard_blocked=true`,`median_return_pct` / `p10_return_pct` / `p90_return_pct` / `expected_price` 等字段**仍在 JSON 中保持原值**(保留给 claim ledger 做事后回归校准)。Claude / MCP 消费方**必须先判 `hard_blocked`**,再决定是否渲染数值,不能直接取 median 字段。
 
 ### 当前 (asset, horizon) 可靠性表(截至 2026-05-09)
 

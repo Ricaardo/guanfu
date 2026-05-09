@@ -65,7 +65,12 @@ var assetHorizonReliability = map[string]map[int]HorizonReliability{
 	"gold": {
 		30:  {DirHit: 0.510, NTests: 51, AsOf: "2026-05-09"},
 		90:  {DirHit: 0.549, NTests: 51, AsOf: "2026-05-09"},
-		180: {DirHit: 0.490, NTests: 51, AsOf: "2026-05-09"}, // dropped from default but still queryable
+		// 180d is intentionally retained here after being dropped from
+		// assetHorizons["gold"] (forecast.go). Users who override via
+		// --forecast-horizons 180 can still query this cell and get the
+		// hard-block caveat; removing it would silently suppress the
+		// warning for explicit queries.
+		180: {DirHit: 0.490, NTests: 51, AsOf: "2026-05-09"},
 	},
 	"hs300": {
 		30:  {DirHit: 0.468, NTests: 47, AsOf: "2026-05-09"},

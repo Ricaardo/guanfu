@@ -122,7 +122,7 @@ FetchSnapshot → AssetSnapshot          (cmd/guanfu/main.go 或 cmd/guanfu-mcp/
 3. 取距离最近 `TopK` 个，按 `DiversifyWindowDays` 去重相邻日。
 4. 对每个 horizon `h`，统计 analogs 在 `+h` 天的前向收益 → quantiles + 概率桶 + dominant scenario label。
 
-**关键 invariant**：feature 数量 = `len(opts.Extractors)`，不是固定 11。`expectedFeatureCount = 11` 是 BTC 历史遗留值，被 `featureCoverage` 用作分母——但用 `clamp01` 截到 [0,1]，所以 13 features 的 Equity 显示为 100%，不会失真，只是上报覆盖率失去鉴别力。改这个常量需要审计所有 feature_coverage 消费者。
+**关键 invariant**：feature 数量 = `len(opts.Extractors)`，不是固定 11。G3 已落地：`probeExpectedFeatures`（`forecast.go:489`）在过去 `expectedProbeWindowDays = 60` 天窗口里探测单日 extractor bundle 能达到的最大 feature count 与 weight 总和，作为 `featureCoverage` 分母。旧常量 `expectedFeatureCount = 11` 已删除。加新 feature / 改 weight 会直接反映到 coverage 分母——回测恶化超预算（见 § 回归预算）时回滚即可。
 
 ## 每资产 horizons（B5，2026-05-09 修订）
 
