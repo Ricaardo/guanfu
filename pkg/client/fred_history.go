@@ -1,0 +1,170 @@
+// FRED daily series → PriceStore archive (incremental).
+//
+// FetchMacroData (in fred.go) returns a snapshot struct used by panels but
+// does not persist series history. This file adds historical archive support
+// for the daily series guanfu kNN extractors consume:
+//
+//   fred_dxy          DTWEXBGS    Trade-Weighted USD (daily)
+//   fred_dgs10        DGS10       10Y Treasury (daily)
+//   fred_dfii10       DFII10      10Y TIPS / real yield (daily)
+//   fred_yield_curve  T10Y2Y      10Y-2Y spread (daily)
+//   fred_breakeven    T10YIE      10Y breakeven inflation (daily)
+//   fred_hy_spread    BAMLH0A0HYM2  ICE BofA US HY OAS (daily)
+//
+// Requires FRED_API_KEY. Without it, FRED sources skip with a clear note
+// rather than failing — keeps the unified refresh pipeline running.
+
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Ricaardo/guanfu/pkg/store"
+)
+
+// FREDSource maps one FRED series ID → one PriceStore key.
+type FREDSource struct {
+	StoreKey    string // e.g. "fred_dxy"
+	Series      string // e.g. "DTWEXBGS"
+	Description string
+	StartDate   string // YYYY-MM-DD floor for full pull (FRED returns from this date)
+}
+
+// DefaultFREDSources lists every fred_* series referenced by current
+// extractors. Adding a new series here automatically wires it into refresh.
+func DefaultFREDSources() []*FREDSource {
+	return []*FREDSource{
+		{StoreKey: "fred_dxy", Series: "DTWEXBGS", Description: "Trade-weighted USD (Broad)", StartDate: "2006-01-01"},
+		{StoreKey: "fred_dgs10", Series: "DGS10", Description: "10Y Treasury yield", StartDate: "1990-01-01"},
+		{StoreKey: "fred_dfii10", Series: "DFII10", Description: "10Y TIPS / real yield", StartDate: "2003-01-01"},
+		{StoreKey: "fred_yield_curve", Series: "T10Y2Y", Description: "10Y-2Y spread", StartDate: "1976-06-01"},
+		{StoreKey: "fred_breakeven", Series: "T10YIE", Description: "10Y breakeven inflation", StartDate: "2003-01-01"},
+		{StoreKey: "fred_hy_spread", Series: "BAMLH0A0HYM2", Description: "BofA US HY OAS", StartDate: "1996-12-31"},
+	}
+}
+
+func (f *FREDSource) Key() string         { return f.StoreKey }
+func (f *FREDSource) DisplayName() string { return f.StoreKey + " (" + f.Description + ")" }
+
+// Refresh fetches the gap between PriceStore last_date and today from FRED.
+// On full import, walks back to f.StartDate.
+func (f *FREDSource) Refresh(ctx context.Context, s *store.PriceStore) (*RefreshResult, error) {
+	apiKey := strings.TrimSpace(os.Getenv("FRED_API_KEY"))
+	if apiKey == "" {
+		return &RefreshResult{
+			Key: f.StoreKey, DisplayName: f.DisplayName(),
+			Mode:  "skip",
+			Error: "FRED_API_KEY not set",
+		}, nil
+	}
+
+	stale, lastDate := staleThreshold(s, f.StoreKey)
+	if !stale {
+		return freshSkipResult(f.StoreKey, f.DisplayName(), lastDate, s), nil
+	}
+
+	// Decide window: lastDate+1 → today for incremental, StartDate → today for full.
+	from := f.StartDate
+	mode := "full"
+	if lastDate != "" {
+		t, err := time.Parse("2006-01-02", lastDate)
+		if err == nil {
+			from = t.AddDate(0, 0, 1).Format("2006-01-02")
+			mode = "incremental"
+		}
+	}
+	to := time.Now().UTC().Format("2006-01-02")
+
+	points, err := fetchFREDSeriesRange(ctx, apiKey, f.Series, from, to)
+	if err != nil {
+		return nil, err
+	}
+	if len(points) == 0 {
+		// no new observations between from-to (e.g. weekend/holiday on incremental)
+		count, _ := s.Count(f.StoreKey)
+		return &RefreshResult{
+			Key: f.StoreKey, DisplayName: f.DisplayName(),
+			Mode: mode, Added: 0, Total: count, LastDate: lastDate,
+		}, nil
+	}
+
+	// Tag source for traceability — preserved by Save/Append.
+	src := "fred:" + f.Series
+	for i := range points {
+		points[i].Source = src
+	}
+
+	if mode == "full" {
+		if err := s.Save(f.StoreKey, points); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := s.Append(f.StoreKey, points); err != nil {
+			return nil, err
+		}
+	}
+
+	count, _ := s.Count(f.StoreKey)
+	last, _ := s.LastDate(f.StoreKey)
+	return &RefreshResult{
+		Key: f.StoreKey, DisplayName: f.DisplayName(),
+		Mode: mode, Added: len(points), Total: count, LastDate: last,
+	}, nil
+}
+
+// fetchFREDSeriesRange pulls observations from from..to inclusive.
+// FRED returns "." for missing values; those are filtered out.
+func fetchFREDSeriesRange(ctx context.Context, apiKey, series, from, to string) ([]store.PricePoint, error) {
+	q := url.Values{}
+	q.Set("series_id", series)
+	q.Set("api_key", apiKey)
+	q.Set("file_type", "json")
+	q.Set("observation_start", from)
+	q.Set("observation_end", to)
+	q.Set("limit", "100000")
+
+	u := fredObservationsURL + "?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	hc := &http.Client{Timeout: 30 * time.Second}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fred %s http %d", series, resp.StatusCode)
+	}
+
+	var parsed fredObservationsResp
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+
+	out := make([]store.PricePoint, 0, len(parsed.Observations))
+	for _, o := range parsed.Observations {
+		if o.Value == "." || o.Value == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(o.Value, 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, store.PricePoint{
+			Date:  o.Date,
+			Close: v,
+		})
+	}
+	return out, nil
+}

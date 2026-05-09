@@ -14,7 +14,7 @@
 
 | 路径 | 用途 |
 |---|---|
-| `cmd/guanfu` | 主 CLI。子命令：`btc`(默认) / `qqq` / `spy` / `gold` / `hs300` / `stock TICKER` / `import-stock TICKER` / `market` / `dca` / `allocate` / `backtest [ASSET\|all]` / `status` |
+| `cmd/guanfu` | 主 CLI。子命令：`btc`(默认) / `qqq` / `spy` / `gold` / `hs300` / `stock TICKER` / `import-stock TICKER` / `market` / `dca` / `allocate` / `backtest [ASSET\|all]` / `status` / `refresh` |
 | `cmd/guanfu-mcp` | MCP stdio server。Claude Desktop / Cursor 可直调 |
 | `cmd/guanfu-similar` | 历史相似度独立工具 |
 | `cmd/guanfu-backtest` | 回测 CLI（独立于 `guanfu backtest` 子命令） |
@@ -75,6 +75,31 @@ JSON 日频文件：`~/.guanfu/prices/<key>.json`。**Namespace 约定**：
 3. 30h TTL（覆盖周末 gap）
 
 **不要 bypass `FetchAndCacheStock` 直接 `s.Save("aapl", ...)`**——会污染核心资产 namespace。
+
+## 数据刷新 (`guanfu refresh`)
+
+23 个 source 统一刷新，首次全量、后续增量。每个 source 实现 `client.Source` 接口（Key/DisplayName/Refresh），按 dependency order 串行执行（外部 API 各有 rate limit，串行更易调试）。
+
+| 类别 | Source 实现 | 文件 | 数据键 |
+|---|---|---|---|
+| 核心价格 | `BTCSource` / `GoldSource` / `HS300Source` | `refresh_native.go` | `btc` / `gold` / `hs300` |
+| Yahoo ETF | `YahooETFSource` | `yahoo_history.go` | `qqq` `spy` `vixy` `tlt` `uup` `hs300_cny`(CNY=X) |
+| FRED 宏观 | `FREDSource` | `fred_history.go` | `fred_{dxy,dgs10,dfii10,yield_curve,breakeven,hy_spread}` |
+| 中国宏观 | `AkshareSource` | `akshare_history.go` | `hs300_{pmi,m2,lpr,volume,northbound,cpi}`（走 `scripts/akshare_bridge.py`） |
+| Shiller CAPE | `CAPESource` | `cape_history.go` | `spx_cape`（走 `scripts/import_cape.py`，月频 28d TTL） |
+| 任意美股 | `StockKeysSource` | `refresh_native.go` | 已 import 的 `stock_*`（依靠 `FetchAndCacheStock` 30h TTL 自动跳过） |
+
+**增量协议** (`refresh.go: staleThreshold`)：
+- `last_date` 在 24h 以内 → `mode="skip"`，不发请求
+- `last_date` 缺失 / 超过 24h → fetch（FRED/Yahoo 拉 `lastDate+1 → today`；akshare 全量返回再 Append+dedup）
+- CAPE 单独走 28 天 TTL（月频）
+
+**失败容忍**：单个 source 失败不影响其他；`fail` 状态在最终表中显式 surface，CLI exit code 1，但 stdout 表保留所有结果。
+
+**新加 source 时**：
+1. 实现 `Source` 接口（在已有 `*_history.go` 里加，或新建文件）
+2. 在 `cli_refresh.go: allRefreshSources()` 注册
+3. 跑 `go test ./pkg/client/ -run TestRefresh` 验证
 
 ## 数据流
 
@@ -222,6 +247,14 @@ Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/l
 | `pkg/client/btc_history.go` | BTC 历史拉取（CoinMetrics + Binance） |
 | `pkg/client/fetch_stock.go` | 任意美股 Yahoo fetch + namespace（D1） |
 | `pkg/client/fred.go` `gold.go` `hs300.go` `cross_asset.go` | 各数据源专用 |
+| `pkg/client/refresh.go` | 统一刷新框架（Source 接口 + RefreshAll） |
+| `pkg/client/refresh_native.go` | BTC/Gold/HS300/Stock 的 Source 实现 |
+| `pkg/client/yahoo_history.go` | YahooETFSource（QQQ/SPY/VIXY/TLT/UUP/CNY=X） |
+| `pkg/client/fred_history.go` | FREDSource（DXY/DGS10/DFII10/curve/breakeven/HY） |
+| `pkg/client/akshare_history.go` | AkshareSource（HS300 macros 走 Python bridge） |
+| `pkg/client/cape_history.go` | CAPESource（Shiller CAPE 走 Python script） |
+| `scripts/akshare_bridge.py` | AkShare CLI 桥（CSI300 + macros，stdin JSON 协议） |
+| `scripts/import_cape.py` | Shiller CAPE 一次性导入（XLS → JSON）|
 | `pkg/store/price.go` | PriceStore JSON 持久化 |
 | `pkg/model/types.go` | `MarketSnapshot` / `IndicatorPanel` / `Indicator` / `SnapshotData` |
 | `pkg/history/` | history.db SQLite（指标历史归档） |

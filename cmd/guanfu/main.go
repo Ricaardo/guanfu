@@ -81,6 +81,9 @@ func main() {
 	plain := flag.Bool("plain", false, "纯文本输出（无 emoji / box drawing）")
 	noEmoji := flag.Bool("no-emoji", false, "等同 --plain")
 	showVersion := flag.Bool("version", false, "打印版本并退出")
+	refreshOnly := flag.String("only", "", "[refresh] 仅刷新指定 key（逗号分隔），如 btc,fred_dxy")
+	refreshSkip := flag.String("skip", "", "[refresh] 跳过指定 key（逗号分隔）")
+	refreshDryRun := flag.Bool("dry-run", false, "[refresh] 列出将要执行的 source，不真正拉数据")
 	flag.Parse()
 
 	// Subcommand detection from trailing (non-flag) args.
@@ -172,6 +175,26 @@ func main() {
 	case "status":
 		runStatus(*jsonOut, *pretty, *plain || *noEmoji)
 		return
+	case "refresh":
+		// Refresh data flags can also appear after the subcommand, so re-scan
+		// trailing args (flag.Parse stops at the first positional).
+		for i := 1; i < len(trailing); i++ {
+			arg := trailing[i]
+			switch {
+			case arg == "--dry-run" || arg == "-dry-run":
+				*refreshDryRun = true
+			case strings.HasPrefix(arg, "--only="):
+				*refreshOnly = strings.TrimPrefix(arg, "--only=")
+			case strings.HasPrefix(arg, "-only="):
+				*refreshOnly = strings.TrimPrefix(arg, "-only=")
+			case strings.HasPrefix(arg, "--skip="):
+				*refreshSkip = strings.TrimPrefix(arg, "--skip=")
+			case strings.HasPrefix(arg, "-skip="):
+				*refreshSkip = strings.TrimPrefix(arg, "-skip=")
+			}
+		}
+		runRefresh(*refreshOnly, *refreshSkip, *refreshDryRun, *jsonOut, *pretty, *timeout)
+		return
 	case "hs300":
 		runEquityAsset("hs300", *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
 		return
@@ -179,7 +202,7 @@ func main() {
 		// default: BTC panel (existing behavior)
 	default:
 		fmt.Fprintf(os.Stderr, "guanfu: unknown subcommand %q\n", subcmd)
-		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status\n")
+		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status, refresh\n")
 		os.Exit(1)
 	}
 

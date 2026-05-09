@@ -77,67 +77,99 @@ func FetchLondonGoldPricePoints(ctx context.Context) ([]store.PricePoint, error)
 //   - primary: LBMA provider (preferred, covers 1968+)
 //   - fallback: WB/GOLD/PM (World Bank commodity prices)
 func fetchDBnomicsGold(ctx context.Context, hc *http.Client) ([]store.PricePoint, error) {
-	// DBnomics LBMA gold series. Try known provider codes.
+	// DBnomics LBMA gold series. Try known provider codes; first one that
+	// returns ≥1000 paginated records wins. The 2026 API enforces limit≤1000
+	// per call so we page in 1000-row chunks until the upstream stops growing.
 	providers := []string{"LBMA", "WB"}
 	datasets := []string{"GOLD", "GOLD"}
 	series := []string{"PM", "PM"}
+	const pageSize = 1000
 
 	for i := range providers {
-		u := fmt.Sprintf(
-			"https://api.db.nomics.world/v22/series/%s/%s/%s?observations=1&limit=25000",
-			url.PathEscape(providers[i]),
-			url.PathEscape(datasets[i]),
-			url.PathEscape(series[i]),
-		)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
-			continue
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := hc.Do(req)
-		if err != nil {
-			continue
-		}
-		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil || resp.StatusCode != http.StatusOK {
-			continue
-		}
-
-		var parsed dbnomicsSeriesResp
-		if err := json.Unmarshal(body, &parsed); err != nil {
-			continue
-		}
-		if len(parsed.Docs) == 0 {
-			continue
-		}
-
-		points := make([]store.PricePoint, 0, len(parsed.Docs))
-		for _, doc := range parsed.Docs {
-			if doc.Value == "" || doc.Value == "." {
-				continue
+		var all []store.PricePoint
+		for offset := 0; ; offset += pageSize {
+			u := fmt.Sprintf(
+				"https://api.db.nomics.world/v22/series/%s/%s/%s?observations=1&limit=%d&offset=%d",
+				url.PathEscape(providers[i]),
+				url.PathEscape(datasets[i]),
+				url.PathEscape(series[i]),
+				pageSize,
+				offset,
+			)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+			if err != nil {
+				break
 			}
-			var val float64
-			if _, err := fmt.Sscanf(doc.Value, "%f", &val); err != nil || val <= 0 {
-				continue
+			req.Header.Set("Accept", "application/json")
+
+			resp, err := hc.Do(req)
+			if err != nil {
+				break
 			}
-			points = append(points, store.PricePoint{
-				Date:   doc.Period,
-				Close:  val,
-				Source: fmt.Sprintf("dbnomics:%s/%s", providers[i], datasets[i]),
-			})
+			body, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil || resp.StatusCode != http.StatusOK {
+				break
+			}
+
+			var parsed dbnomicsSeriesResp
+			if err := json.Unmarshal(body, &parsed); err != nil {
+				break
+			}
+			if len(parsed.Docs) == 0 {
+				break
+			}
+
+			pre := len(all)
+			for _, doc := range parsed.Docs {
+				if doc.Value == "" || doc.Value == "." {
+					continue
+				}
+				var val float64
+				if _, err := fmt.Sscanf(doc.Value, "%f", &val); err != nil || val <= 0 {
+					continue
+				}
+				all = append(all, store.PricePoint{
+					Date:   doc.Period,
+					Close:  val,
+					Source: fmt.Sprintf("dbnomics:%s/%s", providers[i], datasets[i]),
+				})
+			}
+			added := len(all) - pre
+			// Stop when this page added fewer than pageSize valid rows.
+			if added < pageSize {
+				break
+			}
 		}
-		if len(points) >= 1000 {
-			return points, nil
+		if len(all) >= 1000 {
+			return all, nil
 		}
 	}
 
 	return nil, fmt.Errorf("no DBnomics gold series returned usable data")
 }
 
-// fetchYahooGold fetches XAUUSD=X from Yahoo Finance chart API.
+// fetchYahooGold fetches gold price from Yahoo Finance chart API.
+// Tries GC=F (COMEX gold futures, current canonical symbol) first;
+// falls back to XAUUSD=X (delisted in 2026 but kept for historical
+// resilience in case it returns) and GLD ETF as a last-resort proxy.
 func fetchYahooGold(ctx context.Context, hc *http.Client) ([]store.PricePoint, error) {
+	symbols := []string{"GC=F", "XAUUSD=X", "GLD"}
+	var lastErr error
+	for _, sym := range symbols {
+		points, err := fetchYahooGoldSymbol(ctx, hc, sym)
+		if err == nil && len(points) > 0 {
+			return points, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("yahoo gold: no symbol returned data")
+	}
+	return nil, lastErr
+}
+
+func fetchYahooGoldSymbol(ctx context.Context, hc *http.Client, symbol string) ([]store.PricePoint, error) {
 	now := time.Now().Unix()
 	from := now - int64(goldMaxHistoryDays*86400)
 
@@ -147,7 +179,8 @@ func fetchYahooGold(ctx context.Context, hc *http.Client) ([]store.PricePoint, e
 	params.Set("interval", "1d")
 	params.Set("includePrePost", "false")
 
-	apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?%s", params.Encode())
+	apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?%s",
+		url.PathEscape(symbol), params.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
@@ -162,7 +195,7 @@ func fetchYahooGold(ctx context.Context, hc *http.Client) ([]store.PricePoint, e
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-		return nil, fmt.Errorf("yahoo gold http %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("yahoo gold %s http %d: %s", symbol, resp.StatusCode, string(body))
 	}
 
 	var parsed yahooChartResp
@@ -189,7 +222,7 @@ func fetchYahooGold(ctx context.Context, hc *http.Client) ([]store.PricePoint, e
 		points = append(points, store.PricePoint{
 			Date:   date,
 			Close:  *c,
-			Source: "yahoo:XAUUSD=X",
+			Source: "yahoo:" + symbol,
 		})
 	}
 
