@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Ricaardo/guanfu/pkg/alerts"
+	"github.com/Ricaardo/guanfu/pkg/calendar"
 	"github.com/Ricaardo/guanfu/pkg/claim"
 	"github.com/Ricaardo/guanfu/pkg/client"
 	"github.com/Ricaardo/guanfu/pkg/engine"
@@ -255,6 +256,20 @@ func runDigest(args []string) {
 		}
 		change := (p0 - p7) / p7 * 100
 		fmt.Printf("  %-6s  $%10.2f   (7d: %+.2f%%)\n", strings.ToUpper(k), p0, change)
+	}
+	fmt.Println()
+
+	// Upcoming events (F7). 14-day look-ahead is enough for FOMC /
+	// next-month CPI; longer confuses the "near-term heads-up" framing.
+	events := calendar.Upcoming(time.Now().UTC(), 14)
+	if len(events) == 0 {
+		fmt.Println("Events:  none in next 14d")
+		return
+	}
+	fmt.Println("Events (next 14d):")
+	for _, e := range events {
+		days := int(e.Date.Sub(time.Now().UTC()).Hours() / 24)
+		fmt.Printf("  %s  (+%dd)  %s\n", e.Date.Format("2006-01-02"), days, e.Name)
 	}
 }
 
