@@ -1,32 +1,20 @@
-# btc-guanfu skill (v2)
+# btc-guanfu skill (v3)
 
-观复 / 多资产投资盘面 + 解读知识库的 Claude Code skill 包。
+观复 — 多资产投资盘面 + 解读知识库的 Claude Code skill 包。
 
-`SKILL.md` 是数据契约 + 指标手册，`kb/` 是 10 个因果推理文件（宏观传导、流动性管道、加密结构、跨资产、地缘冲击、regime taxonomy、历史类比、决策矩阵、危机 playbook）。
-
-## v2 新增
-
-- 多资产支持 (BTC/QQQ/SPY/Gold/CSI300)
-- kNN 走势推演 (--forecast / --forecast-path)
-- DCA 定投策略对比 (guanfu dca)
-- 懒人组合配置 (guanfu allocate)
-- 多资产回测 (guanfu backtest all)
-- MCP tools 支持 asset 参数
-
-## 安装
+安装：
 
 ```bash
 ln -s "$(pwd)/skill" ~/.claude/skills/btc-guanfu
 ```
 
-或 sparse checkout：
+内容：
 
-```bash
-git clone --depth=1 --filter=blob:none --sparse https://github.com/Ricaardo/guanfu.git
-cd guanfu && git sparse-checkout set skill
-ln -s "$(pwd)/skill" ~/.claude/skills/btc-guanfu
-```
+| 文件 | 用途 |
+|---|---|
+| `SKILL.md` | 完整版 ~850 行：指标手册（定义 + 阈值 + 失效情形）、知识库指针、读盘工作流、图表代码 |
+| `tier1.md` | **数据契约 + 可靠性表 + 关键阈值** — AI 每次读盘必载（~200 行）|
+| `tier2.md` | 决策框架 + 域级方向规则 + 行为护栏 + 输出模板 — 做判断时读（~160 行） |
+| `kb/` | 10 个因果推理文件（宏观传导 / 危机 playbook / 历史类比等）|
 
-## 触发
-
-用户问「BTC/QQQ/SPY/黄金/沪深300 该不该买/卖」「估值如何」「顶/底」「定投」「AHR999/MVRV」「周期位置」「观复」时自动激活。
+推荐加载顺序：`guanfu://skill/tier1`（必载）→ `guanfu://skill/tier2`（决策时）→ `SKILL.md` 对应节（追问细节时）。

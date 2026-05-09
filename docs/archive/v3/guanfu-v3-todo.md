@@ -56,7 +56,6 @@ P1 ▸ 功能 / 数据缺失         P3 ▸ 调研 / 扩展
 | # | 优先级 | 改动 | 文件 |
 |---|---|---|---|
 | E1 | **P0** | README 首屏重写 + **明确用户画像** | `README.md` |
-| E1 | **P0** | README 首屏重写 + **明确用户画像** | `README.md` |
 | E2 | **P0** | 命中率表同步 v6 baseline | `README.md` |
 | E3 | **P0** | SKILL.md CLI 命令节补完(`stock` / `import-stock` / `refresh`) | `skill/SKILL.md` |
 | E4 | **P1** | SKILL.md MCP 工具表补 `get_stock_forecast` + `guanfu calibrate` | `skill/SKILL.md` |

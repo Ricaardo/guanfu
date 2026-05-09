@@ -186,7 +186,7 @@ Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/l
 | `go vet ./...` | 静态检查 |
 | `make build` / `make mcp` / `make all` | 二进制构建 |
 
-**回归预算**(来自 `docs/guanfu-v3-todo.md`):
+**回归预算**(来自 `docs/archive/v3/guanfu-v3-todo.md`):
 - 任一 horizon dir hit 下降 ≥ 3pp → 回滚改动单独 review
 - PIT 偏离 0.5 加大 ≥ 0.05 → 回滚或调权重
 - backtest panic / 失败 → 立即回滚
@@ -234,7 +234,7 @@ Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/l
 | `README.md` | 用户视角的功能 + 安装 |
 | `skill/SKILL.md` | **skill 消费方文档**(AI 用 guanfu 数据回答用户的问题,不是改 guanfu) |
 | `skill/tier1.md` / `tier2.md` | MCP 分层必载上下文(tier1 数据契约,tier2 决策框架 + 行为护栏) |
-| `docs/guanfu-v3-todo.md` | **当前 roadmap + 改动审计**——本文件 + roadmap 是 AI coder 的两大上下文 |
+| `docs/archive/v3/guanfu-v3-todo.md` | **v3 已完成 roadmap + 改动审计**——已归档，参考用 |
 | `docs/v4-thinking.md` | v4 方向 decision log(不是 roadmap,等 90d 实测再拍板) |
 | `docs/audience.md` | 用户画像 Primary/Secondary/Tertiary + 设计优先级 |
 | `docs/DATA-SOURCES.md` | 30+ 数据源一览 + refresh 框架 |

@@ -91,6 +91,8 @@ btc 180d walk-forward:
 
 ### 当前观察(2026-05-09 post-refresh,v6 baseline)
 
+纯 (asset, horizon) 命中率表见 [`skill/tier1.md`](../skill/tier1.md) § 3。本表聚焦 walk-forward **诊断**：
+
 | 资产 | 全局 dir_hit | walk-forward 诊断 |
 |---|---|---|
 | BTC 90d | 65% | 各年均衡 55-80%,无 regime 偏斜 |
@@ -110,7 +112,7 @@ go test ./pkg/engine/ -run TestBacktestBundles -v
 
 ### 更新 reliability 表
 
-如果 walk-forward 数字变化超出回归预算(任一 horizon dir_hit 下降 ≥ 3pp),更新 `pkg/forecast/reliability.go` 的 `assetHorizonReliability` 表 + `AsOf` 字段。具体规则见 `docs/guanfu-v3-todo.md` 回归预算节。
+如果 walk-forward 数字变化超出回归预算(任一 horizon dir_hit 下降 ≥ 3pp),更新 `pkg/forecast/reliability.go` 的 `assetHorizonReliability` 表 + `AsOf` 字段。具体规则见 `docs/archive/v3/guanfu-v3-todo.md` 回归预算节。
 
 ### 为什么不在 BuildForecast 里实时跑 walk-forward
 

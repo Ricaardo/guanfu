@@ -41,7 +41,7 @@ return math.Sqrt(sum / weightSum), matched, true
   - ≥ +2pp → 权重可加到 **0.7-1.0**,继续观察
   - 持平 → 保留 **0.5**,不硬推
   - ≤ -2pp → 删除,别留负贡献
-- 如果新 feature 导致某个 bundle 的**某些 horizon dir_hit 下降 ≥ 3pp**,触发回归预算(见 `docs/guanfu-v3-todo.md`),先回滚再决定
+- 如果新 feature 导致某个 bundle 的**某些 horizon dir_hit 下降 ≥ 3pp**,触发回归预算(见 `docs/archive/v3/guanfu-v3-todo.md`),先回滚再决定
 
 ### 何时走 RFC 引入显式归一化
 
