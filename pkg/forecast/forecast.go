@@ -178,6 +178,13 @@ type HorizonForecast struct {
 	ConformalCoverage   float64 `json:"conformal_coverage,omitempty"`    // finite-sample achievable coverage ∈ [0,1]
 	ConformalLowPrice   float64 `json:"conformal_low_price,omitempty"`
 	ConformalHighPrice  float64 `json:"conformal_high_price,omitempty"`
+
+	// Ensemble cross-check fields (G4). A ridge regression fit on the
+	// same (candidate_features, forward_return) pairs predicts the
+	// current horizon's return as a scalar; large disagreement with
+	// the kNN median flags regime stress. See ensemble.go.
+	EnsembleLinearPct       float64 `json:"ensemble_linear_pct,omitempty"`
+	EnsembleDisagreementPct float64 `json:"ensemble_disagreement_pct,omitempty"`
 }
 
 type Analog struct {
@@ -368,7 +375,7 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 	}
 
 	analogs := buildAnalogs(points, selected, opts.Horizons)
-	horizons := buildHorizonForecasts(points[currentIdx].Close, points, selected, opts.Horizons)
+	horizons := buildHorizonForecasts(points[currentIdx].Close, points, selected, opts.Horizons, currentFeatures, candidates)
 	// Annotate each horizon with its reliability caveat (if asset is set
 	// and a recorded reliability cell flags this horizon as weak/untested).
 	if opts.Asset != "" {
@@ -901,7 +908,7 @@ func buildAnalogs(points []Point, selected []candidate, horizons []int) []Analog
 	return out
 }
 
-func buildHorizonForecasts(currentPrice float64, points []Point, selected []candidate, horizons []int) []HorizonForecast {
+func buildHorizonForecasts(currentPrice float64, points []Point, selected []candidate, horizons []int, currentFeatures featureSet, allCandidates []candidate) []HorizonForecast {
 	out := make([]HorizonForecast, 0, len(horizons))
 	for _, h := range horizons {
 		returns := make([]float64, 0, len(selected))
@@ -916,6 +923,10 @@ func buildHorizonForecasts(currentPrice float64, points []Point, selected []cand
 		}
 		hf := summarizeHorizon(currentPrice, h, returns)
 		annotateHorizonConformal(&hf, returns, currentPrice)
+		// G4: ridge regression on the full candidate pool (not just
+		// selected top-K) — more samples give the linear model more
+		// to fit and better detect when kNN is an outlier view.
+		annotateHorizonEnsemble(&hf, currentFeatures, allCandidates, h, points)
 		out = append(out, hf)
 	}
 	return out

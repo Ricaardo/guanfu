@@ -970,6 +970,18 @@ func printHumanForecast(fc *forecast.Forecast, plain bool) {
 				h.ConformalLowPct, h.ConformalHighPct,
 				h.ConformalCoverage*100)
 		}
+		if h.EnsembleLinearPct != 0 || h.EnsembleDisagreementPct != 0 {
+			disagreement := h.EnsembleDisagreementPct
+			if disagreement < 0 {
+				disagreement = -disagreement
+			}
+			alignment := "一致"
+			if disagreement > 5 {
+				alignment = "⚠ 分歧较大,forecast 置信度下降"
+			}
+			fmt.Printf("          ensemble 线性: %+.2f%%  (vs kNN median 差异 %+.2f%% — %s)\n",
+				h.EnsembleLinearPct, h.EnsembleDisagreementPct, alignment)
+		}
 		if h.ReliabilityNote != "" {
 			fmt.Printf("          %s\n", h.ReliabilityNote)
 		}
