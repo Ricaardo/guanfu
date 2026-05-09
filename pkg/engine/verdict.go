@@ -40,6 +40,24 @@ type Verdict struct {
 	KillCriteria    []string     `json:"kill_criteria"`    // 失效条件
 	ClusterNotes    []string     `json:"cluster_notes"`    // 簇级去重说明
 	MissingNote     string       `json:"missing_note,omitempty"`
+
+	// PortfolioContext is populated when the caller applies
+	// AnnotateVerdictWithPortfolio. Nil in portfolio-agnostic mode
+	// (keeps v2 JSON output byte-identical for no-portfolio paths).
+	PortfolioContext *PortfolioContext `json:"portfolio_context,omitempty"`
+}
+
+// PortfolioContext expresses what the verdict means FOR THIS USER given
+// their declared holdings, ceiling, and horizon. It is additive — Verdict
+// core fields are untouched by its presence or absence. See pkg/portfolio.
+type PortfolioContext struct {
+	HorizonMatch      string   `json:"horizon_match"`       // "ok" / "mismatch" / "unknown"
+	CurrentWeightPct  float64  `json:"current_weight_pct"`  // 0-100; 0 if not in portfolio
+	CeilingPct        float64  `json:"ceiling_pct"`         // 0 if no ceiling declared
+	Overweight        bool     `json:"overweight"`          // weight > ceiling
+	RoomToCeilingPct  float64  `json:"room_to_ceiling_pct"` // max(0, ceiling-weight)
+	RiskBudget        string   `json:"risk_budget"`         // echoed from Preferences
+	Notes             []string `json:"notes,omitempty"`     // short human-readable lines
 }
 
 // DomainVote 单个域的方向与依据。
