@@ -12,6 +12,7 @@ package features_test
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
 	"testing"
 
@@ -86,7 +87,11 @@ func TestUSStockExtractors_AcceptanceAAPL(t *testing.T) {
 	}
 
 	// Sanity: data freshness so we know the test fired against real data.
-	if fi, err := os.Stat(s.Dir + "/stock_aapl.json"); err == nil {
+	dir := s.Dir
+	if dir == "" {
+		dir = store.DefaultPricesDir()
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "stock_aapl.json")); err == nil {
 		t.Logf("stock_aapl.json size=%d bytes", fi.Size())
 	}
 }

@@ -97,7 +97,7 @@ FetchSnapshot → AssetSnapshot          (cmd/guanfu/main.go 或 cmd/guanfu-mcp/
 3. 取距离最近 `TopK` 个，按 `DiversifyWindowDays` 去重相邻日。
 4. 对每个 horizon `h`，统计 analogs 在 `+h` 天的前向收益 → quantiles + 概率桶 + dominant scenario label。
 
-**关键 invariant**：feature 数量 = `len(opts.Extractors)`，不是固定 11。`expectedFeatureCount` 是 BTC 历史值，不要拿来当全局校验。
+**关键 invariant**：feature 数量 = `len(opts.Extractors)`，不是固定 11。`expectedFeatureCount = 11` 是 BTC 历史遗留值，被 `featureCoverage` 用作分母——但用 `clamp01` 截到 [0,1]，所以 13 features 的 Equity 显示为 100%，不会失真，只是上报覆盖率失去鉴别力。改这个常量需要审计所有 feature_coverage 消费者。
 
 ## 每资产 horizons（B5）
 
@@ -109,7 +109,7 @@ FetchSnapshot → AssetSnapshot          (cmd/guanfu/main.go 或 cmd/guanfu-mcp/
 | Gold | `30, 60, 90, 120, 180`（动量反转中段加密） |
 | BTC / HS300 / 任意 stock | `30, 90, 180`（默认） |
 
-**DefaultOptions 陷阱**（B5 fix）：旧代码里 `if len(opts.Horizons) == 0 { opts = forecast.DefaultOptions() }` 会**整个替换 opts**，clobber 掉调用方设置的 `Extractors`/`TopK`。新代码必须只补字段：
+**DefaultOptions 陷阱**（B5 fix）：旧代码里 `if len(opts.Horizons) == 0 { opts = forecast.DefaultOptions() }` 会**整个替换 opts**，理论上能 clobber 调用方设置的 `Extractors`/`TopK`。在当前所有调用路径里，asset 在这一行之后立刻又写一次 `opts.Extractors`，所以**事实上没有 bug 触发过**——是防御性修正而不是热修。新代码统一只补字段，避免后续重构无意中触雷：
 
 ```go
 if len(opts.Horizons) == 0 {

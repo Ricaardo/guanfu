@@ -297,6 +297,14 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		asset = "btc"
 	}
 
+	// Enforce the schema enum at dispatch for tools that accept asset.
+	// get_stock_forecast uses ticker, not asset, so skip there.
+	if name != "get_stock_forecast" && name != "get_domain" && name != "get_indicator" {
+		if rpcErr := validateToolAsset(asset); rpcErr != nil {
+			return "", rpcErr
+		}
+	}
+
 	switch name {
 	case "get_panel", "get_btc_panel":
 		timeout, rpcErr := timeoutFromArgs(args)
@@ -543,7 +551,13 @@ func handleResourceRead(uri string) (string, *rpcError) {
 		return string(b), nil
 	case "forecast":
 		panel := getOrFetchPanel(asset, defaultPanelTimeout)
-		fc, err := buildForecast(asset, defaultPanelTimeout, forecast.DefaultOptions())
+		// B5 (resource): leave Horizons empty so Asset.BuildForecast
+		// fills via forecast.HorizonsForAsset (matches the get_forecast
+		// tool path; otherwise QQQ/SPY/Gold resources would silently
+		// return 3 horizons while the tool returns 5).
+		opts := forecast.DefaultOptions()
+		opts.Horizons = nil
+		fc, err := buildForecast(asset, defaultPanelTimeout, opts)
 		if err != nil {
 			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
 		}
@@ -554,6 +568,7 @@ func handleResourceRead(uri string) (string, *rpcError) {
 }
 
 // extractAsset parses the "asset" field from tool arguments.
+// Returns "btc" when missing/empty (default per schema).
 func extractAsset(args json.RawMessage) string {
 	var p struct {
 		Asset string `json:"asset"`
@@ -561,7 +576,22 @@ func extractAsset(args json.RawMessage) string {
 	if err := json.Unmarshal(args, &p); err != nil || p.Asset == "" {
 		return "btc"
 	}
-	return p.Asset
+	return strings.ToLower(strings.TrimSpace(p.Asset))
+}
+
+// validateToolAsset enforces the JSON-schema enum at dispatch time.
+// Without it, an unsupported asset bubbles up as a cryptic engine
+// "no asset registered" — clients deserve a -32602 with the list.
+func validateToolAsset(asset string) *rpcError {
+	for _, a := range supportedResourceAssets {
+		if asset == a {
+			return nil
+		}
+	}
+	return &rpcError{
+		Code:    -32602,
+		Message: fmt.Sprintf("invalid asset %q; supported: %s", asset, strings.Join(supportedResourceAssets, ", ")),
+	}
 }
 
 func resourceMimeType(uri string) string {
@@ -650,7 +680,12 @@ func buildForecast(asset string, timeout time.Duration, opts forecast.Options) (
 		return a.BuildForecast(snap, opts)
 	}
 
-	// BTC flow
+	// BTC flow — bypass Asset wrapper, but still honor per-asset horizons
+	// for symmetry with the non-BTC path (currently same as defaultHorizons,
+	// but decouples this caller from the global default constant).
+	if len(opts.Horizons) == 0 {
+		opts.Horizons = forecast.HorizonsForAsset("btc")
+	}
 	points, err := client.LoadOrUpdateBTCDailyHistory(ctx, "")
 	if err != nil {
 		return nil, err
