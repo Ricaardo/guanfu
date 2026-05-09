@@ -44,10 +44,13 @@ func DefaultFREDSources() []*FREDSource {
 	return []*FREDSource{
 		{StoreKey: "fred_dxy", Series: "DTWEXBGS", Description: "Trade-weighted USD (Broad)", StartDate: "2006-01-01"},
 		{StoreKey: "fred_dgs10", Series: "DGS10", Description: "10Y Treasury yield", StartDate: "1990-01-01"},
+		{StoreKey: "fred_dgs3mo", Series: "DGS3MO", Description: "3M Treasury yield (risk-free baseline, F4)", StartDate: "1981-09-01"},
 		{StoreKey: "fred_dfii10", Series: "DFII10", Description: "10Y TIPS / real yield", StartDate: "2003-01-01"},
 		{StoreKey: "fred_yield_curve", Series: "T10Y2Y", Description: "10Y-2Y spread", StartDate: "1976-06-01"},
 		{StoreKey: "fred_breakeven", Series: "T10YIE", Description: "10Y breakeven inflation", StartDate: "2003-01-01"},
 		{StoreKey: "fred_hy_spread", Series: "BAMLH0A0HYM2", Description: "BofA US HY OAS", StartDate: "1996-12-31"},
+		{StoreKey: "fred_tga", Series: "WTREGEN", Description: "Treasury General Account (F1)", StartDate: "2005-01-05"},
+		{StoreKey: "fred_rrp", Series: "RRPONTSYD", Description: "Overnight Reverse Repo (F1)", StartDate: "2013-02-04"},
 	}
 }
 

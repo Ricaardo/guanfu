@@ -40,6 +40,7 @@ func DefaultAkshareSources() []*AkshareSource {
 		{StoreKey: "hs300_volume", Series: "volume", Note: "CSI300 daily volume", Source: "akshare:csi300_volume"},
 		{StoreKey: "hs300_northbound", Series: "northbound", Note: "Northbound net buy (daily)", Source: "akshare:northbound"},
 		{StoreKey: "hs300_cpi", Series: "cpi", Note: "China CPI YoY (monthly)", Source: "akshare:CPI"},
+		{StoreKey: "hs300_margin", Series: "margin", Note: "SSE+SZSE margin balance total (daily, F3)", Source: "akshare:margin"},
 	}
 }
 

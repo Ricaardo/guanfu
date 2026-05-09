@@ -132,6 +132,32 @@ def fetch_hs300_macro(series):
             if value_col is None:
                 value_col = cols[1]
             df = df[[date_col, value_col]].rename(columns={date_col: "date", value_col: "close"})
+        elif series == "margin":
+            # F3: A-share margin-balance crowdedness proxy. Combines SSE + SZSE
+            # financing balance ("融资余额"). Output is sum in CNY; rank/percentile
+            # is computed downstream from history. Daily frequency.
+            df_sse = ak.stock_margin_sse()
+            df_szse = ak.stock_margin_szse()
+            # Both return date + 融资余额 (and other cols); use date + 融资余额.
+            def _slim(df_raw, bal_candidates):
+                cols = list(df_raw.columns)
+                date_col = next((c for c in cols if "日期" in c or c == "date"), cols[0])
+                bal_col = next((c for c in cols if c in bal_candidates), None)
+                if bal_col is None:
+                    # fall back: first numeric column after date
+                    for c in cols:
+                        if c != date_col and df_raw[c].dtype.kind in "biufc":
+                            bal_col = c; break
+                slim = df_raw[[date_col, bal_col]].rename(columns={date_col: "date", bal_col: "close"})
+                slim["close"] = slim["close"].astype(float)
+                return slim
+            sse_slim = _slim(df_sse, {"融资余额", "rzye"})
+            szse_slim = _slim(df_szse, {"融资余额", "rzye"})
+            # Outer join on date; sum where both present, otherwise skip that
+            # date (avoids apparent drops when one exchange hasn't published).
+            merged = sse_slim.merge(szse_slim, on="date", how="outer", suffixes=("_sse", "_szse")).dropna()
+            merged["close"] = merged["close_sse"] + merged["close_szse"]
+            df = merged[["date", "close"]]
         else:
             return {"error": f"unknown series: {series}"}
 
