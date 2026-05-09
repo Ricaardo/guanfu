@@ -224,11 +224,68 @@ func TestResourceMimeTypeMatchesDeclaredResources(t *testing.T) {
 		"guanfu://panel/latest":       "application/json",
 		"guanfu://verdict/latest":     "application/json",
 		"guanfu://forecast/latest":    "application/json",
+		"guanfu://panel/latest/btc":   "application/json",
+		"guanfu://panel/latest/qqq":   "application/json",
+		"guanfu://verdict/latest/spy": "application/json",
+		"guanfu://forecast/latest/gold":"application/json",
+		"guanfu://forecast/latest/hs300":"application/json",
 		"guanfu://unknown":            "text/plain",
 	}
 	for uri, want := range cases {
 		if got := resourceMimeType(uri); got != want {
 			t.Fatalf("resourceMimeType(%q) = %q, want %q", uri, got, want)
+		}
+	}
+}
+
+// C3: parseResourceURI parses guanfu://{kind}/latest[/{asset}] correctly.
+func TestParseResourceURI(t *testing.T) {
+	cases := []struct {
+		uri       string
+		wantKind  string
+		wantAsset string
+		wantOK    bool
+	}{
+		{"guanfu://panel/latest", "panel", "btc", true},
+		{"guanfu://panel/latest/btc", "panel", "btc", true},
+		{"guanfu://panel/latest/qqq", "panel", "qqq", true},
+		{"guanfu://verdict/latest/gold", "verdict", "gold", true},
+		{"guanfu://forecast/latest/hs300", "forecast", "hs300", true},
+		{"guanfu://panel/latest/eth", "", "", false}, // unsupported asset
+		{"guanfu://knowledge/skill.md", "", "", false},
+		{"guanfu://panel/old", "", "", false}, // not "latest"
+		{"unknown://foo", "", "", false},
+		{"", "", "", false},
+	}
+	for _, c := range cases {
+		kind, asset, ok := parseResourceURI(c.uri)
+		if ok != c.wantOK || kind != c.wantKind || asset != c.wantAsset {
+			t.Errorf("parseResourceURI(%q) = (%q,%q,%v), want (%q,%q,%v)",
+				c.uri, kind, asset, ok, c.wantKind, c.wantAsset, c.wantOK)
+		}
+	}
+}
+
+// C3: resources/list must include per-asset URIs for all 4 equity assets.
+func TestToolsListIncludesPerAssetResources(t *testing.T) {
+	resp := handleRequest(&rpcRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "resources/list",
+	})
+	b, _ := json.Marshal(resp)
+	body := string(b)
+	for _, suffix := range []string{
+		"/latest/qqq", "/latest/spy", "/latest/gold", "/latest/hs300",
+	} {
+		if !strings.Contains(body, suffix) {
+			t.Fatalf("per-asset URI %q not in resources/list: %s", suffix, body)
+		}
+	}
+	// Legacy unsuffixed URIs must still be present.
+	for _, suffix := range []string{"/latest", "/skill.md"} {
+		if !strings.Contains(body, suffix) {
+			t.Fatalf("legacy URI containing %q not in resources/list: %s", suffix, body)
 		}
 	}
 }

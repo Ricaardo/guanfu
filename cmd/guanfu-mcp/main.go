@@ -266,12 +266,7 @@ func handleRequest(req *rpcRequest) *rpcResponse {
 		return ok(req.ID, map[string]any{"content": []map[string]any{{"type": "text", "text": result}}})
 
 	case "resources/list":
-		return ok(req.ID, map[string]any{"resources": json.RawMessage(`[
-			{"uri":"guanfu://knowledge/skill.md","name":"SKILL.md","mimeType":"text/markdown","description":"观复 BTC 投资盘面解读知识库"},
-			{"uri":"guanfu://panel/latest","name":"最新盘面","mimeType":"application/json","description":"缓存的最新完整盘面 JSON"},
-			{"uri":"guanfu://verdict/latest","name":"最新结构化读盘","mimeType":"application/json","description":"缓存盘面的 verdict JSON"},
-			{"uri":"guanfu://forecast/latest","name":"最新走势推演","mimeType":"application/json","description":"缓存盘面的 forecast JSON"}
-		]`)})
+		return ok(req.ID, map[string]any{"resources": buildResourcesList()})
 
 	case "resources/read":
 		var params struct {
@@ -449,33 +444,109 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 	}
 }
 
+// supportedResourceAssets lists the asset keys that resources/* recognizes.
+// First entry is the legacy default for unsuffixed URIs (panel/verdict/forecast/latest).
+var supportedResourceAssets = []string{"btc", "qqq", "spy", "gold", "hs300"}
+
+// parseResourceURI splits a guanfu://{kind}/latest[/{asset}] URI into kind+asset.
+// kind is "panel" | "verdict" | "forecast"; asset defaults to "btc" for the
+// unsuffixed legacy form. Returns ok=false for non-matching URIs.
+func parseResourceURI(uri string) (kind, asset string, ok bool) {
+	const prefix = "guanfu://"
+	if !strings.HasPrefix(uri, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(uri, prefix), "/")
+	if len(parts) < 2 || parts[1] != "latest" {
+		return "", "", false
+	}
+	kind = parts[0]
+	switch kind {
+	case "panel", "verdict", "forecast":
+	default:
+		return "", "", false
+	}
+	asset = "btc"
+	if len(parts) >= 3 && parts[2] != "" {
+		asset = strings.ToLower(parts[2])
+	}
+	for _, a := range supportedResourceAssets {
+		if asset == a {
+			return kind, asset, true
+		}
+	}
+	return "", "", false
+}
+
+func buildResourcesList() json.RawMessage {
+	type res struct {
+		URI         string `json:"uri"`
+		Name        string `json:"name"`
+		MIMEType    string `json:"mimeType"`
+		Description string `json:"description"`
+	}
+	out := []res{{
+		URI:         "guanfu://knowledge/skill.md",
+		Name:        "SKILL.md",
+		MIMEType:    "text/markdown",
+		Description: "观复 多资产投资盘面解读知识库",
+	}}
+	for _, kind := range []struct{ k, name, desc string }{
+		{"panel", "盘面", "完整指标盘面 JSON"},
+		{"verdict", "结构化读盘", "盘面 verdict JSON"},
+		{"forecast", "走势推演", "kNN 历史相似走势 JSON"},
+	} {
+		// Legacy unsuffixed URI (BTC default) preserved for backward compat.
+		out = append(out, res{
+			URI:         "guanfu://" + kind.k + "/latest",
+			Name:        "最新" + kind.name + " (BTC, 默认)",
+			MIMEType:    "application/json",
+			Description: "[Deprecated alias] 同 guanfu://" + kind.k + "/latest/btc",
+		})
+		for _, a := range supportedResourceAssets {
+			out = append(out, res{
+				URI:         "guanfu://" + kind.k + "/latest/" + a,
+				Name:        strings.ToUpper(a) + " 最新" + kind.name,
+				MIMEType:    "application/json",
+				Description: kind.desc + " (asset=" + a + ")",
+			})
+		}
+	}
+	b, _ := json.Marshal(out)
+	return b
+}
+
 func handleResourceRead(uri string) (string, *rpcError) {
-	switch uri {
-	case "guanfu://knowledge/skill.md":
+	if uri == "guanfu://knowledge/skill.md" {
 		data, err := os.ReadFile(skillPath())
 		if err != nil {
 			return "", &rpcError{Code: -32603, Message: "SKILL.md not found: " + err.Error()}
 		}
 		return string(data), nil
-	case "guanfu://panel/latest":
-		panel := getOrFetchPanel("btc", defaultPanelTimeout)
+	}
+	kind, asset, ok := parseResourceURI(uri)
+	if !ok {
+		return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
+	}
+	switch kind {
+	case "panel":
+		panel := getOrFetchPanel(asset, defaultPanelTimeout)
 		b, _ := json.MarshalIndent(panel, "", "  ")
 		return string(b), nil
-	case "guanfu://verdict/latest":
-		panel := getOrFetchPanel("btc", defaultPanelTimeout)
-		b, _ := json.MarshalIndent(buildVerdictPayload("btc", panel, false), "", "  ")
+	case "verdict":
+		panel := getOrFetchPanel(asset, defaultPanelTimeout)
+		b, _ := json.MarshalIndent(buildVerdictPayload(asset, panel, false), "", "  ")
 		return string(b), nil
-	case "guanfu://forecast/latest":
-		panel := getOrFetchPanel("btc", defaultPanelTimeout)
-		fc, err := buildForecast("btc", defaultPanelTimeout, forecast.DefaultOptions())
+	case "forecast":
+		panel := getOrFetchPanel(asset, defaultPanelTimeout)
+		fc, err := buildForecast(asset, defaultPanelTimeout, forecast.DefaultOptions())
 		if err != nil {
 			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
 		}
-		b, _ := json.MarshalIndent(buildForecastPayload("btc", panel, fc, false), "", "  ")
+		b, _ := json.MarshalIndent(buildForecastPayload(asset, panel, fc, false), "", "  ")
 		return string(b), nil
-	default:
-		return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
 	}
+	return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
 }
 
 // extractAsset parses the "asset" field from tool arguments.
@@ -490,14 +561,13 @@ func extractAsset(args json.RawMessage) string {
 }
 
 func resourceMimeType(uri string) string {
-	switch uri {
-	case "guanfu://knowledge/skill.md":
+	if uri == "guanfu://knowledge/skill.md" {
 		return "text/markdown"
-	case "guanfu://panel/latest", "guanfu://verdict/latest", "guanfu://forecast/latest":
-		return "application/json"
-	default:
-		return "text/plain"
 	}
+	if _, _, ok := parseResourceURI(uri); ok {
+		return "application/json"
+	}
+	return "text/plain"
 }
 
 func buildVerdictPayload(asset string, panel *model.IndicatorPanel, includePanel bool) any {
