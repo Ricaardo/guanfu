@@ -123,6 +123,7 @@ func (a *QQAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*fore
 	if len(opts.Horizons) == 0 {
 		opts.Horizons = forecast.HorizonsForAsset("qqq")
 	}
+	opts.Asset = "qqq"
 	opts.Extractors = features.EquityExtractors(a.store)
 	return forecast.Build(points, opts)
 }

@@ -102,6 +102,7 @@ func (a *BTCAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*for
 	if len(opts.Horizons) == 0 {
 		opts.Horizons = forecast.HorizonsForAsset("btc")
 	}
+	opts.Asset = "btc"
 	opts.Extractors = features.CoreExtractors()
 	return forecast.Build(points, opts)
 }

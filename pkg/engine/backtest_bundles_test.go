@@ -139,6 +139,39 @@ func runAssetBacktest(t *testing.T, name, loadKey string, minHistory int, bundle
 	sort.Slice(yrs, func(i, j int) bool { return yrs[i].yr < yrs[j].yr })
 	t.Logf("  years: %v", yearStr(yrs))
 
+	// Walk-forward: dir_hit per (year, horizon). Surfaces whether a low
+	// overall hit rate is uniform across regimes or driven by specific
+	// bad years. A low overall rate that's uniform → no strategy edge in
+	// any regime; a low rate driven by a few bad years → strategy works
+	// most of the time but breaks under specific conditions.
+	yearKeys := make([]int, 0, len(result.ByYear))
+	for yr := range result.ByYear {
+		yearKeys = append(yearKeys, yr)
+	}
+	sort.Ints(yearKeys)
+	t.Logf("  walk-forward dir_hit by (year, horizon):")
+	header := "       "
+	for _, h := range horizons {
+		header += fmt.Sprintf("  %3dd  ", h)
+	}
+	t.Logf("%s", header)
+	for _, yr := range yearKeys {
+		ym := result.ByYear[yr]
+		if ym == nil {
+			continue
+		}
+		row := fmt.Sprintf("    %d:", yr)
+		for _, h := range horizons {
+			tally := ym.ByHorizon[h]
+			if tally == nil || tally.Total == 0 {
+				row += "    -   "
+				continue
+			}
+			row += fmt.Sprintf(" %4.0f%%/%d", tally.HitRate()*100, tally.Total)
+		}
+		t.Logf("%s", row)
+	}
+
 	t.Logf("  data: %s — %s (%d days)",
 		raw[0].Date, raw[len(raw)-1].Date, len(raw))
 }

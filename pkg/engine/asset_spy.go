@@ -108,6 +108,7 @@ func (a *SPYAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*for
 	if len(opts.Horizons) == 0 {
 		opts.Horizons = forecast.HorizonsForAsset("spy")
 	}
+	opts.Asset = "spy"
 	opts.Extractors = features.EquityExtractors(a.store)
 	return forecast.Build(points, opts)
 }

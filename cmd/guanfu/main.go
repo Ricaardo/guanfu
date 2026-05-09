@@ -71,7 +71,7 @@ func main() {
 	verdictOnly := flag.Bool("verdict-only", false, "仅输出 verdict（隐藏指标盘）")
 	forecastOut := flag.Bool("forecast", false, "输出 BTC 历史相似盘面走势推演")
 	forecastOnly := flag.Bool("forecast-only", false, "仅输出 forecast（隐藏指标盘）")
-	forecastHorizons := flag.String("forecast-horizons", "auto", "走势推演周期，逗号分隔天数，如 30,90,180；'auto' 用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120/180，其余 30/90/180）")
+	forecastHorizons := flag.String("forecast-horizons", "auto", "走势推演周期，逗号分隔天数，如 30,90,180；'auto' 用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120，其余 30/90/180）")
 	forecastTop := flag.Int("forecast-top", 21, "走势推演使用的历史相似样本数")
 	forecastPath := flag.Bool("forecast-path", false, "输出历史相似盘面路径推演 (ASCII fan chart)")
 	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow/technical/cross_asset")
@@ -269,6 +269,7 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 		opts := forecast.DefaultOptions()
 		opts.Horizons = horizons
 		opts.TopK = forecastTop
+		opts.Asset = "btc"
 		opts.Extractors = features.CoreExtractors()
 		fc, err = forecast.Build(points, opts)
 		if err != nil {
@@ -684,6 +685,9 @@ func printHumanForecast(fc *forecast.Forecast, plain bool) {
 			h.P10ReturnPct,
 			h.P90ReturnPct,
 			h.MedianPrice)
+		if h.ReliabilityNote != "" {
+			fmt.Printf("          %s\n", h.ReliabilityNote)
+		}
 	}
 	if len(fc.Analogs) > 0 {
 		fmt.Println()

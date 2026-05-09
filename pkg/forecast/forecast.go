@@ -27,14 +27,16 @@ const (
 
 var defaultHorizons = []int{30, 90, 180}
 
-// assetHorizons holds per-asset default horizons (B5).
-// QQQ/SPY add 63d (quarterly) and 252d (yearly) on top of {30,90,180};
-// gold adds 60/120 around the 90d midpoint to better resolve momentum
-// reversals. Other assets fall back to defaultHorizons.
+// assetHorizons holds per-asset default horizons (B5, revised 2026-05-09).
+//
+// QQQ/SPY add 63d (quarterly) and 252d (yearly) on top of {30,90,180}.
+// Gold uses {30,60,90,120} — the 180d horizon was removed after the
+// post-refresh backtest exposed it as 49% dir_hit on n=51 (i.e. random).
+// Other assets fall back to defaultHorizons.
 var assetHorizons = map[string][]int{
 	"qqq":  {30, 63, 90, 180, 252},
 	"spy":  {30, 63, 90, 180, 252},
-	"gold": {30, 60, 90, 120, 180},
+	"gold": {30, 60, 90, 120},
 }
 
 // HorizonsForAsset returns the asset-specific default horizons.
@@ -59,6 +61,10 @@ type Options struct {
 	UseMahalanobis      bool               `json:"-"` // use Mahalanobis distance
 	LearnWeights        bool               `json:"-"` // learn feature weights from data
 	Frequency           string             `json:"-"` // "daily" or "monthly"
+	// Asset is the canonical key (btc/qqq/spy/gold/hs300) used for
+	// per-asset reliability lookups. Empty means "no asset claim" — Build
+	// will skip writing ReliabilityNote on each HorizonForecast.
+	Asset string `json:"-"`
 }
 
 // Point is an oldest-first daily close price.
@@ -125,6 +131,10 @@ type HorizonForecast struct {
 	DominantLabel                 string  `json:"dominant_label"`
 	UpsideThresholdPct            float64 `json:"upside_threshold_pct"`
 	DownsideThresholdPct          float64 `json:"downside_threshold_pct"`
+	// ReliabilityNote is populated when the (asset, horizon) combination has
+	// historically poor or untested directional accuracy. Empty when reliable
+	// or no historical data is recorded. Sourced from forecast/reliability.go.
+	ReliabilityNote string `json:"reliability_note,omitempty"`
 }
 
 type Analog struct {
@@ -286,6 +296,13 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 
 	analogs := buildAnalogs(points, selected, opts.Horizons)
 	horizons := buildHorizonForecasts(points[currentIdx].Close, points, selected, opts.Horizons)
+	// Annotate each horizon with its reliability caveat (if asset is set
+	// and a recorded reliability cell flags this horizon as weak/untested).
+	if opts.Asset != "" {
+		for i := range horizons {
+			horizons[i].ReliabilityNote = HorizonCaveat(opts.Asset, horizons[i].Days)
+		}
+	}
 	avgSim := averageSimilarity(selected)
 	featureCoverage := float64(len(currentFeatures.values)) / float64(expectedFeatureCount)
 

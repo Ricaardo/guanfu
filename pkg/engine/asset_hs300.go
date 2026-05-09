@@ -105,6 +105,7 @@ func (a *HS300Asset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*f
 	if len(opts.Horizons) == 0 {
 		opts.Horizons = forecast.HorizonsForAsset("hs300")
 	}
+	opts.Asset = "hs300"
 	opts.Extractors = features.HS300Extractors(a.store)
 	return forecast.Build(points, opts)
 }

@@ -124,15 +124,29 @@ FetchSnapshot → AssetSnapshot          (cmd/guanfu/main.go 或 cmd/guanfu-mcp/
 
 **关键 invariant**：feature 数量 = `len(opts.Extractors)`，不是固定 11。`expectedFeatureCount = 11` 是 BTC 历史遗留值，被 `featureCoverage` 用作分母——但用 `clamp01` 截到 [0,1]，所以 13 features 的 Equity 显示为 100%，不会失真，只是上报覆盖率失去鉴别力。改这个常量需要审计所有 feature_coverage 消费者。
 
-## 每资产 horizons（B5）
+## 每资产 horizons（B5，2026-05-09 修订）
 
 `forecast.HorizonsForAsset(asset)` 返回 per-asset 默认 horizons：
 
-| Asset | Horizons |
-|---|---|
-| QQQ / SPY | `30, 63, 90, 180, 252`（季度 + 年度） |
-| Gold | `30, 60, 90, 120, 180`（动量反转中段加密） |
-| BTC / HS300 / 任意 stock | `30, 90, 180`（默认） |
+| Asset | Horizons | 说明 |
+|---|---|---|
+| QQQ / SPY | `30, 63, 90, 180, 252` | 季度 + 年度 |
+| Gold | `30, 60, 90, 120` | **180d 已删除**——n=51 上 49% dir_hit ≈ 硬币 |
+| BTC / HS300 / 任意 stock | `30, 90, 180` | 默认 |
+
+## Horizon 可靠性提示（reliability.go）
+
+`forecast.HorizonCaveat(asset, days)` 查 `assetHorizonReliability` 静态表：dir_hit < 0.55 或 n < 10 时返回中文 caveat 字符串。值来自 `TestBacktestBundles` 输出，AsOf 字段记录最后更新日期。Build 时自动写入 `HorizonForecast.ReliabilityNote`，CLI 在每个 horizon 行下方一行打印。
+
+更新规则：跑 `TestBacktestBundles` 后**手动**同步 `assetHorizonReliability` 数字 + AsOf 字段。不在 Build 时实时跑回测（IO 重 + 慢）。
+
+## Walk-forward 视图（backtest）
+
+`TestBacktestBundles` 现按 `(year, horizon)` 输出 dir_hit/n 矩阵。低整体命中率可能是：
+- **均匀差**（如 HS300 各年都 25-50%）→ 策略本身没 alpha
+- **regime-依赖**（如 Gold 2017-2022 ≤50%，2023-2025 50-100%）→ 在某些 regime 下能用，过拟合到训练分布之外
+
+现有结论：BTC/QQQ/SPY 大多数年份稳健；Gold 强 regime 依赖；HS300 全 regime 弱信号。
 
 **DefaultOptions 陷阱**（B5 fix）：旧代码里 `if len(opts.Horizons) == 0 { opts = forecast.DefaultOptions() }` 会**整个替换 opts**，理论上能 clobber 调用方设置的 `Extractors`/`TopK`。在当前所有调用路径里，asset 在这一行之后立刻又写一次 `opts.Extractors`，所以**事实上没有 bug 触发过**——是防御性修正而不是热修。新代码统一只补字段，避免后续重构无意中触雷：
 

@@ -80,8 +80,10 @@ func TestGoldAssetBuildForecastUsesPerAssetHorizons(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GoldAsset.BuildForecast: %v", err)
 	}
-	// Gold default per B5: {30, 60, 90, 120, 180}
-	want := []int{30, 60, 90, 120, 180}
+	// Gold default per B5 (revised 2026-05-09): {30, 60, 90, 120}.
+	// 180d was dropped after post-refresh backtest showed 49% dir_hit
+	// on n=51, no better than random.
+	want := []int{30, 60, 90, 120}
 	if len(fc.Horizons) != len(want) {
 		t.Fatalf("len(fc.Horizons) = %d, want %d (per-asset default did not fire)", len(fc.Horizons), len(want))
 	}

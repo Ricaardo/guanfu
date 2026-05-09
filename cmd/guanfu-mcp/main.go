@@ -120,7 +120,7 @@ var tools = json.RawMessage(`
       "properties": {
         "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
-        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数；省略时使用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120/180，BTC/HS300 30/90/180）"},
+        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数；省略时使用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120，BTC/HS300 30/90/180）"},
         "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
@@ -686,6 +686,7 @@ func buildForecast(asset string, timeout time.Duration, opts forecast.Options) (
 	if len(opts.Horizons) == 0 {
 		opts.Horizons = forecast.HorizonsForAsset("btc")
 	}
+	opts.Asset = "btc"
 	points, err := client.LoadOrUpdateBTCDailyHistory(ctx, "")
 	if err != nil {
 		return nil, err

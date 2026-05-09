@@ -88,7 +88,8 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 			// Direction hit
 			predictedUp := h.MedianReturnPct > 0
 			actualUp := actualReturn > 0
-			if predictedUp == actualUp {
+			hit := predictedUp == actualUp
+			if hit {
 				hm.DirectionHits++
 			}
 
@@ -103,15 +104,26 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 				h.MedianReturnPct/100, h.P75ReturnPct/100, h.P90ReturnPct/100)
 			hm.CRPSSum += crps
 
-			// Year breakdown
+			// Year + per-horizon breakdown (walk-forward view).
 			year := extractYear(points, idx)
 			ym := r.ByYear[year]
 			if ym == nil {
-				ym = &YearMetrics{Year: year}
+				ym = &YearMetrics{Year: year, ByHorizon: make(map[int]*HorizonHitTally)}
 				r.ByYear[year] = ym
 			}
+			if ym.ByHorizon == nil {
+				ym.ByHorizon = make(map[int]*HorizonHitTally)
+			}
 			ym.TotalTests++
-			_ = predictedUp && actualUp
+			tally := ym.ByHorizon[h.Days]
+			if tally == nil {
+				tally = &HorizonHitTally{}
+				ym.ByHorizon[h.Days] = tally
+			}
+			tally.Total++
+			if hit {
+				tally.Hits++
+			}
 		}
 		r.TotalTests++
 	}
@@ -215,9 +227,28 @@ func (m *HorizonMetrics) CRPSScore() float64 {
 }
 
 // YearMetrics holds yearly breakdown.
+//
+// ByHorizon lets us see whether a low overall dir_hit (e.g. Gold 49% on
+// n=51) is uniform across years or driven by a few bad regimes — the
+// classic walk-forward sanity check.
 type YearMetrics struct {
-	Year       int `json:"year"`
-	TotalTests int `json:"total_tests"`
+	Year       int                      `json:"year"`
+	TotalTests int                      `json:"total_tests"`
+	ByHorizon  map[int]*HorizonHitTally `json:"by_horizon,omitempty"`
+}
+
+// HorizonHitTally counts directional hits/total per (year, horizon) cell.
+type HorizonHitTally struct {
+	Hits  int `json:"hits"`
+	Total int `json:"total"`
+}
+
+// HitRate returns Hits/Total as a fraction; 0 when no samples.
+func (h *HorizonHitTally) HitRate() float64 {
+	if h == nil || h.Total == 0 {
+		return 0
+	}
+	return float64(h.Hits) / float64(h.Total)
 }
 
 // Summary returns a human-readable summary of results.
