@@ -48,6 +48,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ricaardo/guanfu/pkg/claim"
 	"github.com/Ricaardo/guanfu/pkg/client"
 	"github.com/Ricaardo/guanfu/pkg/engine"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
@@ -367,6 +368,8 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		if err != nil {
 			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
 		}
+		annotateBaselines(fc)
+		emitClaim(fc, asset, panel)
 		b, _ := json.MarshalIndent(buildForecastPayload(asset, panel, fc, p.IncludePanel), "", "  ")
 		return string(b), nil
 
@@ -499,9 +502,29 @@ func buildResourcesList() json.RawMessage {
 	}
 	out := []res{{
 		URI:         "guanfu://knowledge/skill.md",
-		Name:        "SKILL.md",
+		Name:        "SKILL.md (完整版)",
 		MIMEType:    "text/markdown",
-		Description: "观复 多资产投资盘面解读知识库",
+		Description: "完整解读知识库 (~900 行,占 context 较大;新客户端建议改用 tier1/2/3 分层)",
+	}, {
+		URI:         "guanfu://skill/tier1",
+		Name:        "Tier 1 — 数据契约 + 关键阈值",
+		MIMEType:    "text/markdown",
+		Description: "必载最小上下文 (~200 行):字段定义 / 可靠性标注 / source_health / 必出规则。每次读盘都应先读",
+	}, {
+		URI:         "guanfu://skill/tier2",
+		Name:        "Tier 2 — 决策框架 + 行为护栏",
+		MIMEType:    "text/markdown",
+		Description: "读盘流程 / 域级方向 / 输出模板 / 行为护栏。需要给建议 / 做判断时必读",
+	}, {
+		URI:         "guanfu://skill/tier3",
+		Name:        "Tier 3 — 术语 + 机制 + 类比(当前同 SKILL.md)",
+		MIMEType:    "text/markdown",
+		Description: "深度参考:指标定义 / 因果机制 / 历史类比。用户追问原理 / 历史时按需读",
+	}, {
+		URI:         "guanfu://ledger/summary",
+		Name:        "Claim + Intent ledger summary (K9)",
+		MIMEType:    "application/json",
+		Description: "最近 90d 工具 claim 校准汇总 + 用户 intent 列表。本地 ledger 聚合,不触网。",
 	}}
 	for _, kind := range []struct{ k, name, desc string }{
 		{"panel", "盘面", "完整指标盘面 JSON"},
@@ -536,6 +559,28 @@ func handleResourceRead(uri string) (string, *rpcError) {
 		}
 		return string(data), nil
 	}
+	if uri == "guanfu://ledger/summary" {
+		return readLedgerSummary()
+	}
+	if tier, ok := strings.CutPrefix(uri, "guanfu://skill/"); ok {
+		p, err := tierPath(tier)
+		if err != nil {
+			return "", &rpcError{Code: -32602, Message: err.Error()}
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			// tier3 falls back to SKILL.md until the explicit tier3.md is
+			// written out; behave like an alias so consumers that read
+			// tier3 don't error.
+			if tier == "tier3" {
+				if skillData, sErr := os.ReadFile(skillPath()); sErr == nil {
+					return string(skillData), nil
+				}
+			}
+			return "", &rpcError{Code: -32603, Message: "tier " + tier + " not found: " + err.Error()}
+		}
+		return string(data), nil
+	}
 	kind, asset, ok := parseResourceURI(uri)
 	if !ok {
 		return "", &rpcError{Code: -32602, Message: "unknown resource: " + uri}
@@ -561,6 +606,8 @@ func handleResourceRead(uri string) (string, *rpcError) {
 		if err != nil {
 			return "", &rpcError{Code: -32603, Message: "build forecast failed: " + err.Error()}
 		}
+		annotateBaselines(fc)
+		emitClaim(fc, asset, panel)
 		b, _ := json.MarshalIndent(buildForecastPayload(asset, panel, fc, false), "", "  ")
 		return string(b), nil
 	}
@@ -597,6 +644,12 @@ func validateToolAsset(asset string) *rpcError {
 func resourceMimeType(uri string) string {
 	if uri == "guanfu://knowledge/skill.md" {
 		return "text/markdown"
+	}
+	if strings.HasPrefix(uri, "guanfu://skill/") {
+		return "text/markdown"
+	}
+	if uri == "guanfu://ledger/summary" {
+		return "application/json"
 	}
 	if _, _, ok := parseResourceURI(uri); ok {
 		return "application/json"
@@ -799,11 +852,141 @@ func findIndicator(p *model.IndicatorPanel, name string) *model.Indicator {
 	return nil
 }
 
+// emitClaim writes the forecast to the claim ledger. Silent no-op on
+// any failure — claim recording must not break forecast responses.
+func emitClaim(fc *forecast.Forecast, asset string, panel *model.IndicatorPanel) {
+	if fc == nil || claim.Disabled() {
+		return
+	}
+	ledger, err := claim.Open("")
+	if err != nil {
+		return
+	}
+	_, panelJSON, _ := claim.PanelJSONHash(panel)
+	ledger.RecordForecast(fc, asset, panelJSON)
+}
+
+// annotateBaselines attaches T-bill + passive comparisons to each horizon
+// (H3/J14). See cmd/guanfu/main.go:annotateBaselines for the rationale;
+// MCP mirrors that logic so every client gets baseline-aware forecasts.
+func annotateBaselines(fc *forecast.Forecast) {
+	if fc == nil {
+		return
+	}
+	s := &store.PriceStore{}
+	annualRiskFree := 4.5
+	rfSource := "fallback flat 4.5%"
+	if p, ok := s.Latest("fred_dgs3mo"); ok && p.Close > 0 {
+		annualRiskFree = p.Close
+		rfSource = "FRED DGS3MO " + p.Date
+	}
+	const annualPassive = 6.0
+	fn := func(days int) (float64, float64, bool, string) {
+		tb, pa, ok, _ := forecast.FlatRateBaseline(annualRiskFree, annualPassive)(days)
+		if !ok {
+			return 0, 0, false, ""
+		}
+		return tb, pa, true, rfSource
+	}
+	forecast.AnnotateBaselines(fc, fn)
+}
+
+// readLedgerSummary aggregates ~/.guanfu/claims/ + intents/ into a small
+// JSON payload for MCP consumers. 90-day lookback; safe offline.
+func readLedgerSummary() (string, *rpcError) {
+	ledger, err := claim.Open("")
+	if err != nil {
+		return "", &rpcError{Code: -32603, Message: "open ledger: " + err.Error()}
+	}
+	cutoff := time.Now().AddDate(0, 0, -90)
+
+	type ClaimBucket struct {
+		Asset   string `json:"asset"`
+		Horizon int    `json:"horizon"`
+		N       int    `json:"n"`
+	}
+	buckets := map[string]*ClaimBucket{}
+	claims, _ := ledger.ListClaims(func(c claim.Claim) bool {
+		return !c.AsOf.Before(cutoff)
+	})
+	for _, c := range claims {
+		key := c.Asset + "|" + strconvItoa(c.Horizon)
+		b := buckets[key]
+		if b == nil {
+			b = &ClaimBucket{Asset: c.Asset, Horizon: c.Horizon}
+			buckets[key] = b
+		}
+		b.N++
+	}
+	bucketList := make([]ClaimBucket, 0, len(buckets))
+	for _, b := range buckets {
+		bucketList = append(bucketList, *b)
+	}
+
+	intents, _ := ledger.ListIntents(func(it claim.Intent) bool {
+		return !it.AsOf.Before(cutoff)
+	})
+	type IntentLite struct {
+		AsOf         string `json:"as_of"`
+		Asset        string `json:"asset"`
+		HorizonClass string `json:"horizon_class"`
+		Thesis       string `json:"thesis"`
+	}
+	lite := make([]IntentLite, 0, len(intents))
+	for _, it := range intents {
+		lite = append(lite, IntentLite{
+			AsOf:         it.AsOf.Format("2006-01-02"),
+			Asset:        it.Asset,
+			HorizonClass: it.HorizonClass,
+			Thesis:       it.Thesis,
+		})
+	}
+
+	out := map[string]any{
+		"lookback_days":  90,
+		"claim_buckets":  bucketList,
+		"claim_total":    len(claims),
+		"intents":        lite,
+		"intent_total":   len(intents),
+		"note":           "For per-claim calibration run `guanfu calibrate --json`.",
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return string(b), nil
+}
+
+func strconvItoa(i int) string {
+	// avoid pulling strconv into this file; Itoa is trivial for small ints
+	return fmt.Sprintf("%d", i)
+}
+
 func skillPath() string {
 	if p := os.Getenv("GUANFU_SKILL_PATH"); p != "" {
 		return p
 	}
 	return "skill/SKILL.md"
+}
+
+// tierPath resolves a tier key ("tier1" / "tier2" / "tier3") to its file
+// path. Resolution order:
+//  1. $GUANFU_SKILL_DIR/{tier}.md (if env set)
+//  2. sibling of $GUANFU_SKILL_PATH (common deployment: SKILL/tier live together)
+//  3. "skill/{tier}.md" (repo-relative default)
+func tierPath(tier string) (string, error) {
+	switch tier {
+	case "tier1", "tier2", "tier3":
+	default:
+		return "", fmt.Errorf("unknown tier %q (want tier1/tier2/tier3)", tier)
+	}
+	if d := os.Getenv("GUANFU_SKILL_DIR"); d != "" {
+		return d + "/" + tier + ".md", nil
+	}
+	// Use skillPath's directory if GUANFU_SKILL_PATH is set so tier files sit
+	// next to the main SKILL.md deployment.
+	sp := skillPath()
+	if i := strings.LastIndex(sp, "/"); i >= 0 {
+		return sp[:i+1] + tier + ".md", nil
+	}
+	return "skill/" + tier + ".md", nil
 }
 
 // ─── RPC helpers ──────────────────────────────────────

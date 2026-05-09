@@ -52,6 +52,25 @@ func runDCA(jsonOut, pretty, plain bool) {
 	if zoneResult != nil {
 		printDCAZoneReplay(zoneResult, plain)
 	}
+	printDCACostWarning(plain)
+}
+
+// printDCACostWarning (L8): remind the user that the simulated ROI ignores
+// brokerage / ETF / wrapping costs that compound meaningfully over multi-
+// year horizons. We don't have per-user cost data, so just surface the
+// typical range + say "subtract this from ROI in your head".
+func printDCACostWarning(plain bool) {
+	fmt.Println()
+	if plain {
+		fmt.Println("Cost awareness (not simulated):")
+	} else {
+		fmt.Println("成本提示(以下未计入上表 ROI):")
+	}
+	fmt.Println("  - 交易所手续费: 0.1-0.5% per trade → 每月 DCA 长期累积 ~0.5-1% 年化拖累")
+	fmt.Println("  - BTC 现货 ETF (IBIT/FBTC): 0.12-0.25% expense ratio → 20y 复合 -2.4% 至 -4.8%")
+	fmt.Println("  - 托管钱包 / 硬件: 一次性 0-0.2%,忽略不计")
+	fmt.Println("  - 点差 / 税: 视辖区差异大;短线频繁 DCA 需特别关注")
+	fmt.Println("  真实净 ROI = 上表 ROI - 年化成本拖累 × 年数。短 horizon 影响小,长期显著。")
 }
 
 func printDCAComparison(cr *dca.ComparisonResult, plain bool) {
@@ -80,6 +99,7 @@ func printDCAComparison(cr *dca.ComparisonResult, plain bool) {
 	fmt.Println("  ahr   - AHR999 < 0.8 accelerate (2x), > 1.2 decelerate (0.5x)")
 	fmt.Println("  mayer - Mayer < 0.8 accelerate (2x), > 1.5 decelerate (0.5x)")
 	fmt.Println()
+	fmt.Println("Best = 历史回测 ROI 最高,不代表未来最优或推荐使用。")
 	fmt.Println("Not investment advice.")
 }
 
@@ -195,6 +215,7 @@ func runMarketOverview(jsonOut, pretty, plain bool) {
 			fmt.Printf("%-8s $%9.2f %+9.1f%% %s\n", sig.Asset, sig.Price, sig.Momentum, sig.Signal)
 		}
 		fmt.Println(strings.Repeat("-", 56))
+		fmt.Println("Signal 仅表达当前 30d 动量方向标签,不是买卖指令。读盘见 --verdict。")
 	}
 }
 

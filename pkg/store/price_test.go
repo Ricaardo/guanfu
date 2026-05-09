@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func tempStore(t *testing.T) *PriceStore {
@@ -195,10 +196,14 @@ func TestIncrementalFetchDays(t *testing.T) {
 		t.Fatalf("expected 3000 for empty asset, got %d", days)
 	}
 
-	s.Save("btc", []PricePoint{{Date: "2026-05-05", Close: 100, Source: "test"}})
+	// Use today's date so the test isn't sensitive to wall-clock drift
+	// between when it was written and when it runs. Previously hard-coded
+	// "2026-05-05" failed as soon as now() drifted more than 1 day past it.
+	today := time.Now().UTC().Format("2006-01-02")
+	s.Save("btc", []PricePoint{{Date: today, Close: 100, Source: "test"}})
 	days = s.IncrementalFetchDays("btc", 3000)
 	if days != 0 {
-		t.Fatalf("expected 0 for fresh data, got %d", days)
+		t.Fatalf("expected 0 for fresh data (today), got %d", days)
 	}
 }
 

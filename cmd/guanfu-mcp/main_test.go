@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +222,10 @@ func TestHandleRequestResourceReadUsesDeclaredMimeType(t *testing.T) {
 func TestResourceMimeTypeMatchesDeclaredResources(t *testing.T) {
 	cases := map[string]string{
 		"guanfu://knowledge/skill.md": "text/markdown",
+		"guanfu://skill/tier1":        "text/markdown",
+		"guanfu://skill/tier2":        "text/markdown",
+		"guanfu://skill/tier3":        "text/markdown",
+		"guanfu://ledger/summary":     "application/json",
 		"guanfu://panel/latest":       "application/json",
 		"guanfu://verdict/latest":     "application/json",
 		"guanfu://forecast/latest":    "application/json",
@@ -235,6 +240,59 @@ func TestResourceMimeTypeMatchesDeclaredResources(t *testing.T) {
 		if got := resourceMimeType(uri); got != want {
 			t.Fatalf("resourceMimeType(%q) = %q, want %q", uri, got, want)
 		}
+	}
+}
+
+// K9: ledger summary MCP resource. Empty ledger → valid JSON shell.
+func TestHandleResourceReadLedgerSummary(t *testing.T) {
+	t.Setenv("GUANFU_CLAIMS_DIR", t.TempDir())
+	body, rpcErr := handleResourceRead("guanfu://ledger/summary")
+	if rpcErr != nil {
+		t.Fatalf("ledger summary failed: %v", rpcErr)
+	}
+	if !strings.Contains(body, "lookback_days") || !strings.Contains(body, "claim_buckets") {
+		t.Errorf("ledger summary missing expected keys: %s", body)
+	}
+}
+
+// M1/M2: tier URIs must be listed and return non-empty body from the
+// repo skill/ directory. Ensures deployments that expose MCP but forget
+// to set GUANFU_SKILL_DIR still get the in-repo tier files.
+func TestHandleResourceReadTiers(t *testing.T) {
+	// tierPath resolves relative to $GUANFU_SKILL_PATH's dir or "skill/";
+	// tests run in cmd/guanfu-mcp/, so steer it to repo-root skill/ via env.
+	absSkill, err := filepath.Abs("../../skill/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUANFU_SKILL_PATH", absSkill)
+
+	listBytes := buildResourcesList()
+	listStr := string(listBytes)
+	for _, tier := range []string{"tier1", "tier2"} {
+		uri := "guanfu://skill/" + tier
+		if !strings.Contains(listStr, uri) {
+			t.Errorf("resources/list must expose %s", uri)
+		}
+		body, rpcErr := handleResourceRead(uri)
+		if rpcErr != nil {
+			t.Fatalf("%s read failed: %v", uri, rpcErr)
+		}
+		if len(body) == 0 {
+			t.Errorf("%s body must be non-empty", uri)
+		}
+	}
+	// tier3 gracefully aliases to SKILL.md when no tier3.md exists yet.
+	body, rpcErr := handleResourceRead("guanfu://skill/tier3")
+	if rpcErr != nil {
+		t.Fatalf("tier3 alias failed: %v", rpcErr)
+	}
+	if len(body) == 0 {
+		t.Error("tier3 body must be non-empty (alias to SKILL.md)")
+	}
+	// Unknown tier is a proper -32602.
+	if _, rpcErr := handleResourceRead("guanfu://skill/tier99"); rpcErr == nil {
+		t.Error("unknown tier must error")
 	}
 }
 

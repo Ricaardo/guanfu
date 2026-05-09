@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ricaardo/guanfu/pkg/claim"
 	"github.com/Ricaardo/guanfu/pkg/client"
 	"github.com/Ricaardo/guanfu/pkg/engine"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
@@ -34,8 +35,78 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/history"
 	"github.com/Ricaardo/guanfu/pkg/store"
 	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/portfolio"
 	"github.com/Ricaardo/guanfu/pkg/version"
 )
+
+// annotateBaselines reads the latest DGS3MO from PriceStore (F4) and
+// annotates every HorizonForecast with T-bill + passive 60-40 baselines.
+// On missing data falls back to a flat 4.5% / 6.0% assumption — keeps
+// the field populated so SKILL consumers always see a comparison.
+func annotateBaselines(fc *forecast.Forecast) {
+	if fc == nil {
+		return
+	}
+	s := &store.PriceStore{}
+	// Latest T-bill rate in percent annualized. PriceStore keeps DGS3MO as %.
+	annualRiskFree := 4.5 // fallback
+	rfSource := "fallback flat 4.5%"
+	if p, ok := s.Latest("fred_dgs3mo"); ok && p.Close > 0 {
+		annualRiskFree = p.Close
+		rfSource = "FRED DGS3MO " + p.Date
+	}
+	// Passive 60/40 long-run assumption. Could be refined by actually
+	// rolling SPY 60% + TLT 40% returns over the horizon; using a stable
+	// 6.0% anchor avoids letting recent-drawdown noise dominate the
+	// comparison (J14 wants "do nothing" not "last month's noise").
+	const annualPassive = 6.0
+
+	fn := func(days int) (float64, float64, bool, string) {
+		tb, pa, ok, _ := forecast.FlatRateBaseline(annualRiskFree, annualPassive)(days)
+		if !ok {
+			return 0, 0, false, ""
+		}
+		return tb, pa, true, rfSource
+	}
+	forecast.AnnotateBaselines(fc, fn)
+}
+
+// annotateVerdict opt-in wires ~/.guanfu/portfolio.json into the verdict
+// (L2/L3). Silent no-op if:
+//   - v is nil
+//   - portfolio file missing (the most common path)
+//   - loading errors (we prefer clean v2 output to a panicked annotation)
+//
+// The price map for weight computation uses only the given asset's
+// current price plus whatever is in the portfolio's cash holding;
+// cross-asset weight is a Wave 2 follow-up (needs refresh of all the
+// user's sleeves).
+func annotateVerdict(v *engine.Verdict, asset string, currentPrice float64) {
+	if v == nil {
+		return
+	}
+	p, err := portfolio.Load("")
+	if err != nil || p == nil {
+		return
+	}
+	prices := map[string]float64{strings.ToLower(asset): currentPrice}
+	engine.AnnotateVerdictWithPortfolio(v, asset, p, currentPrice, prices)
+}
+
+// emitClaim writes forecast → claim ledger when claim persistence is on.
+// Silent no-op on any failure — claim recording is non-critical and must
+// not break the user-visible forecast output.
+func emitClaim(fc *forecast.Forecast, asset string, panel *model.IndicatorPanel) {
+	if fc == nil || claim.Disabled() {
+		return
+	}
+	ledger, err := claim.Open("")
+	if err != nil {
+		return
+	}
+	_, panelJSON, _ := claim.PanelJSONHash(panel)
+	ledger.RecordForecast(fc, asset, panelJSON)
+}
 
 // resolveHorizonsArg parses --forecast-horizons. The sentinel "auto"
 // (or empty) defers to the asset's per-asset default (B5);
@@ -74,12 +145,15 @@ func main() {
 	forecastHorizons := flag.String("forecast-horizons", "auto", "走势推演周期，逗号分隔天数，如 30,90,180；'auto' 用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120，其余 30/90/180）")
 	forecastTop := flag.Int("forecast-top", 21, "走势推演使用的历史相似样本数")
 	forecastPath := flag.Bool("forecast-path", false, "输出历史相似盘面路径推演 (ASCII fan chart)")
+	recencyWeighted := flag.Bool("forecast-recency-weighted", false, "kNN 候选按近 5 年加权 1.25× (G5),适合 BTC ETF 后 / 2024+ 新 regime")
+	regimeGate := flag.Bool("forecast-regime-gate", false, "跨 regime (bull/bear/fracture) analog 距离 ×1.2 惩罚 (G2),适合 Gold 2022+ regime 切换后")
 	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow/technical/cross_asset")
 	timeout := flag.Duration("timeout", 90*time.Second, "拉数据超时")
 	halfLife := flag.Int("halflife", 0, "AHR 拟合半衰期（天，默认 1460）")
 	historyDB := flag.String("history-db", "", "history.db 路径（默认 ~/.guanfu/history.db；GUANFU_NO_HISTORY=1 禁用）")
 	plain := flag.Bool("plain", false, "纯文本输出（无 emoji / box drawing）")
 	noEmoji := flag.Bool("no-emoji", false, "等同 --plain")
+	full := flag.Bool("full", false, "输出完整 40+ 指标盘面（默认只输出 --brief 摘要）")
 	showVersion := flag.Bool("version", false, "打印版本并退出")
 	refreshOnly := flag.String("only", "", "[refresh] 仅刷新指定 key（逗号分隔），如 btc,fred_dxy")
 	refreshSkip := flag.String("skip", "", "[refresh] 跳过指定 key（逗号分隔）")
@@ -110,6 +184,10 @@ func main() {
 				*forecastOnly = true
 			case arg == "--forecast-path" || arg == "-forecast-path":
 				*forecastPath = true
+			case arg == "--forecast-recency-weighted" || arg == "-forecast-recency-weighted":
+				*recencyWeighted = true
+			case arg == "--forecast-regime-gate" || arg == "-forecast-regime-gate":
+				*regimeGate = true
 			case arg == "--verdict" || arg == "-verdict":
 				*verdict = true
 			case arg == "--verdict-only" || arg == "-verdict-only":
@@ -122,6 +200,8 @@ func main() {
 				*plain = true
 			case arg == "--no-emoji" || arg == "-no-emoji":
 				*noEmoji = true
+			case arg == "--full" || arg == "-full":
+				*full = true
 			case strings.HasPrefix(arg, "--domain="):
 				*domainFilter = strings.TrimPrefix(arg, "--domain=")
 			case strings.HasPrefix(arg, "-domain="):
@@ -135,7 +215,7 @@ func main() {
 	// Route subcommands
 	switch subcmd {
 	case "qqq", "spy", "gold":
-		runEquityAsset(subcmd, *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		runEquityAsset(subcmd, *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji, *full, *domainFilter, *recencyWeighted, *regimeGate)
 		return
 	case "stock":
 		ticker := "AAPL"
@@ -173,7 +253,29 @@ func main() {
 		}
 		return
 	case "status":
+		frank := false
+		for i := 1; i < len(trailing); i++ {
+			if trailing[i] == "--frank" || trailing[i] == "-frank" {
+				frank = true
+			}
+		}
+		if frank {
+			runStatusFrank(*jsonOut, *pretty, *plain || *noEmoji)
+			return
+		}
 		runStatus(*jsonOut, *pretty, *plain || *noEmoji)
+		return
+	case "intent":
+		runIntent(trailing[1:])
+		return
+	case "watch":
+		runWatch(trailing[1:])
+		return
+	case "digest":
+		runDigest(trailing[1:])
+		return
+	case "calibrate":
+		runCalibrate(trailing[1:])
 		return
 	case "refresh":
 		// Refresh data flags can also appear after the subcommand, so re-scan
@@ -196,13 +298,13 @@ func main() {
 		runRefresh(*refreshOnly, *refreshSkip, *refreshDryRun, *jsonOut, *pretty, *timeout)
 		return
 	case "hs300":
-		runEquityAsset("hs300", *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		runEquityAsset("hs300", *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji, *full, *domainFilter, *recencyWeighted, *regimeGate)
 		return
 	case "btc", "":
 		// default: BTC panel (existing behavior)
 	default:
 		fmt.Fprintf(os.Stderr, "guanfu: unknown subcommand %q\n", subcmd)
-		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status, refresh\n")
+		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status, refresh, intent, watch, digest, calibrate\n")
 		os.Exit(1)
 	}
 
@@ -211,11 +313,13 @@ func main() {
 		return
 	}
 
-	runBTCPanel(*jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *halfLife, *historyDB, *domainFilter, *plain || *noEmoji, *forecastPath)
+	runBTCPanel(*jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *halfLife, *historyDB, *domainFilter, *plain || *noEmoji, *forecastPath, *full, *recencyWeighted, *regimeGate)
 }
 
-// runBTCPanel is the existing BTC panel flow (unchanged from v1).
-func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, halfLife int, historyDB, domainFilter string, plain bool, forecastPath bool) {
+// runBTCPanel is the BTC panel flow. Default human output is --brief (10 lines);
+// --full restores the pre-v3 40-row panel. --verdict / --forecast / --domain
+// all implicitly opt into full mode (they need the detailed numbers).
+func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, halfLife int, historyDB, domainFilter string, plain bool, forecastPath, full, recencyWeighted, regimeGate bool) {
 	cfg := &model.Config{
 		Weights: model.Weights{Trend: 0.30, Reversal: 0.25, Valuation: 0.25, Structure: 0.20},
 		Thresholds: model.Thresholds{
@@ -249,9 +353,15 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 	}
 	panel := calc.BuildPanel(snap)
 
+	// Brief mode implicitly needs a verdict to surface TOP3 supports /
+	// TOP2 counter-evidence. --verdict / --verdict-only / --forecast-only
+	// / --domain / --full all suppress brief auto-render.
+	briefMode := !full && !verdict && !verdictOnly && !forecastOnly && !forecastOut && domainFilter == "" && !jsonOut && !pretty
+
 	var v *engine.Verdict
-	if verdict || verdictOnly {
+	if verdict || verdictOnly || briefMode {
 		v = engine.BuildVerdict(panel)
+		annotateVerdict(v, "btc", panel.Snapshot.BTCPrice)
 	}
 
 	var fc *forecast.Forecast
@@ -271,11 +381,15 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 		opts.TopK = forecastTop
 		opts.Asset = "btc"
 		opts.Extractors = features.CoreExtractors()
+		opts.RecencyWeighted = recencyWeighted
+		opts.RegimeGate = regimeGate
 		fc, err = forecast.Build(points, opts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "build forecast failed: %v\n", err)
 			os.Exit(1)
 		}
+		annotateBaselines(fc)
+		emitClaim(fc, "btc", panel)
 	}
 
 	// JSON output
@@ -306,6 +420,10 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 	}
 
 	// Human panel
+	if briefMode {
+		printHumanBrief(panel, v, plain)
+		return
+	}
 	if !verdictOnly && !forecastOnly {
 		printHumanPanel(panel, domainFilter, plain)
 	}
@@ -382,6 +500,8 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 		fmt.Fprintf(os.Stderr, "forecast failed for %s: %v\n", ticker, err)
 		os.Exit(1)
 	}
+	annotateBaselines(fc)
+	emitClaim(fc, client.StockKey(ticker), panel)
 
 	if jsonOut || pretty {
 		out := struct {
@@ -443,7 +563,7 @@ func runImportStock(ticker string, days int, timeout time.Duration) {
 }
 
 // runEquityAsset runs the equity flow for QQQ/SPY through the Asset interface.
-func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, plain bool) {
+func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, plain, full bool, domainFilter string, recencyWeighted, regimeGate bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -465,9 +585,25 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 		os.Exit(1)
 	}
 
+	briefMode := !full && !verdict && !verdictOnly && !forecastOnly && !forecastOut && domainFilter == "" && !jsonOut && !pretty
+
 	var v *engine.Verdict
-	if verdict || verdictOnly {
+	if verdict || verdictOnly || briefMode {
 		v = a.BuildVerdict(panel)
+		// Pick the right price field for annotation. Keep in sync with
+		// equityPanelHeader's switch.
+		price := 0.0
+		switch assetKey {
+		case "qqq":
+			price = panel.Snapshot.QQQPrice
+		case "spy":
+			price = panel.Snapshot.SPYPrice
+		case "gold":
+			price = panel.Snapshot.GoldPrice
+		case "hs300":
+			price = panel.Snapshot.HS300Price
+		}
+		annotateVerdict(v, assetKey, price)
 	}
 
 	var fc *forecast.Forecast
@@ -480,11 +616,15 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 		opts := forecast.DefaultOptions()
 		opts.Horizons = horizons
 		opts.TopK = forecastTop
+		opts.RecencyWeighted = recencyWeighted
+		opts.RegimeGate = regimeGate
 		fc, err = a.BuildForecast(snap, opts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "build forecast failed: %v\n", err)
 			os.Exit(1)
 		}
+		annotateBaselines(fc)
+		emitClaim(fc, assetKey, panel)
 	}
 
 	// JSON output
@@ -512,6 +652,10 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 	}
 
 	// Human panel
+	if briefMode {
+		printHumanBrief(panel, v, plain)
+		return
+	}
 	if !verdictOnly && !forecastOnly {
 		printEquityPanel(panel, plain)
 	}
@@ -586,6 +730,103 @@ func equityPanelHeader(p *model.IndicatorPanel) (price float64, plainTitle, fanc
 	}
 }
 
+// printHumanBrief is the default terse output — a 10-line summary designed
+// to be the first thing a user sees and often the only thing they need:
+//   - asset / price / date line
+//   - verdict stance + net direction
+//   - TOP 3 supports, TOP 2 counter-evidence (from Verdict)
+//   - most concerning source_health issue
+// Use --full to unlock the 40+ indicator panel. --verdict/--forecast/--domain
+// implicitly opt into full mode (they already carry detail).
+func printHumanBrief(p *model.IndicatorPanel, v *engine.Verdict, plain bool) {
+	asset := strings.ToUpper(p.Asset)
+	if asset == "" {
+		asset = "BTC"
+	}
+	price := 0.0
+	switch p.Asset {
+	case "qqq":
+		price = p.Snapshot.QQQPrice
+	case "spy":
+		price = p.Snapshot.SPYPrice
+	case "gold":
+		price = p.Snapshot.GoldPrice
+	case "hs300":
+		price = p.Snapshot.HS300Price
+	default:
+		price = p.Snapshot.BTCPrice
+	}
+	if plain {
+		fmt.Printf("guanfu %s brief (%s)   price: $%.2f\n", asset, p.Date, price)
+	} else {
+		fmt.Printf("观复 · %s 摘要 (%s)   价格: $%.2f\n", asset, p.Date, price)
+	}
+	// L7: if portfolio.home_currency is set and != USD, append a converted
+	// price line so non-USD users don't have to convert in their head.
+	if pf, _ := portfolio.Load(""); pf != nil && pf.Preferences.HomeCurrency != "" &&
+		strings.ToUpper(pf.Preferences.HomeCurrency) != "USD" {
+		// Use stored USD/CNY rate from PriceStore when available.
+		ps := &store.PriceStore{}
+		cnyRate := 0.0
+		if lp, ok := ps.Latest("hs300_cny"); ok {
+			cnyRate = lp.Close
+		}
+		local, cur := pf.ConvertUSD(price, cnyRate)
+		fmt.Printf("  本币       : %.2f %s\n", local, cur)
+	}
+	if v == nil {
+		fmt.Println()
+		fmt.Println("  (无 verdict 数据,建议 --full 查看完整指标盘)")
+		return
+	}
+	fmt.Printf("  读盘      : %s  (净方向 %+d / 8,覆盖率 %.0f%%,置信度 %s)\n",
+		v.Stance, v.NetDirection, v.Coverage*100, v.Confidence)
+	if len(v.Reasons) > 0 {
+		fmt.Println("  支持      :")
+		for _, r := range v.Reasons {
+			fmt.Printf("    + %s\n", r)
+		}
+	}
+	if len(v.CounterEvidence) > 0 {
+		fmt.Println("  反证      :")
+		for _, c := range v.CounterEvidence {
+			fmt.Printf("    - %s\n", c)
+		}
+	}
+	if len(v.KillCriteria) > 0 {
+		fmt.Printf("  失效条件  : %s\n", v.KillCriteria[0])
+	}
+	if v.PortfolioContext != nil {
+		ctx := v.PortfolioContext
+		if ctx.CurrentWeightPct > 0 {
+			if ctx.Overweight {
+				fmt.Printf("  组合      : %s 当前 %.1f%% (超出上限 %.0f%%)\n",
+					asset, ctx.CurrentWeightPct, ctx.CeilingPct)
+			} else if ctx.CeilingPct > 0 {
+				fmt.Printf("  组合      : %s 当前 %.1f%% / 上限 %.0f%%,剩余空间 %.1f%%\n",
+					asset, ctx.CurrentWeightPct, ctx.CeilingPct, ctx.RoomToCeilingPct)
+			} else {
+				fmt.Printf("  组合      : %s 当前 %.1f%% (无上限声明)\n", asset, ctx.CurrentWeightPct)
+			}
+		}
+		if len(ctx.Notes) > 0 {
+			fmt.Printf("  组合提示  : %s\n", ctx.Notes[0])
+		}
+	}
+	// Most concerning source_health (first non-ok)
+	for _, h := range p.SourceHealth {
+		if h.Status != "" && h.Status != "ok" {
+			line := fmt.Sprintf("  数据源    : %s=%s", h.Source, h.Status)
+			if h.Note != "" {
+				line += " — " + h.Note
+			}
+			fmt.Println(line)
+			break
+		}
+	}
+	fmt.Println("  (完整盘面:guanfu --full;详细读盘:--verdict;走势推演:--forecast)")
+}
+
 func printHumanVerdict(v *engine.Verdict, plain bool) {
 	bar := "═══════════════════════════════════════════════════════════"
 	if plain {
@@ -643,6 +884,27 @@ func printHumanVerdict(v *engine.Verdict, plain bool) {
 		fmt.Println()
 		fmt.Printf("  数据缺失提示：%s\n", v.MissingNote)
 	}
+	if v.PortfolioContext != nil {
+		ctx := v.PortfolioContext
+		fmt.Println()
+		fmt.Println("  组合上下文:")
+		if ctx.CurrentWeightPct > 0 {
+			fmt.Printf("    当前权重     : %.1f%%\n", ctx.CurrentWeightPct)
+		}
+		if ctx.CeilingPct > 0 {
+			fmt.Printf("    自定上限     : %.0f%%   超出: %v   剩余空间: %.1f%%\n",
+				ctx.CeilingPct, ctx.Overweight, ctx.RoomToCeilingPct)
+		}
+		if ctx.HorizonMatch != "" {
+			fmt.Printf("    期限匹配     : %s\n", ctx.HorizonMatch)
+		}
+		if ctx.RiskBudget != "" {
+			fmt.Printf("    风险预算     : %s\n", ctx.RiskBudget)
+		}
+		for _, n := range ctx.Notes {
+			fmt.Printf("    · %s\n", n)
+		}
+	}
 	fmt.Println(bar)
 	fmt.Println()
 }
@@ -675,6 +937,13 @@ func printHumanForecast(fc *forecast.Forecast, plain bool) {
 	fmt.Println()
 	fmt.Println("  Horizon scenarios:")
 	for _, h := range fc.Horizons {
+		if h.HardBlocked {
+			fmt.Printf("    %3dd  信号强度低于随机阈值，不显示数值预测\n", h.Days)
+			if h.ReliabilityNote != "" {
+				fmt.Printf("          %s\n", h.ReliabilityNote)
+			}
+			continue
+		}
 		fmt.Printf("    %3dd  %-12s  up=%.0f%% range=%.0f%% down=%.0f%%  median=%+.2f%%  p10/p90=%+.2f%%/%+.2f%%  median_price=$%.0f\n",
 			h.Days,
 			h.DominantLabel,
@@ -685,6 +954,16 @@ func printHumanForecast(fc *forecast.Forecast, plain bool) {
 			h.P10ReturnPct,
 			h.P90ReturnPct,
 			h.MedianPrice)
+		if h.RiskFreeReturnPct != 0 || h.PassiveReturnPct != 0 {
+			fmt.Printf("          vs T-bill %.2f%% / 60-40 %.2f%%  → 风险调整差 %+.2f%% (%s)\n",
+				h.RiskFreeReturnPct, h.PassiveReturnPct, h.RiskAdjustedDeltaPct, h.BaselineNote)
+		}
+		if h.ConformalAlpha > 0 {
+			fmt.Printf("          conformal %.0f%% 区间: [%+.2f%%, %+.2f%%]  (achieved %.0f%%)\n",
+				(1-h.ConformalAlpha)*100,
+				h.ConformalLowPct, h.ConformalHighPct,
+				h.ConformalCoverage*100)
+		}
 		if h.ReliabilityNote != "" {
 			fmt.Printf("          %s\n", h.ReliabilityNote)
 		}

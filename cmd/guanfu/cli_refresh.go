@@ -44,6 +44,8 @@ func allRefreshSources() []client.Source {
 		srcs = append(srcs, a)
 	}
 	srcs = append(srcs, client.CAPESource{})
+	srcs = append(srcs, client.DefillamaStablecoinSource{})
+	srcs = append(srcs, client.StooqPutCallSource{})
 	srcs = append(srcs, client.StockKeysSource{})
 	return srcs
 }
