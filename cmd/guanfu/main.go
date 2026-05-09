@@ -37,6 +37,17 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/version"
 )
 
+// resolveHorizonsArg parses --forecast-horizons. The sentinel "auto"
+// (or empty) defers to the asset's per-asset default (B5);
+// other values are parsed as a comma-separated horizon list.
+func resolveHorizonsArg(raw, assetKey string) ([]int, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" || strings.EqualFold(s, "auto") {
+		return forecast.HorizonsForAsset(assetKey), nil
+	}
+	return forecast.ParseHorizons(s)
+}
+
 // domain 中英文显示名
 var domainNames = []struct {
 	Key   string
@@ -60,7 +71,7 @@ func main() {
 	verdictOnly := flag.Bool("verdict-only", false, "仅输出 verdict（隐藏指标盘）")
 	forecastOut := flag.Bool("forecast", false, "输出 BTC 历史相似盘面走势推演")
 	forecastOnly := flag.Bool("forecast-only", false, "仅输出 forecast（隐藏指标盘）")
-	forecastHorizons := flag.String("forecast-horizons", "30,90,180", "走势推演周期，逗号分隔天数，如 30,90,180")
+	forecastHorizons := flag.String("forecast-horizons", "auto", "走势推演周期，逗号分隔天数，如 30,90,180；'auto' 用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120/180，其余 30/90/180）")
 	forecastTop := flag.Int("forecast-top", 21, "走势推演使用的历史相似样本数")
 	forecastPath := flag.Bool("forecast-path", false, "输出历史相似盘面路径推演 (ASCII fan chart)")
 	domainFilter := flag.String("domain", "", "仅看单个 domain: cycle/valuation/network/positioning/macro/flow/technical/cross_asset")
@@ -222,7 +233,7 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 
 	var fc *forecast.Forecast
 	if forecastOut || forecastOnly {
-		horizons, err := forecast.ParseHorizons(forecastHorizonsArg)
+		horizons, err := resolveHorizonsArg(forecastHorizonsArg, "btc")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "parse forecast horizons failed: %v\n", err)
 			os.Exit(1)
@@ -332,7 +343,7 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 		PriceHistory: history,
 	})
 
-	horizons, err := forecast.ParseHorizons(forecastHorizonsArg)
+	horizons, err := resolveHorizonsArg(forecastHorizonsArg, strings.ToLower(ticker))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "parse horizons: %v\n", err)
 		os.Exit(1)
@@ -437,7 +448,7 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 
 	var fc *forecast.Forecast
 	if forecastOut || forecastOnly {
-		horizons, err := forecast.ParseHorizons(forecastHorizonsArg)
+		horizons, err := resolveHorizonsArg(forecastHorizonsArg, assetKey)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "parse forecast horizons failed: %v\n", err)
 			os.Exit(1)

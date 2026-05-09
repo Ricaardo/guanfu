@@ -27,6 +27,27 @@ const (
 
 var defaultHorizons = []int{30, 90, 180}
 
+// assetHorizons holds per-asset default horizons (B5).
+// QQQ/SPY add 63d (quarterly) and 252d (yearly) on top of {30,90,180};
+// gold adds 60/120 around the 90d midpoint to better resolve momentum
+// reversals. Other assets fall back to defaultHorizons.
+var assetHorizons = map[string][]int{
+	"qqq":  {30, 63, 90, 180, 252},
+	"spy":  {30, 63, 90, 180, 252},
+	"gold": {30, 60, 90, 120, 180},
+}
+
+// HorizonsForAsset returns the asset-specific default horizons.
+// Falls back to {30,90,180} when no per-asset override is registered.
+// Callers should NOT route through DefaultOptions() when filling missing
+// horizons — that overwrites Extractors/TopK set elsewhere.
+func HorizonsForAsset(asset string) []int {
+	if h, ok := assetHorizons[strings.ToLower(strings.TrimSpace(asset))]; ok {
+		return append([]int(nil), h...)
+	}
+	return append([]int(nil), defaultHorizons...)
+}
+
 // Options controls the historical analogue forecast.
 type Options struct {
 	Horizons            []int              `json:"horizons"`

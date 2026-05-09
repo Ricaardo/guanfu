@@ -88,6 +88,40 @@ func TestBuildRejectsShortHistory(t *testing.T) {
 	}
 }
 
+func TestHorizonsForAsset(t *testing.T) {
+	cases := []struct {
+		asset string
+		want  []int
+	}{
+		{"qqq", []int{30, 63, 90, 180, 252}},
+		{"QQQ", []int{30, 63, 90, 180, 252}},
+		{"spy", []int{30, 63, 90, 180, 252}},
+		{"gold", []int{30, 60, 90, 120, 180}},
+		{"btc", []int{30, 90, 180}},
+		{"hs300", []int{30, 90, 180}},
+		{"AAPL", []int{30, 90, 180}}, // arbitrary stock falls back to default
+		{"", []int{30, 90, 180}},
+	}
+	for _, tc := range cases {
+		got := HorizonsForAsset(tc.asset)
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: len = %d, want %d", tc.asset, len(got), len(tc.want))
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("%s: got %v, want %v", tc.asset, got, tc.want)
+			}
+		}
+	}
+
+	// HorizonsForAsset must return a fresh slice (no aliasing of internal map).
+	h := HorizonsForAsset("qqq")
+	h[0] = 999
+	if HorizonsForAsset("qqq")[0] == 999 {
+		t.Fatal("HorizonsForAsset returned aliased slice; mutation leaked back to map")
+	}
+}
+
 func testOpts() Options {
 	opts := DefaultOptions()
 	opts.Extractors = []FeatureExtractor{

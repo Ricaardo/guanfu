@@ -103,7 +103,7 @@ func (a *HS300Asset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*f
 		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: "price_store:hs300"}
 	}
 	if len(opts.Horizons) == 0 {
-		opts = forecast.DefaultOptions()
+		opts.Horizons = forecast.HorizonsForAsset("hs300")
 	}
 	opts.Extractors = features.HS300Extractors(a.store)
 	return forecast.Build(points, opts)

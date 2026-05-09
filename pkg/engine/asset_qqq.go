@@ -121,7 +121,7 @@ func (a *QQAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*fore
 		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: "price_store:qqq"}
 	}
 	if len(opts.Horizons) == 0 {
-		opts = forecast.DefaultOptions()
+		opts.Horizons = forecast.HorizonsForAsset("qqq")
 	}
 	opts.Extractors = features.EquityExtractors(a.store)
 	return forecast.Build(points, opts)

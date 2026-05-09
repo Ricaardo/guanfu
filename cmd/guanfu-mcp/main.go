@@ -120,7 +120,7 @@ var tools = json.RawMessage(`
       "properties": {
         "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
-        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数，默认 [30,90,180]"},
+        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数；省略时使用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120/180，BTC/HS300 30/90/180）"},
         "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
@@ -149,7 +149,7 @@ var tools = json.RawMessage(`
       "properties": {
         "ticker": {"type": "string", "description": "美股代码，如 AAPL / MSFT / NVDA"},
         "days": {"type": "integer", "description": "拉历史天数，默认 3650 (~10y)；Yahoo 上限决定上界"},
-        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数，默认 [30,90,180]"},
+        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数，默认 [30,90,180]（任意 ticker 走通用默认）"},
         "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21，最小 5"},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       },
@@ -340,6 +340,10 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		opts := forecast.DefaultOptions()
 		if len(p.Horizons) > 0 {
 			opts.Horizons = p.Horizons
+		} else {
+			// B5: defer to asset-specific default. Asset.BuildForecast
+			// fills Horizons via forecast.HorizonsForAsset when empty.
+			opts.Horizons = nil
 		}
 		if p.TopK != 0 {
 			if p.TopK < minForecastTopK() {

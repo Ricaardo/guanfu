@@ -152,7 +152,7 @@ func (a *GoldAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*fo
 		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: "price_store:gold"}
 	}
 	if len(opts.Horizons) == 0 {
-		opts = forecast.DefaultOptions()
+		opts.Horizons = forecast.HorizonsForAsset("gold")
 	}
 	opts.Extractors = features.GoldExtractors(a.store)
 	return forecast.Build(points, opts)
