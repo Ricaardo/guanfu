@@ -105,6 +105,17 @@ P1 ▸ 功能 / 数据缺失         P3 ▸ 调研 / 扩展
 
 **不补**:CryptoQuant 付费 / Bloomberg / 单股 Form 4 / 新闻 feed / 社媒情绪。
 
+### F5 状态更新(2026-05-09,Wave 6 决策)
+
+F5 真正稀缺的是**央行季度购金净额**(World Gold Council 2022+ regime 的解释变量),而非 GLD 价格(Futu/Yahoo 已覆盖 → PriceStore key `gld`)。免费 endpoint 现状:
+
+- WGC 季度 CSV:URL 在 `gold.org/goldhub/` 下多次改路径,无稳定版
+- IMF DOT:有 CSV 但需要注册 + token
+- Stooq `xaucb.f`(央行储备变化)系列:历史覆盖不足 + 数据过旧
+- SPDR `historical_mf_data.xml`(GLD 持仓,but not 央行):XML 格式偶尔异常
+
+**结论**:暂缓实现,不硬上会频繁 fail 的 source。Gold 2022+ regime 识别已被 G2 `regimeBucket` + 现有 DXY / real yield / COT 覆盖,边际收益不值得 endpoint 不稳定的维护成本。等 WGC 公开稳定 CSV 或 Stooq 补齐 central-bank-reserves symbol 历史覆盖再启动 F5。
+
 ---
 
 ## Track G — 算法升级(6 项,不换 kNN 架构)

@@ -280,6 +280,9 @@ func main() {
 	case "stress":
 		runStress(trailing[1:])
 		return
+	case "joint":
+		runJoint(trailing[1:])
+		return
 	case "refresh":
 		// Refresh data flags can also appear after the subcommand, so re-scan
 		// trailing args (flag.Parse stops at the first positional).
@@ -307,7 +310,7 @@ func main() {
 		// default: BTC panel (existing behavior)
 	default:
 		fmt.Fprintf(os.Stderr, "guanfu: unknown subcommand %q\n", subcmd)
-		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status, refresh, intent, watch, digest, calibrate, stress\n")
+		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status, refresh, intent, watch, digest, calibrate, stress, joint\n")
 		os.Exit(1)
 	}
 
