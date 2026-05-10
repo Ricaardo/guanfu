@@ -87,6 +87,7 @@ func (GoldSource) Refresh(ctx context.Context, s *store.PriceStore) (*RefreshRes
 	if lastDate != "" {
 		mode = "incremental"
 	}
+	beforeCount, _ := s.Count("gold")
 
 	var pts []store.PricePoint
 	var err error
@@ -117,9 +118,13 @@ func (GoldSource) Refresh(ctx context.Context, s *store.PriceStore) (*RefreshRes
 	}
 	count, _ := s.Count("gold")
 	last, _ := s.LastDate("gold")
+	added := count - beforeCount
+	if added < 0 {
+		added = 0
+	}
 	return &RefreshResult{
 		Key: "gold", DisplayName: "gold (DBnomics + Yahoo)",
-		Mode: mode, Added: len(pts), Total: count, LastDate: last,
+		Mode: mode, Added: added, Total: count, LastDate: last,
 	}, nil
 }
 

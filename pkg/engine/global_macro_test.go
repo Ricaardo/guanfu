@@ -44,6 +44,13 @@ func TestEnrichGlobalInvestorMacroAddsFXAndCentralBankContext(t *testing.T) {
 	if got := panel.Macro["global_dm_policy_rate_avg_pct"]; got.Value != 2.33 || got.Missing {
 		t.Fatalf("unexpected DM policy avg: %+v", got)
 	}
+
+	if got, ok := testSourceHealth(panel.SourceHealth, investorFXSourceName); !ok || got.Status != "ok" || got.AsOf != "2026-03-05" {
+		t.Fatalf("unexpected FX source health ok=%v health=%+v", ok, got)
+	}
+	if got, ok := testSourceHealth(panel.SourceHealth, globalCentralBankRateSource); !ok || got.Status != "ok" || got.AsOf != "2026-03-01" {
+		t.Fatalf("unexpected central bank source health ok=%v health=%+v", ok, got)
+	}
 }
 
 func TestEnrichGlobalInvestorMacroFallsBackToTBillWhenFedFundsMissing(t *testing.T) {
@@ -59,4 +66,18 @@ func TestEnrichGlobalInvestorMacroFallsBackToTBillWhenFedFundsMissing(t *testing
 	if !ok || got.Value != 4.10 || got.Source != "fred:DGS3MO" {
 		t.Fatalf("expected DGS3MO fallback, got ok=%v ind=%+v", ok, got)
 	}
+
+	health, ok := testSourceHealth(panel.SourceHealth, globalCentralBankRateSource)
+	if !ok || health.Status != "partial" || health.AsOf != "2026-03-01" {
+		t.Fatalf("expected partial central-bank source health, got ok=%v health=%+v", ok, health)
+	}
+}
+
+func testSourceHealth(items []model.SourceHealth, source string) (model.SourceHealth, bool) {
+	for _, item := range items {
+		if item.Source == source {
+			return item, true
+		}
+	}
+	return model.SourceHealth{}, false
 }
