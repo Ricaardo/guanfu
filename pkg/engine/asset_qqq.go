@@ -88,10 +88,12 @@ func (a *QQAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error) {
 		}
 		panel := BuildEquityDashboard(din)
 		enrichEquityPanelWithValuation(panel, "qqq", as.PE, as.PB)
+		EnrichGlobalInvestorMacro(panel, a.store)
 		return panel, nil
 	}
 	panel := BuildEquityPanel(in)
 	enrichEquityPanelWithValuation(panel, "qqq", as.PE, as.PB)
+	EnrichGlobalInvestorMacro(panel, a.store)
 	return panel, nil
 }
 

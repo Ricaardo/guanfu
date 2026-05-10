@@ -53,7 +53,7 @@ return math.Sqrt(sum / weightSum), matched, true
 
 ### 现状
 
-`guanfu refresh` 注册了 23 个 `Source`,但 BTC 面板依赖的几个数据**不走 refresh 框架**:
+`guanfu refresh` 注册了 26 个 `Source`,但 BTC 面板依赖的几个数据**不走 refresh 框架**:
 
 | 源 | 走哪 | TTL |
 |---|---|---|
@@ -76,7 +76,7 @@ return math.Sqrt(sum / weightSum), matched, true
 
 什么情况下值得改成 `Source`:
 - 源的 API 限流到让 panel-build 被拖慢(目前 90s 冷启动可接受)
-- 用户要求 `guanfu refresh` 一次搞定所有数据(目前 23 个 source 之外的都靠 panel-build 触发拉取)
+- 用户要求 `guanfu refresh` 一次搞定所有数据(目前 26 个 source 之外的都靠 panel-build 触发拉取)
 - 新加 BTC 链上特征需要多年历史而非即时值
 
 短期内不做。**记录在此**,未来如果有人发起要改,先看这段再说。

@@ -77,6 +77,7 @@ func (a *SPYAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error) 
 
 	panel := BuildEquityPanel(in)
 	enrichEquityPanelWithValuation(panel, "spy", as.PE, as.PB)
+	EnrichGlobalInvestorMacro(panel, a.store)
 	return panel, nil
 }
 

@@ -100,6 +100,7 @@ func (a *GoldAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error)
 
 	// ── Gold valuation domain ──
 	panel.Valuation = buildGoldValuation(as, panel.Macro["tlt_proxy"])
+	EnrichGlobalInvestorMacro(panel, a.store)
 
 	return panel, nil
 }

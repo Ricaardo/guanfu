@@ -8,6 +8,7 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/history"
 	"github.com/Ricaardo/guanfu/pkg/mathutil"
 	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/store"
 
 	"github.com/shopspring/decimal"
 )
@@ -23,8 +24,9 @@ const (
 )
 
 type Calculator struct {
-	Config  *model.Config
-	History *history.Store // 可选；nil 表示不写历史 / 不算历史分位
+	Config     *model.Config
+	History    *history.Store    // 可选；nil 表示不写历史 / 不算历史分位
+	PriceStore *store.PriceStore // 可选；nil 表示不追加 PriceStore 宏观上下文
 }
 
 func NewCalculator(cfg *model.Config) *Calculator {
@@ -34,6 +36,13 @@ func NewCalculator(cfg *model.Config) *Calculator {
 // WithHistory 注入 SQLite history store 后启用 v2 历史分位填充
 func (c *Calculator) WithHistory(s *history.Store) *Calculator {
 	c.History = s
+	return c
+}
+
+// WithPriceStore enables optional PriceStore-backed macro context such as
+// USD/CNY and global front-end policy rates.
+func (c *Calculator) WithPriceStore(s *store.PriceStore) *Calculator {
+	c.PriceStore = s
 	return c
 }
 

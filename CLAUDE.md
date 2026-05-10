@@ -76,13 +76,13 @@ JSON 日频文件：`~/.guanfu/prices/<key>.json`。**Namespace 约定**：
 
 ## 数据刷新 (`guanfu refresh`)
 
-23 个 source 统一刷新，首次全量、后续增量。每个 source 实现 `client.Source` 接口（Key/DisplayName/Refresh），按 dependency order 串行执行（外部 API 各有 rate limit，串行更易调试）。
+26 个 source 统一刷新，首次全量、后续增量。每个 source 实现 `client.Source` 接口（Key/DisplayName/Refresh），按 dependency order 串行执行（外部 API 各有 rate limit，串行更易调试）。
 
 | 类别 | Source 实现 | 文件 | 数据键 |
 |---|---|---|---|
 | 核心价格 | `BTCSource` / `GoldSource` | `refresh_native.go` | `btc` / `gold` |
 | Yahoo ETF | `YahooETFSource` | `yahoo_history.go` | `qqq` `spy` `vixy` `tlt` `uup` `usd_cny`(CNY=X) |
-| FRED 宏观 | `FREDSource` | `fred_history.go` | `fred_{dxy,dgs10,dfii10,yield_curve,breakeven,hy_spread}` |
+| FRED 宏观 | `FREDSource` | `fred_history.go` | `fred_{dxy,fed_funds,dgs10,dgs3mo,dfii10,yield_curve,breakeven,hy_spread,tga,rrp,ecb_deposit_rate,boj_call_rate,pboc_interbank_rate}` |
 | Shiller CAPE | `CAPESource` | `cape_history.go` | `spx_cape`（走 `scripts/import_cape.py`，月频 28d TTL） |
 | 任意美股 | `StockKeysSource` | `refresh_native.go` | 已 import 的 `stock_*`（依靠 `FetchAndCacheStock` 30h TTL 自动跳过） |
 

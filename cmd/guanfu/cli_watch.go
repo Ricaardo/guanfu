@@ -180,7 +180,7 @@ func buildBTCPanelOrExit(ctx context.Context, cfg *model.Config, _ string) *mode
 		fmt.Fprintf(os.Stderr, "watch: fetch BTC snapshot: %v\n", err)
 		os.Exit(1)
 	}
-	calc := engine.NewCalculator(cfg)
+	calc := engine.NewCalculator(cfg).WithPriceStore(&store.PriceStore{})
 	return calc.BuildPanel(snap)
 }
 

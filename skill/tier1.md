@@ -80,6 +80,8 @@ tier: 1
 | real_yield_10y_pct | <1 | >2.5 |
 | dxy_60d_trend_pct | <-1 | >+1 |
 | spx_correlation_30d | <0.2 (独立) | >0.7 (宏观主导) |
+| usd_cny_60d_trend_pct | CNY 投资者 USD 资产本币顺风 | CNY 投资者 USD 资产本币逆风 |
+| global_rate_* | 全球央行约束背景 | 只作 context,不单独触发交易结论 |
 
 ### Flow
 

@@ -427,6 +427,21 @@ v1 使用 BTC 全历史日线中可完整回放的特征：
   - > 8% 强劲扩张（2020-21 印钞峰值，BTC 翻数倍背景）
 - **数据时效**：M2SL 月度发布，通常滞后 30-45 天。as_of 日期看 note 字段。
 
+#### `usd_cny` / `usd_cny_60d_trend_pct`
+- **定义**：Yahoo `CNY=X` 的 USD/CNY spot 和 60 日变化。数值上行 = 人民币走弱 / 美元走强。
+- **用途**：服务 CNY 本币投资者。BTC / QQQ / SPY / Gold 都以 USD 计价；USD 价格横盘时，人民币贬值也会抬高 CNY 计价收益，反之亦然。
+- **解读**：它是本币风险和购买力指标，不是 A 股或港股逻辑，也不应单独作为买卖信号。
+
+#### `global_rate_*`
+- **定义**：FRED 里的美欧日中前端政策/同业利率背景：
+  - `global_rate_us_fed_pct`: Fed effective rate (`DFF`)，缺失时用 3M T-bill (`DGS3MO`) proxy。
+  - `global_rate_eu_ecb_pct`: ECB deposit facility rate (`ECBDFR`)。
+  - `global_rate_jp_boj_pct`: Japan overnight call / interbank rate (`IRSTCI01JPM156N`)。
+  - `global_rate_cn_pboc_pct`: China overnight call / interbank rate (`IRSTCI01CNM156N`)。
+  - `global_rate_spread_us_cn_pct`: US - China 利差。
+  - `global_dm_policy_rate_avg_pct`: Fed / ECB / BOJ 均值。
+- **用途**：判断全球央行约束和 USD 利差背景。只作为 macro context；进入 forecast 前必须单独 walk-forward 验证。
+
 #### `spx_correlation_30d` (BTC vs SPX 30 日 Pearson 相关)
 - **定义**：BTC 与 S&P 500 过去 30 个 SPX 交易日对数收益率的 Pearson 相关系数 [-1, 1]。
 - **阈值**：

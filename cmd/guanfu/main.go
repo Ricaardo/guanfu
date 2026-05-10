@@ -386,7 +386,7 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 		os.Exit(1)
 	}
 
-	calc := engine.NewCalculator(cfg)
+	calc := engine.NewCalculator(cfg).WithPriceStore(&store.PriceStore{})
 	if os.Getenv("GUANFU_NO_HISTORY") != "1" {
 		store, err := history.Open(historyDB)
 		if err != nil {
@@ -529,6 +529,7 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 		PriceAsOf:    latest.Date,
 		PriceHistory: history,
 	})
+	engine.EnrichGlobalInvestorMacro(panel, s)
 
 	horizons, err := resolveHorizonsArg(forecastHorizonsArg, strings.ToLower(ticker))
 	if err != nil {

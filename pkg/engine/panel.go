@@ -73,6 +73,7 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 	c.fillFlow(panel, snap, now)
 	c.fillTechnical(panel, snap, now)
 	c.fillCrossAsset(panel, snap, now)
+	EnrichGlobalInvestorMacro(panel, c.PriceStore)
 
 	c.persistAndAnnotateHistory(panel, dataDate)
 	panel.StaleWarnings = dedupeStrings(panel.StaleWarnings)

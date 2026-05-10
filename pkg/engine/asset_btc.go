@@ -13,6 +13,7 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/history"
 	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/store"
 )
 
 // BTCAsset implements Asset for Bitcoin.
@@ -71,7 +72,7 @@ func (a *BTCAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error) 
 		return nil, fmt.Errorf("btc: AssetSnapshot missing BTCMarketSnapshot")
 	}
 
-	calc := NewCalculator(a.cfg)
+	calc := NewCalculator(a.cfg).WithPriceStore(&store.PriceStore{})
 
 	// Attach history store if available
 	if os.Getenv("GUANFU_NO_HISTORY") != "1" {

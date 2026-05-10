@@ -5,6 +5,7 @@
 // for the daily series guanfu kNN extractors consume:
 //
 //   fred_dxy          DTWEXBGS    Trade-Weighted USD (daily)
+//   fred_fed_funds    DFF         Effective federal funds rate (daily)
 //   fred_dgs10        DGS10       10Y Treasury (daily)
 //   fred_dfii10       DFII10      10Y TIPS / real yield (daily)
 //   fred_yield_curve  T10Y2Y      10Y-2Y spread (daily)
@@ -43,6 +44,7 @@ type FREDSource struct {
 func DefaultFREDSources() []*FREDSource {
 	return []*FREDSource{
 		{StoreKey: "fred_dxy", Series: "DTWEXBGS", Description: "Trade-weighted USD (Broad)", StartDate: "2006-01-01"},
+		{StoreKey: "fred_fed_funds", Series: "DFF", Description: "Effective federal funds rate", StartDate: "1981-01-01"},
 		{StoreKey: "fred_dgs10", Series: "DGS10", Description: "10Y Treasury yield", StartDate: "1990-01-01"},
 		{StoreKey: "fred_dgs3mo", Series: "DGS3MO", Description: "3M Treasury yield (risk-free baseline, F4)", StartDate: "1981-09-01"},
 		{StoreKey: "fred_dfii10", Series: "DFII10", Description: "10Y TIPS / real yield", StartDate: "2003-01-01"},
@@ -51,6 +53,9 @@ func DefaultFREDSources() []*FREDSource {
 		{StoreKey: "fred_hy_spread", Series: "BAMLH0A0HYM2", Description: "BofA US HY OAS", StartDate: "1996-12-31"},
 		{StoreKey: "fred_tga", Series: "WTREGEN", Description: "Treasury General Account (F1)", StartDate: "2005-01-05"},
 		{StoreKey: "fred_rrp", Series: "RRPONTSYD", Description: "Overnight Reverse Repo (F1)", StartDate: "2013-02-04"},
+		{StoreKey: "fred_ecb_deposit_rate", Series: "ECBDFR", Description: "ECB deposit facility rate", StartDate: "1999-01-01"},
+		{StoreKey: "fred_boj_call_rate", Series: "IRSTCI01JPM156N", Description: "Japan overnight call/interbank rate", StartDate: "1985-07-01"},
+		{StoreKey: "fred_pboc_interbank_rate", Series: "IRSTCI01CNM156N", Description: "China overnight call/interbank rate", StartDate: "1990-01-01"},
 	}
 }
 

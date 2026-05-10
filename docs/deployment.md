@@ -14,7 +14,7 @@
 
 | 变量 | 何时需要 |
 |---|---|
-| `FRED_API_KEY` | 想要 DXY / real yield / TGA / RRP / 利差 / T-bill 等宏观数据。免费 <https://fred.stlouisfed.org> 注册。**缺失时 baseline 对比会 fallback 到 flat 4.5%,forecast 仍可跑** |
+| `FRED_API_KEY` | 想要 DXY / real yield / TGA / RRP / 利差 / T-bill / Fed-ECB-BOJ-PBoC rates 等宏观数据。免费 <https://fred.stlouisfed.org> 注册。**缺失时 baseline 对比会 fallback 到 flat 4.5%,forecast 仍可跑** |
 | `COINMETRICS_API_KEY` | 想要 MVRV Z / NUPL 等付费端点。缺失 = 社区 tier,仅价格 + 少量链上 |
 
 ---
@@ -47,7 +47,7 @@ make all   # vet + test + build 3 binary 到 bin/
 
 ```bash
 guanfu --version                    # 确认版本
-guanfu refresh --dry-run            # 列 30 个数据源(不拉数据)
+guanfu refresh --dry-run            # 列 26 个数据源(不拉数据)
 guanfu status --frank               # 按可靠性分类 (asset, horizon)
 ```
 
@@ -59,7 +59,7 @@ guanfu status --frank               # 按可靠性分类 (asset, horizon)
 
 ```bash
 export FRED_API_KEY=your_key
-guanfu refresh                       # 23 个 source 串行拉
+guanfu refresh                       # 26 个 source 串行拉
 ```
 
 - 数据落在 `~/.guanfu/prices/<asset>.json`
