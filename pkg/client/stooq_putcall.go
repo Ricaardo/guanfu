@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +31,7 @@ import (
 const (
 	stooqPutCallURL = "https://stooq.com/q/d/l/?s=^pc&i=d"
 	stooqTimeout    = 60 * time.Second
+	stooqAPIKeyEnv  = "STOOQ_APIKEY"
 )
 
 // StooqPutCallSource fetches CBOE total Put/Call ratio daily history
@@ -48,7 +51,20 @@ func (s StooqPutCallSource) Refresh(ctx context.Context, ps *store.PriceStore) (
 		return freshSkipResult(s.Key(), s.DisplayName(), lastDate, ps), nil
 	}
 
-	points, err := fetchStooqCSV(ctx, stooqPutCallURL, "stooq:^PC")
+	apiKey := strings.TrimSpace(os.Getenv(stooqAPIKeyEnv))
+	if apiKey == "" {
+		count, _ := ps.Count(s.Key())
+		return &RefreshResult{
+			Key:         s.Key(),
+			DisplayName: s.DisplayName(),
+			Mode:        "skip",
+			Total:       count,
+			LastDate:    lastDate,
+			Error:       stooqAPIKeyEnv + " not set; Stooq now requires an API key for CSV downloads",
+		}, nil
+	}
+
+	points, err := fetchStooqCSV(ctx, stooqURLWithAPIKey(stooqPutCallURL, apiKey), "stooq:^PC")
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +98,17 @@ func (s StooqPutCallSource) Refresh(ctx context.Context, ps *store.PriceStore) (
 		Key: s.Key(), DisplayName: s.DisplayName(),
 		Mode: mode, Added: added, Total: total, LastDate: last,
 	}, nil
+}
+
+func stooqURLWithAPIKey(raw, apiKey string) string {
+	if apiKey == "" {
+		return raw
+	}
+	sep := "?"
+	if strings.Contains(raw, "?") {
+		sep = "&"
+	}
+	return raw + sep + "apikey=" + url.QueryEscape(apiKey)
 }
 
 // fetchStooqCSV pulls a Stooq CSV (header: Date,Open,High,Low,Close,Volume)

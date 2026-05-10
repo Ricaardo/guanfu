@@ -271,6 +271,7 @@ crontab -e
 | 变量 | 默认 | 作用 |
 |---|---|---|
 | `FRED_API_KEY` | — | FRED 宏观数据 key |
+| `STOOQ_APIKEY` | — | Stooq CSV 下载 key；缺失时 `stooq_putcall` 在 refresh 中 skip，不阻断其他源 |
 | `COINMETRICS_API_KEY` | — | CoinMetrics 付费端点 key |
 | `GUANFU_NO_HISTORY=1` | off | 禁用 history.db 写入 |
 | `GUANFU_HISTORY_DB` | `~/.guanfu/history.db` | SQLite 路径 |

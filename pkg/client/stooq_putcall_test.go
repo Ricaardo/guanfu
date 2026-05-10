@@ -13,3 +13,11 @@ func TestStooqPutCallSourceInterface(t *testing.T) {
 		t.Error("DisplayName empty")
 	}
 }
+
+func TestStooqURLWithAPIKey(t *testing.T) {
+	got := stooqURLWithAPIKey("https://stooq.com/q/d/l/?s=^pc&i=d", "abc 123")
+	want := "https://stooq.com/q/d/l/?s=^pc&i=d&apikey=abc+123"
+	if got != want {
+		t.Fatalf("url = %q, want %q", got, want)
+	}
+}

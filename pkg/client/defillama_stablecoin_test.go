@@ -23,6 +23,10 @@ func TestParseDefillamaDate(t *testing.T) {
 	if tm, ok := parseDefillamaDate("2025-03-15"); !ok || tm.Year() != 2025 || tm.Month() != 3 {
 		t.Errorf("iso date failed: %v %v", tm, ok)
 	}
+	// unix seconds as string (current DefiLlama schema)
+	if tm, ok := parseDefillamaDate("1700000000"); !ok || tm.Year() != 2023 {
+		t.Errorf("string unix failed: %v %v", tm, ok)
+	}
 	// garbage
 	if _, ok := parseDefillamaDate([]string{"nope"}); ok {
 		t.Error("garbage should not parse")

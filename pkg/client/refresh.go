@@ -100,7 +100,11 @@ func FormatRefreshTable(results []*RefreshResult) string {
 	for _, r := range results {
 		mode := r.Mode
 		if r.Error != "" {
-			mode = "FAIL: " + truncate(r.Error, 40)
+			if r.Mode == "skip" {
+				mode = "SKIP: " + truncate(r.Error, 40)
+			} else {
+				mode = "FAIL: " + truncate(r.Error, 40)
+			}
 		}
 		out += fmt.Sprintf("%-22s %-12s %8d %12d %10s\n",
 			truncate(r.Key, 22), mode, r.Added, r.Total, r.LastDate)

@@ -135,6 +135,7 @@ curl -sL https://raw.githubusercontent.com/Ricaardo/guanfu/main/pkg/client/futu_
 | 变量 | 作用 | 影响 |
 |---|---|---|
 | `FRED_API_KEY` | FRED 宏观数据 | 缺失时 Macro 域为 placeholder |
+| `STOOQ_APIKEY` | Stooq CSV 下载 key | 缺失时 `stooq_putcall` refresh 显式 skip |
 | `COINMETRICS_API_KEY` | MVRV / NUPL 付费 tier | 缺失时 Valuation 缺 MVRV Z |
 | `GUANFU_NO_HISTORY=1` | 禁用 history.db | 跳过 15 个非价格指标的 q 分位 |
 

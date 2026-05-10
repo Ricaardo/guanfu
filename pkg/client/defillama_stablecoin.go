@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -153,6 +154,9 @@ func parseDefillamaDate(v any) (time.Time, bool) {
 	case string:
 		s := strings.TrimSpace(x)
 		// try unix seconds as string
+		if unix, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return time.Unix(unix, 0).UTC(), true
+		}
 		if t, err := time.Parse("2006-01-02", s); err == nil {
 			return t.UTC(), true
 		}
