@@ -34,7 +34,7 @@ func CAPEExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 		return []forecast.FeatureValue{{
 			Name: "cape", Value: math.Round(v*100) / 100,
 			Normalized: math.Round(clipE(normalized, 3)*1000) / 1000,
-			Weight: 0.80, Note: "Shiller CAPE (monthly)",
+			Weight:     0.80, Note: "Shiller CAPE (monthly)",
 		}}, true
 	}
 }
@@ -62,7 +62,7 @@ func DGS10Extractor(s *store.PriceStore) forecast.FeatureExtractor {
 		return []forecast.FeatureValue{{
 			Name: "dgs10_30d", Value: math.Round((now-past)*10000) / 100,
 			Normalized: math.Round(clipE(chg, 3)*1000) / 1000,
-			Weight: 0.45, Note: "10Y Treasury 30d change",
+			Weight:     0.45, Note: "10Y Treasury 30d change",
 		}}, true
 	}
 }
@@ -84,11 +84,11 @@ func DXYExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 		if now == 0 || past == 0 {
 			return nil, false
 		}
-		chg := (now-past)/past / 0.03
+		chg := (now - past) / past / 0.03
 		return []forecast.FeatureValue{{
 			Name: "dxy_30d", Value: math.Round((now/past-1)*10000) / 100,
 			Normalized: math.Round(clipE(-chg, 3)*1000) / 1000,
-			Weight: 0.45, Note: "USD 30d trend (inverted)",
+			Weight:     0.45, Note: "USD 30d trend (inverted)",
 		}}, true
 	}
 }
@@ -301,7 +301,7 @@ func LeadLagExtractor(s *store.PriceStore, otherAsset string, lagDays, window in
 		return []forecast.FeatureValue{{
 			Name: "leadlag_7d", Value: math.Round(corr*1000) / 1000,
 			Normalized: math.Round(clipE(corr, 3)*1000) / 1000,
-			Weight: 0.35, Note: "Cross-asset 7d lead correlation",
+			Weight:     0.35, Note: "Cross-asset 7d lead correlation",
 		}}, true
 	}
 }

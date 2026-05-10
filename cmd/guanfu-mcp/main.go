@@ -3,7 +3,7 @@
 // 通过 stdio 提供 MCP 协议接口，让 Claude Desktop / Cursor / 任何 MCP 客户端
 // 直接调用 guanfu 引擎获取多资产盘面数据，无需 Bash 权限。
 //
-// 提供的 Tools (传 asset=btc/qqq/spy/gold/hs300 切资产):
+// 提供的 Tools (传 asset=btc/qqq/spy/gold 切资产):
 //   get_panel / get_btc_panel          — 完整域盘面 (JSON)
 //   get_verdict / get_btc_verdict      — 结构化多域读盘 (JSON)
 //   get_forecast / get_btc_forecast    — 历史相似盘面走势推演 (JSON)
@@ -92,11 +92,11 @@ var tools = json.RawMessage(`
 [
   {
     "name": "get_panel",
-    "description": "获取完整指标盘面（多资产，传 asset 切资产）。BTC 走 8 域 40+ 指标；股票/ETF/黄金/沪深300 走 6 域。每个指标含原始值、历史分位(q)、解读标签、数据源。",
+    "description": "获取完整指标盘面（多资产，传 asset 切资产）。BTC 走 8 域 40+ 指标；股票/ETF/黄金走 6 域。每个指标含原始值、历史分位(q)、解读标签、数据源。",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
+        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold", "enum": ["btc","qqq","spy","gold"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       }
     }
@@ -107,7 +107,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
+        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold", "enum": ["btc","qqq","spy","gold"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
@@ -119,9 +119,9 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold / hs300", "enum": ["btc","qqq","spy","gold","hs300"]},
+        "asset": {"type": "string", "description": "资产标识: btc(默认) / qqq / spy / gold", "enum": ["btc","qqq","spy","gold"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"},
-        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数；省略时使用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120，BTC/HS300 30/90/180）"},
+        "horizons": {"type": "array", "items": {"type": "integer"}, "description": "推演周期天数；省略时使用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120，BTC 30/90/180）"},
         "top_k": {"type": "integer", "description": "使用的历史相似样本数，默认 21"},
         "include_panel": {"type": "boolean", "description": "是否同时返回原始指标盘面，默认 false"}
       }
@@ -144,7 +144,7 @@ var tools = json.RawMessage(`
   },
   {
     "name": "get_stock_forecast",
-    "description": "对任意美股 ticker 跑 kNN 走势推演。自动从 Yahoo 拉日频数据缓存到 PriceStore，使用 USStockExtractors（无 CAPE）做特征。Ticker 不能与核心资产 (btc/qqq/spy/gold/hs300) 或 feature data key (vixy/fred_*/...) 撞名。",
+    "description": "对任意美股 ticker 跑 kNN 走势推演。自动从 Yahoo 拉日频数据缓存到 PriceStore，使用 USStockExtractors（无 CAPE）做特征。Ticker 不能与核心资产 (btc/qqq/spy/gold) 或 feature data key (vixy/fred_*/...) 撞名。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -163,7 +163,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
+        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold"},
         "domain": {"type": "string", "enum": ["cycle","valuation","network","positioning","macro","flow","technical","cross_asset"]},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       },
@@ -176,7 +176,7 @@ var tools = json.RawMessage(`
     "inputSchema": {
       "type": "object",
       "properties": {
-        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold, hs300"},
+        "asset": {"type": "string", "description": "资产标识: btc, qqq, spy, gold"},
         "name": {"type": "string", "description": "指标 key 名称，如 ahr999, hash_ribbons, fear_greed"},
         "timeout_seconds": {"type": "integer", "description": "拉数据超时秒数，默认 90"}
       },
@@ -461,7 +461,7 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 
 // supportedResourceAssets lists the asset keys that resources/* recognizes.
 // First entry is the legacy default for unsuffixed URIs (panel/verdict/forecast/latest).
-var supportedResourceAssets = []string{"btc", "qqq", "spy", "gold", "hs300"}
+var supportedResourceAssets = []string{"btc", "qqq", "spy", "gold"}
 
 // parseResourceURI splits a guanfu://{kind}/latest[/{asset}] URI into kind+asset.
 // kind is "panel" | "verdict" | "forecast"; asset defaults to "btc" for the
@@ -943,12 +943,12 @@ func readLedgerSummary() (string, *rpcError) {
 	}
 
 	out := map[string]any{
-		"lookback_days":  90,
-		"claim_buckets":  bucketList,
-		"claim_total":    len(claims),
-		"intents":        lite,
-		"intent_total":   len(intents),
-		"note":           "For per-claim calibration run `guanfu calibrate --json`.",
+		"lookback_days": 90,
+		"claim_buckets": bucketList,
+		"claim_total":   len(claims),
+		"intents":       lite,
+		"intent_total":  len(intents),
+		"note":          "For per-claim calibration run `guanfu calibrate --json`.",
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	return string(b), nil

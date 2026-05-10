@@ -33,11 +33,11 @@ func TestSummarizeConsensusNoMajorityIsMixed(t *testing.T) {
 }
 
 func TestSummarizeConsensusExcludesHardBlocked(t *testing.T) {
-	// HS300 hard-blocked; remaining 2/2 agree → consensus
+	// Hard-blocked rows do not vote; remaining 2/2 agree → consensus.
 	rows := []JointRow{
 		{Asset: "btc", DominantScenario: "upside_continuation"},
 		{Asset: "qqq", DominantScenario: "upside_continuation"},
-		{Asset: "hs300", DominantScenario: "downside_pressure", HardBlocked: true},
+		{Asset: "gold", DominantScenario: "downside_pressure", HardBlocked: true},
 	}
 	r := summarizeConsensus(rows, 90)
 	if r.Consensus != "upside_continuation" {
@@ -50,7 +50,7 @@ func TestSummarizeConsensusExcludesHardBlocked(t *testing.T) {
 
 func TestSummarizeConsensusAllBlocked(t *testing.T) {
 	rows := []JointRow{
-		{Asset: "hs300", DominantScenario: "downside_pressure", HardBlocked: true},
+		{Asset: "qqq", DominantScenario: "downside_pressure", HardBlocked: true},
 		{Asset: "gold", DominantScenario: "range", HardBlocked: true},
 	}
 	r := summarizeConsensus(rows, 90)

@@ -40,7 +40,7 @@ func DefaultYahooETFSources() []*YahooETFSource {
 		{StoreKey: "vixy", Symbol: "^VIX", FullDays: 4000, Note: "VIX index"},
 		{StoreKey: "tlt", Symbol: "TLT", FullDays: 4000, Note: "20Y+ Treasury ETF"},
 		{StoreKey: "uup", Symbol: "UUP", FullDays: 4000, Note: "USD bullish ETF"},
-		{StoreKey: "hs300_cny", Symbol: "CNY=X", FullDays: 9000, Note: "USD/CNY spot rate"},
+		{StoreKey: "usd_cny", Symbol: "CNY=X", FullDays: 9000, Note: "USD/CNY spot rate"},
 	}
 }
 

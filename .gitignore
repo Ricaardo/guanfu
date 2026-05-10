@@ -41,6 +41,7 @@ Thumbs.db
 .env.local
 
 # Root-level local binaries / agent state
+/guanfu
 /guanfu-mcp
 .serena/
 .agents/state/

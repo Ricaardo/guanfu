@@ -447,7 +447,7 @@ func encodeGetSnapshot(symbol string) []byte {
 func parseFutuSymbol(symbol string) (market int32, code string, err error) {
 	// US.QQQ → market=11, code="QQQ"
 	// HK.00700 → market=1, code="00700"
-	// SH.000300 → market=2, code="000300" (Shanghai A-share)
+	// SH.600519 → market=2, code="600519" (Shanghai A-share)
 	// SZ.159919 → market=3, code="159919" (Shenzhen A-share)
 	switch {
 	case len(symbol) > 3 && symbol[:3] == "US.":
@@ -531,19 +531,19 @@ type CrossAssetFutuPrices struct {
 	VIXYHistory    []float64
 	VIXYPriceAsOf  string
 	// New ETFs for Part D 懒人组合
-	BILPrice       float64 // 1-3 Month T-Bill ETF
-	BILHistory     []float64
-	BILPriceAsOf   string
-	SHYPrice       float64 // 1-3 Year Treasury ETF
-	SHYHistory     []float64
-	SHYPriceAsOf   string
-	BNDPrice       float64 // Total Bond Market ETF
-	BNDHistory     []float64
-	BNDPriceAsOf   string
-	VTIPrice       float64 // Total US Stock Market ETF
-	VTIHistory     []float64
-	VTIPriceAsOf   string
-	Warnings       []string
+	BILPrice     float64 // 1-3 Month T-Bill ETF
+	BILHistory   []float64
+	BILPriceAsOf string
+	SHYPrice     float64 // 1-3 Year Treasury ETF
+	SHYHistory   []float64
+	SHYPriceAsOf string
+	BNDPrice     float64 // Total Bond Market ETF
+	BNDHistory   []float64
+	BNDPriceAsOf string
+	VTIPrice     float64 // Total US Stock Market ETF
+	VTIHistory   []float64
+	VTIPriceAsOf string
+	Warnings     []string
 }
 
 // futuFetchOne requests history KL for a single symbol, returns (price, history, asOf).

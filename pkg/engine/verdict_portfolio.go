@@ -24,7 +24,7 @@ import (
 // Inputs:
 //
 //	v            — verdict to annotate (mutated in place)
-//	asset        — canonical asset key (btc/qqq/spy/gold/hs300/stock_xxx)
+//	asset        — canonical asset key (btc/qqq/spy/gold/stock_xxx)
 //	p            — loaded portfolio (nil if user has no portfolio.json)
 //	currentPrice — current USD price of `asset` (for position value)
 //	prices       — lowercase-keyed USD prices of ALL portfolio holdings

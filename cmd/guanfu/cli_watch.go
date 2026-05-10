@@ -35,7 +35,7 @@ import (
 
 const watchUsage = `usage: guanfu watch <asset> --when '<expr>' [--dispatch osascript|stdout] [--quiet]
 
-  asset     btc / qqq / spy / gold / hs300 / stock_<ticker>
+  asset     btc / qqq / spy / gold / stock_<ticker>
   --when    e.g. 'mayer_multiple < 0.8' / 'rsi_14 > 75' / 'ahr999_compressed > 3.344'
   --dispatch  notification channel (default stdout; osascript requires macOS)
   --quiet   suppress stdout when condition NOT met (for cron use)
@@ -119,7 +119,7 @@ func fetchMetricValue(asset, metric string) (float64, bool) {
 	case "btc", "":
 		cfg := defaultBTCConfig()
 		panel = buildBTCPanelOrExit(ctx, cfg, "")
-	case "qqq", "spy", "gold", "hs300":
+	case "qqq", "spy", "gold":
 		a, err := engine.GetAsset(asset)
 		if err != nil {
 			return 0, false
@@ -249,7 +249,7 @@ func runDigest(args []string) {
 	// Price diffs.
 	fmt.Println("Prices (latest vs ~7d ago):")
 	ps := &store.PriceStore{}
-	for _, k := range []string{"btc", "qqq", "spy", "gold", "hs300"} {
+	for _, k := range []string{"btc", "qqq", "spy", "gold"} {
 		p7, p0, ok := pricePair(ps, k, 7)
 		if !ok {
 			continue

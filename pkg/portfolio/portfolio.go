@@ -45,10 +45,10 @@ const SchemaVersion = 1
 
 // Portfolio is the user's opt-in self-declared context.
 type Portfolio struct {
-	SchemaVersion int                 `json:"schema_version"`
-	Holdings      map[string]Holding  `json:"holdings"`
-	Preferences   Preferences         `json:"preferences"`
-	Behavior      Behavior            `json:"behavior"`
+	SchemaVersion int                `json:"schema_version"`
+	Holdings      map[string]Holding `json:"holdings"`
+	Preferences   Preferences        `json:"preferences"`
+	Behavior      Behavior           `json:"behavior"`
 }
 
 // Holding is a flexible record — different assets use different fields.
@@ -212,7 +212,7 @@ func (p *Portfolio) TotalValueUSD(prices map[string]float64) float64 {
 }
 
 // CurrencyPairUSDRate returns how many units of the given currency per 1
-// USD, using the PriceStore's hs300_cny rate when available, and sensible
+// USD, using the PriceStore's usd_cny rate when available, and sensible
 // fallbacks for JPY/EUR/GBP otherwise. This is intentionally best-effort —
 // we'd rather show a slightly-stale conversion than block the output. The
 // caller passes in a PriceStore-resolved USD/CNY rate (or 0 to use the
@@ -255,6 +255,7 @@ func (p *Portfolio) ConvertUSD(usdAmount float64, cnyRate float64) (float64, str
 	}
 	return usdAmount * rate, home
 }
+
 // portfolio given current prices. Returns 0 if total is 0 or asset
 // absent. Callers that want "compare to ceiling" do:
 //

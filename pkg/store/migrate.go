@@ -195,4 +195,3 @@ func mapFutuSymToAsset(sym string) string {
 		return sym
 	}
 }
-

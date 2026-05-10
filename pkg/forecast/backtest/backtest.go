@@ -46,10 +46,10 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 	}
 
 	r := &Result{
-		Horizons:     horizons,
-		TotalTests:   0,
-		ByHorizon:    make(map[int]*HorizonMetrics),
-		ByYear:       make(map[int]*YearMetrics),
+		Horizons:   horizons,
+		TotalTests: 0,
+		ByHorizon:  make(map[int]*HorizonMetrics),
+		ByYear:     make(map[int]*YearMetrics),
 	}
 
 	for _, h := range horizons {
@@ -62,7 +62,7 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 
 		// Build forecast
 		opts := forecast.Options{
-			Horizons:      horizons,
+			Horizons:       horizons,
 			TopK:           21,
 			StepDays:       7,
 			Extractors:     extractors,
@@ -186,10 +186,10 @@ func calcCRPS(actual, p10, p25, median, p75, p90 float64) float64 {
 
 // Result holds aggregated backtest results.
 type Result struct {
-	Horizons   []int                    `json:"horizons"`
-	TotalTests int                      `json:"total_tests"`
-	ByHorizon  map[int]*HorizonMetrics  `json:"by_horizon"`
-	ByYear     map[int]*YearMetrics     `json:"by_year"`
+	Horizons   []int                   `json:"horizons"`
+	TotalTests int                     `json:"total_tests"`
+	ByHorizon  map[int]*HorizonMetrics `json:"by_horizon"`
+	ByYear     map[int]*YearMetrics    `json:"by_year"`
 }
 
 // HorizonMetrics holds metrics for a single forecast horizon.

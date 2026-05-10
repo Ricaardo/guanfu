@@ -53,8 +53,6 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 		snap.SPYPrice = price
 	case "gold":
 		snap.GoldPrice = price
-	case "hs300":
-		snap.HS300Price = price
 	}
 
 	panel := &model.IndicatorPanel{
@@ -77,40 +75,40 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	sma200Dev := (price - sma200) / sma200 * 100
 
 	panel.Valuation["sma_200_dev"] = model.Indicator{
-		Value: math.Round(sma200Dev*10) / 10,
-		Label: smaDevZone(sma200Dev),
+		Value:  math.Round(sma200Dev*10) / 10,
+		Label:  smaDevZone(sma200Dev),
 		Source: "price_store",
 	}
 	panel.Valuation["sma_50_dev"] = model.Indicator{
-		Value: math.Round((price-sma50)/sma50*1000) / 10,
-		Label: fmt.Sprintf("SMA50 $%.0f", sma50),
+		Value:  math.Round((price-sma50)/sma50*1000) / 10,
+		Label:  fmt.Sprintf("SMA50 $%.0f", sma50),
 		Source: "price_store",
 	}
 	panel.Valuation["sma_200"] = model.Indicator{
-		Value: math.Round(sma200*100) / 100,
-		Label: fmt.Sprintf("200SMA $%.0f (price %+.1f%%)", sma200, sma200Dev),
+		Value:  math.Round(sma200*100) / 100,
+		Label:  fmt.Sprintf("200SMA $%.0f (price %+.1f%%)", sma200, sma200Dev),
 		Source: "price_store",
 	}
 
 	if in.PE > 0 {
 		peZone := peValuationZone(in.PE)
 		panel.Valuation["pe"] = model.Indicator{
-			Value: math.Round(in.PE*10) / 10,
-			Label: peZone,
+			Value:  math.Round(in.PE*10) / 10,
+			Label:  peZone,
 			Source: "futu:snapshot",
 		}
 	} else {
 		panel.Valuation["pe"] = model.Indicator{
 			Value: 0, Missing: true,
-			Label: "待接入",
+			Label:  "待接入",
 			Source: "待接入",
 		}
 	}
 
 	if in.PB > 0 {
 		panel.Valuation["pb"] = model.Indicator{
-			Value: math.Round(in.PB*100) / 100,
-			Label: fmt.Sprintf("PB %.2f", in.PB),
+			Value:  math.Round(in.PB*100) / 100,
+			Label:  fmt.Sprintf("PB %.2f", in.PB),
 			Source: "futu:snapshot",
 		}
 	}
@@ -122,23 +120,23 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	vol30d := calcVolEquity(history, 30)
 
 	panel.Technical["rsi_14"] = model.Indicator{
-		Value: math.Round(rsi14*10) / 10,
-		Label: rsiZoneLabel(rsi14),
+		Value:  math.Round(rsi14*10) / 10,
+		Label:  rsiZoneLabel(rsi14),
 		Source: "price_store",
 	}
 	panel.Technical["macd"] = model.Indicator{
-		Value: math.Round(macd*10000) / 10000,
-		Label: fmt.Sprintf("sig=%.4f hist=%.4f %s", macdSig, macdHist, macdLabel(macdHist)),
+		Value:  math.Round(macd*10000) / 10000,
+		Label:  fmt.Sprintf("sig=%.4f hist=%.4f %s", macdSig, macdHist, macdLabel(macdHist)),
 		Source: "price_store",
 	}
 	panel.Technical["bb_width"] = model.Indicator{
-		Value: math.Round(bbWidth*100) / 100,
-		Label: fmt.Sprintf("upper=%.0f lower=%.0f", bbUpper, bbLower),
+		Value:  math.Round(bbWidth*100) / 100,
+		Label:  fmt.Sprintf("upper=%.0f lower=%.0f", bbUpper, bbLower),
 		Source: "price_store",
 	}
 	panel.Technical["volatility_30d"] = model.Indicator{
-		Value: math.Round(vol30d*10) / 10,
-		Label: volRegimeLabel(vol30d),
+		Value:  math.Round(vol30d*10) / 10,
+		Label:  volRegimeLabel(vol30d),
 		Source: "price_store",
 	}
 
@@ -146,7 +144,7 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	rsiDiv := detectRSIDivergence(history, 14, 20)
 	if rsiDiv != "" {
 		panel.Technical["rsi_divergence"] = model.Indicator{
-			Label: rsiDiv,
+			Label:  rsiDiv,
 			Source: "computed",
 		}
 	}
@@ -158,45 +156,45 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	drawdown := calcMaxDrawdown(history, 200, price)
 
 	panel.Cycle["momentum_30d"] = model.Indicator{
-		Value: math.Round(mom30d*100) / 100,
-		Label: momentumLabel(mom30d),
+		Value:  math.Round(mom30d*100) / 100,
+		Label:  momentumLabel(mom30d),
 		Source: "price_store",
 	}
 	panel.Cycle["momentum_90d"] = model.Indicator{
-		Value: math.Round(mom90d*100) / 100,
-		Label: momentumLabel(mom90d),
+		Value:  math.Round(mom90d*100) / 100,
+		Label:  momentumLabel(mom90d),
 		Source: "price_store",
 	}
 	panel.Cycle["momentum_180d"] = model.Indicator{
-		Value: math.Round(mom180d*100) / 100,
-		Label: momentumLabel(mom180d),
+		Value:  math.Round(mom180d*100) / 100,
+		Label:  momentumLabel(mom180d),
 		Source: "price_store",
 	}
 	panel.Cycle["drawdown_200d"] = model.Indicator{
-		Value: math.Round(drawdown*100) / 100,
-		Label: drawdownLabel(drawdown),
+		Value:  math.Round(drawdown*100) / 100,
+		Label:  drawdownLabel(drawdown),
 		Source: "price_store",
 	}
 
 	// ─── 4. Macro Domain ───
 	if in.VIX > 0 {
 		panel.Macro["vix_level"] = model.Indicator{
-			Value: math.Round(in.VIX*10) / 10,
-			Label: vixRegimeLabel(in.VIX),
+			Value:  math.Round(in.VIX*10) / 10,
+			Label:  vixRegimeLabel(in.VIX),
 			Source: "price_store",
 		}
 	}
 	if in.DXY > 0 {
 		panel.Macro["dxy_proxy"] = model.Indicator{
-			Value: math.Round(in.DXY*100) / 100,
-			Label: fmt.Sprintf("UUP $%.2f", in.DXY),
+			Value:  math.Round(in.DXY*100) / 100,
+			Label:  fmt.Sprintf("UUP $%.2f", in.DXY),
 			Source: "price_store",
 		}
 	}
 	if in.TLT > 0 {
 		panel.Macro["tlt_proxy"] = model.Indicator{
-			Value: math.Round(in.TLT*100) / 100,
-			Label: fmt.Sprintf("TLT $%.2f (yield proxy)", in.TLT),
+			Value:  math.Round(in.TLT*100) / 100,
+			Label:  fmt.Sprintf("TLT $%.2f (yield proxy)", in.TLT),
 			Source: "price_store",
 		}
 	}
@@ -204,8 +202,8 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	// ─── 5. Sentiment / Positioning ───
 	if in.FearGreed > 0 {
 		panel.Positioning["fear_greed"] = model.Indicator{
-			Value: math.Round(in.FearGreed*10) / 10,
-			Label: fgZoneLabel(in.FearGreed),
+			Value:  math.Round(in.FearGreed*10) / 10,
+			Label:  fgZoneLabel(in.FearGreed),
 			Source: "alternative.me",
 		}
 	}
@@ -214,8 +212,8 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	if len(history) >= 50 {
 		volTrend := calcVolumeProxy(history, 50)
 		panel.Flow["volume_trend"] = model.Indicator{
-			Value: math.Round(volTrend*100) / 100,
-			Label: volumeLabel(volTrend),
+			Value:  math.Round(volTrend*100) / 100,
+			Label:  volumeLabel(volTrend),
 			Source: "price_store",
 		}
 	}
@@ -231,11 +229,11 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 // BuildEquityVerdictEnhanced builds a structured verdict with evidence chains.
 func BuildEquityVerdictEnhanced(panel *model.IndicatorPanel, asset string) *Verdict {
 	v := &Verdict{
-		Date:         panel.Date,
-		Domains:      make([]DomainVote, 0),
-		Reasons:      make([]string, 0),
+		Date:            panel.Date,
+		Domains:         make([]DomainVote, 0),
+		Reasons:         make([]string, 0),
 		CounterEvidence: make([]string, 0),
-		KillCriteria:  make([]string, 0),
+		KillCriteria:    make([]string, 0),
 	}
 
 	// Score each domain
@@ -446,7 +444,7 @@ func calcVolumeProxy(history []float64, period int) float64 {
 	// Use price range * return as volume proxy
 	sum := 0.0
 	for i := 0; i < period && i+1 < len(history); i++ {
-		sum += math.Abs(history[i] - history[i+1]) / history[i+1]
+		sum += math.Abs(history[i]-history[i+1]) / history[i+1]
 	}
 	return sum / float64(period) * 100
 }

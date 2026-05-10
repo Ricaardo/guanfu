@@ -2,8 +2,8 @@
 //
 // FetchAndCacheStock pulls daily closes from Yahoo's chart API and stores
 // them in PriceStore under the namespaced key "stock_<ticker>" so they
-// don't collide with core asset keys (btc/qqq/spy/gold/hs300/...) or
-// feature data keys (fred_dxy/vixy/hs300_pmi/...).
+// don't collide with core asset keys (btc/qqq/spy/gold/...) or
+// feature data keys (fred_dxy/vixy/...).
 //
 // TTL: if cached data exists and the latest point is within 30h
 // (covers weekend gaps), the call returns cached points without
@@ -44,7 +44,7 @@ func StockKey(ticker string) string {
 // ValidateStockTicker rejects empty tickers and tickers that collide
 // with any existing PriceStore key (case-insensitive). Existing keys
 // include core asset prices (btc/qqq/...) and feature data
-// (fred_dxy/vixy/hs300_pmi/...) — both must be protected from
+// (fred_dxy/vixy/...) — both must be protected from
 // accidental overwrite via import-stock.
 func ValidateStockTicker(s *store.PriceStore, ticker string) error {
 	t := strings.ToLower(strings.TrimSpace(ticker))

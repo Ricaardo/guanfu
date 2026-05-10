@@ -33,9 +33,9 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/history"
-	"github.com/Ricaardo/guanfu/pkg/store"
 	"github.com/Ricaardo/guanfu/pkg/model"
 	"github.com/Ricaardo/guanfu/pkg/portfolio"
+	"github.com/Ricaardo/guanfu/pkg/store"
 	"github.com/Ricaardo/guanfu/pkg/version"
 )
 
@@ -89,8 +89,50 @@ func annotateVerdict(v *engine.Verdict, asset string, currentPrice float64) {
 	if err != nil || p == nil {
 		return
 	}
-	prices := map[string]float64{strings.ToLower(asset): currentPrice}
+	prices, ok := portfolioPricesForVerdict(p, &store.PriceStore{}, asset, currentPrice)
+	if !ok {
+		prices = nil
+	}
 	engine.AnnotateVerdictWithPortfolio(v, asset, p, currentPrice, prices)
+}
+
+func portfolioPricesForVerdict(p *portfolio.Portfolio, ps *store.PriceStore, asset string, currentPrice float64) (map[string]float64, bool) {
+	if p == nil {
+		return nil, false
+	}
+	if ps == nil {
+		ps = &store.PriceStore{}
+	}
+	asset = strings.ToLower(strings.TrimSpace(asset))
+	prices := map[string]float64{}
+	if currentPrice > 0 && asset != "" {
+		prices[asset] = currentPrice
+	}
+
+	for holding := range p.Holdings {
+		key := strings.ToLower(strings.TrimSpace(holding))
+		if key == "" || key == "cash" {
+			continue
+		}
+		if key == asset {
+			if currentPrice <= 0 {
+				return nil, false
+			}
+			continue
+		}
+		if latest, ok := ps.Latest(key); ok && latest.Close > 0 {
+			prices[key] = latest.Close
+			continue
+		}
+		if !strings.HasPrefix(key, client.StockNamespacePrefix) {
+			if latest, ok := ps.Latest(client.StockKey(key)); ok && latest.Close > 0 {
+				prices[key] = latest.Close
+				continue
+			}
+		}
+		return nil, false
+	}
+	return prices, true
 }
 
 // emitClaim writes forecast → claim ledger when claim persistence is on.
@@ -303,14 +345,11 @@ func main() {
 		}
 		runRefresh(*refreshOnly, *refreshSkip, *refreshDryRun, *jsonOut, *pretty, *timeout)
 		return
-	case "hs300":
-		runEquityAsset("hs300", *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji, *full, *domainFilter, *recencyWeighted, *regimeGate)
-		return
 	case "btc", "":
 		// default: BTC panel (existing behavior)
 	default:
 		fmt.Fprintf(os.Stderr, "guanfu: unknown subcommand %q\n", subcmd)
-		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, hs300, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|hs300|all], status, refresh, intent, watch, digest, calibrate, stress, joint\n")
+		fmt.Fprintf(os.Stderr, "  available: btc, qqq, spy, gold, stock, import-stock, market, dca, allocate, backtest [btc|gold|qqq|spy|all], status, refresh, intent, watch, digest, calibrate, stress, joint\n")
 		os.Exit(1)
 	}
 
@@ -606,8 +645,6 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 			price = panel.Snapshot.SPYPrice
 		case "gold":
 			price = panel.Snapshot.GoldPrice
-		case "hs300":
-			price = panel.Snapshot.HS300Price
 		}
 		annotateVerdict(v, assetKey, price)
 	}
@@ -728,8 +765,6 @@ func equityPanelHeader(p *model.IndicatorPanel) (price float64, plainTitle, fanc
 		return p.Snapshot.SPYPrice, "SPY panel", "SPY 盘面"
 	case "gold":
 		return p.Snapshot.GoldPrice, "gold panel", "黄金盘面"
-	case "hs300":
-		return p.Snapshot.HS300Price, "HS300 panel", "沪深 300 盘面"
 	default:
 		// Legacy fallback: pre-A0 panels lacked Asset; prefer SPY+QQQ sum (one of them is 0).
 		return p.Snapshot.SPYPrice + p.Snapshot.QQQPrice, "equity panel", "权益 ETF 盘面"
@@ -742,6 +777,7 @@ func equityPanelHeader(p *model.IndicatorPanel) (price float64, plainTitle, fanc
 //   - verdict stance + net direction
 //   - TOP 3 supports, TOP 2 counter-evidence (from Verdict)
 //   - most concerning source_health issue
+//
 // Use --full to unlock the 40+ indicator panel. --verdict/--forecast/--domain
 // implicitly opt into full mode (they already carry detail).
 func printHumanBrief(p *model.IndicatorPanel, v *engine.Verdict, plain bool) {
@@ -757,8 +793,6 @@ func printHumanBrief(p *model.IndicatorPanel, v *engine.Verdict, plain bool) {
 		price = p.Snapshot.SPYPrice
 	case "gold":
 		price = p.Snapshot.GoldPrice
-	case "hs300":
-		price = p.Snapshot.HS300Price
 	default:
 		price = p.Snapshot.BTCPrice
 	}
@@ -774,7 +808,7 @@ func printHumanBrief(p *model.IndicatorPanel, v *engine.Verdict, plain bool) {
 		// Use stored USD/CNY rate from PriceStore when available.
 		ps := &store.PriceStore{}
 		cnyRate := 0.0
-		if lp, ok := ps.Latest("hs300_cny"); ok {
+		if lp, ok := ps.Latest("usd_cny"); ok {
 			cnyRate = lp.Close
 		}
 		local, cur := pf.ConvertUSD(price, cnyRate)

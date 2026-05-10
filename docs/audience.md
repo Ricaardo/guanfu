@@ -11,7 +11,7 @@
 **他们的真实场景**:
 - 组合里已有 BTC / QQQ / Gold 类持仓,每隔 1-4 周复盘一次
 - 不信单一评分,也不想自己看 40 个指标
-- 习惯用 Claude / Cursor / Claude Code,有 FRED / Yahoo / AkShare API key
+- 习惯用 Claude / Cursor / Claude Code,有 FRED / Yahoo API key
 - 做决定前喜欢看反证 + 失效条件,不喜欢"一定会涨"
 
 **他们不要什么**:

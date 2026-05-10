@@ -37,7 +37,7 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/store"
 )
 
-const stressUsage = `usage: guanfu stress --series <key> [--shift X | --target-pct X] --asset <btc|qqq|spy|gold|hs300> [--horizon N] [--tolerance X]
+const stressUsage = `usage: guanfu stress --series <key> [--shift X | --target-pct X] --asset <btc|qqq|spy|gold> [--horizon N] [--tolerance X]
 
   --series       PriceStore key of the macro input to perturb, e.g.
                  fred_dfii10 (real yield), fred_dxy, fred_hy_spread,

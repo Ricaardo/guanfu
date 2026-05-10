@@ -6,8 +6,8 @@ guanfu 的命令行工具分 5 个入口,按角色分为:
 
 | 目录 | 用途 | 调用方式 |
 |---|---|---|
-| `guanfu/` | 主 CLI + MCP 可调的多资产盘面 | `guanfu [btc\|qqq\|spy\|gold\|hs300\|stock TICKER] [--verdict\|--forecast\|--full]`;子命令 `refresh` / `market` / `dca` / `allocate` / `intent` / `watch` / `digest` / `calibrate` / `status --frank` |
-| `guanfu-mcp/` | MCP stdio server(Claude Desktop / Cursor / Claude Code) | 配置 `mcpServers.guanfu.command = /path/to/guanfu-mcp`,资源 `guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://skill/tier1` 等 |
+| `guanfu/` | 主 CLI + MCP 可调的多资产盘面 | `guanfu [btc\|qqq\|spy\|gold\|stock TICKER] [--verdict\|--forecast\|--full]`;子命令 `refresh` / `market` / `dca` / `allocate` / `intent` / `watch` / `digest` / `calibrate` / `status --frank` |
+| `guanfu-mcp/` | MCP stdio server(Claude Desktop / Cursor / Claude Code) | 配置 `mcpServers.guanfu.command = /path/to/guanfu-mcp`,资源 `guanfu://panel/latest/{btc,qqq,spy,gold}` `guanfu://skill/tier1` 等 |
 
 ## 辅助工具(二进制级,但更偏运维/复盘)
 
@@ -37,4 +37,4 @@ guanfu-threshold-search 这类脚本**生命周期与正式 CLI 不同**:
 
 ---
 
-历史上曾有 `cmd/guanfu/akshare_import.go`(一次性 CSI300 XLS 导入)和多个 `*_backtest.go`(`// +build ignore` tag)这种混在 `cmd/guanfu/` 里的 ad-hoc 脚本。它们在 Wave 1-2 清理时已经归档到 `archive/` 或重写成独立入口。新 ad-hoc 脚本**不要再混进主 CLI 目录** — 保持 `cmd/guanfu/` 纯净。
+历史上曾有多个 `*_backtest.go`(`// +build ignore` tag)这种混在 `cmd/guanfu/` 里的 ad-hoc 脚本。它们已经归档到 `archive/` 或重写成独立入口。新 ad-hoc 脚本**不要再混进主 CLI 目录** — 保持 `cmd/guanfu/` 纯净。

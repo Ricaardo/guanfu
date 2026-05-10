@@ -33,7 +33,7 @@ type frankCell struct {
 }
 
 func runStatusFrank(jsonOut, pretty, plain bool) {
-	assets := []string{"btc", "qqq", "spy", "gold", "hs300"}
+	assets := []string{"btc", "qqq", "spy", "gold"}
 	horizons := []int{30, 60, 63, 90, 120, 180, 252}
 	var reliable, suspect, blocked []frankCell
 

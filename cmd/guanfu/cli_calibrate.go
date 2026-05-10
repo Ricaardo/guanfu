@@ -237,6 +237,13 @@ func resolveActualReturn(c claim.Claim, ps *store.PriceStore) (float64, bool) {
 	targetStr := target.Format("2006-01-02")
 	for _, p := range points {
 		if p.Date >= targetStr {
+			actualDate, err := time.Parse("2006-01-02", p.Date)
+			if err != nil {
+				continue
+			}
+			if actualDate.Sub(target) > 5*24*time.Hour {
+				return 0, false
+			}
 			price = p.Close
 			found = true
 			break
@@ -254,7 +261,7 @@ func resolveActualReturn(c claim.Claim, ps *store.PriceStore) (float64, bool) {
 }
 
 func isCoreAsset(k string) bool {
-	return map[string]bool{"btc": true, "qqq": true, "spy": true, "gold": true, "hs300": true}[k]
+	return map[string]bool{"btc": true, "qqq": true, "spy": true, "gold": true}[k]
 }
 
 func printCalibrationTable(rows []calibrationRow) {

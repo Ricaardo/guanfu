@@ -29,8 +29,8 @@ import (
 
 // Condition is a parsed --when expression.
 type Condition struct {
-	Metric    string  // short key, not domain-qualified
-	Operator  string  // one of < <= > >= = !=
+	Metric    string // short key, not domain-qualified
+	Operator  string // one of < <= > >= = !=
 	Threshold float64
 }
 

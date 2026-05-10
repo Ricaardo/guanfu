@@ -7,7 +7,7 @@
 ## 一、前置条件
 
 - **Go 1.26+**(如果走 `go install` 路径)
-- **Python 3.9+**(可选;AkShare + Futu bridge 需要)
+- **Python 3.9+**(可选;Futu / CAPE bridge 需要)
 - **~/.guanfu/**(自动创建,用于价格历史 / claim ledger / portfolio 配置)
 
 ### API Key(按需)
@@ -136,7 +136,7 @@ export FUTU_ENABLED=1   # 可选,default on
 
 | Tool | 别名(deprecated,仍工作) | 用途 |
 |---|---|---|
-| `get_panel` | `get_btc_panel` | 完整盘面;`asset` 参数切换 btc/qqq/spy/gold/hs300 |
+| `get_panel` | `get_btc_panel` | 完整盘面;`asset` 参数切换 btc/qqq/spy/gold |
 | `get_verdict` | `get_btc_verdict` | 结构化读盘(附 portfolio_context 当 `~/.guanfu/portfolio.json` 存在) |
 | `get_forecast` | `get_btc_forecast` | kNN 推演 + 基线对比 + conformal 区间 + ensemble disagreement + reliability 标注 |
 | `get_stock_forecast` | — | 任意美股 kNN(首次自动 Yahoo fetch + kNN) |
@@ -296,9 +296,7 @@ crontab -e
 | Futu 连不上 | OpenD 未启动 / 端口不对 | `export FUTU_ENABLED=0` 先回落 Yahoo |
 | `source_health` 有 `stale` / `fallback_used` | 某 source 多天未更新 | 跑 `guanfu refresh --only=<key>` 重拉 |
 | `guanfu calibrate` 说 no matured claims | ledger 为空或 claim 都未到期 | 每日自动跑 forecast 积累 30d 后再看 |
-| HS300 forecast 不显示数值 | dir_hit < 50% hard-block(设计如此) | 看 `status --frank` 确认 |
 | MCP 里 Claude 读不到 guanfu | 二进制路径错 / env 变量缺失 | `which guanfu-mcp`;日志在 Claude Desktop 开发者控制台 |
-| `guanfu --full` 输出 `cny_usd 待接入` | `hs300_cny` 未 refresh 过 | 跑 `guanfu refresh --only=hs300_cny` |
 
 ### 诊断命令
 
@@ -316,8 +314,8 @@ guanfu refresh --dry-run             # 不拉数据,只列计划
 ```
 ~/.guanfu/
 ├── prices/                 # JSON 日频存档(refresh 输出)
-│   ├── btc.json / qqq.json / spy.json / gold.json / hs300.json
-│   ├── fred_*.json / hs300_*.json / spx_cape.json
+│   ├── btc.json / qqq.json / spy.json / gold.json
+│   ├── fred_*.json / spx_cape.json
 │   ├── defillama_stablecoin_supply.json / stooq_putcall.json / coinbase_btc.json
 │   └── stock_*.json         # 任意美股
 ├── history.db               # SQLite:15 非价格指标分位(730d 滚动)

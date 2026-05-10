@@ -7,9 +7,6 @@
 // Gold: FetchGoldIncremental(lastDate) returns oldest-first PricePoint
 // for the gap. On full import (lastDate=""), FetchLondonGoldPricePoints
 // returns the DBnomics+Yahoo merge from 1968+.
-//
-// HS300: FetchHS300Incremental / FetchHS300PricePoints already targets
-// store.PricePoint and writes to "hs300".
 
 package client
 
@@ -122,58 +119,6 @@ func (GoldSource) Refresh(ctx context.Context, s *store.PriceStore) (*RefreshRes
 	last, _ := s.LastDate("gold")
 	return &RefreshResult{
 		Key: "gold", DisplayName: "gold (DBnomics + Yahoo)",
-		Mode: mode, Added: len(pts), Total: count, LastDate: last,
-	}, nil
-}
-
-// HS300Source refreshes CSI300 via Yahoo (full / incremental).
-type HS300Source struct{}
-
-func (HS300Source) Key() string         { return "hs300" }
-func (HS300Source) DisplayName() string { return "hs300 (Yahoo ^HS300)" }
-
-func (HS300Source) Refresh(ctx context.Context, s *store.PriceStore) (*RefreshResult, error) {
-	stale, lastDate := staleThreshold(s, "hs300")
-	if !stale {
-		return freshSkipResult("hs300", "hs300 (Yahoo ^HS300)", lastDate, s), nil
-	}
-
-	mode := "full"
-	if lastDate != "" {
-		mode = "incremental"
-	}
-
-	var pts []store.PricePoint
-	var err error
-	if mode == "incremental" {
-		pts, err = FetchHS300Incremental(ctx, lastDate)
-	} else {
-		pts, err = FetchHS300PricePoints(ctx)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(pts) == 0 {
-		count, _ := s.Count("hs300")
-		return &RefreshResult{
-			Key: "hs300", DisplayName: "hs300 (Yahoo ^HS300)",
-			Mode: mode, Added: 0, Total: count, LastDate: lastDate,
-		}, nil
-	}
-
-	if mode == "full" {
-		if err := s.Save("hs300", pts); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := s.Append("hs300", pts); err != nil {
-			return nil, err
-		}
-	}
-	count, _ := s.Count("hs300")
-	last, _ := s.LastDate("hs300")
-	return &RefreshResult{
-		Key: "hs300", DisplayName: "hs300 (Yahoo ^HS300)",
 		Mode: mode, Added: len(pts), Total: count, LastDate: last,
 	}, nil
 }

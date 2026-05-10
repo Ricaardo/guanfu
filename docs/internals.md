@@ -106,7 +106,7 @@ guanfu 有 4 种被持久化 / 跨版本保留的 struct,各有独立策略:
 - 加字段**永远不 bump**(没有磁盘读者)
 - 只需保证 JSON 消费方(SKILL / MCP)接新字段是向后兼容的 → 全 `omitempty`
 
-v2 A0 犯过一次错:把 `HS300Price` 加到 `SnapshotData` 时,曾经以为要 bump `CurrentMarketSnapshotSchemaVersion`。**不用**,原因是这两个 struct 关系如下:
+历史上给 `SnapshotData` 加 live panel 字段时,曾经误以为要 bump `CurrentMarketSnapshotSchemaVersion`。**不用**,原因是这两个 struct 关系如下:
 
 ```
 SnapshotData    (live panel)  — rebuilt every run, no disk serialization

@@ -51,13 +51,13 @@ type Verdict struct {
 // their declared holdings, ceiling, and horizon. It is additive — Verdict
 // core fields are untouched by its presence or absence. See pkg/portfolio.
 type PortfolioContext struct {
-	HorizonMatch      string   `json:"horizon_match"`       // "ok" / "mismatch" / "unknown"
-	CurrentWeightPct  float64  `json:"current_weight_pct"`  // 0-100; 0 if not in portfolio
-	CeilingPct        float64  `json:"ceiling_pct"`         // 0 if no ceiling declared
-	Overweight        bool     `json:"overweight"`          // weight > ceiling
-	RoomToCeilingPct  float64  `json:"room_to_ceiling_pct"` // max(0, ceiling-weight)
-	RiskBudget        string   `json:"risk_budget"`         // echoed from Preferences
-	Notes             []string `json:"notes,omitempty"`     // short human-readable lines
+	HorizonMatch     string   `json:"horizon_match"`       // "ok" / "mismatch" / "unknown"
+	CurrentWeightPct float64  `json:"current_weight_pct"`  // 0-100; 0 if not in portfolio
+	CeilingPct       float64  `json:"ceiling_pct"`         // 0 if no ceiling declared
+	Overweight       bool     `json:"overweight"`          // weight > ceiling
+	RoomToCeilingPct float64  `json:"room_to_ceiling_pct"` // max(0, ceiling-weight)
+	RiskBudget       string   `json:"risk_budget"`         // echoed from Preferences
+	Notes            []string `json:"notes,omitempty"`     // short human-readable lines
 }
 
 // DomainVote 单个域的方向与依据。

@@ -3,6 +3,8 @@ package allocate
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/Ricaardo/guanfu/pkg/store"
 )
 
 func TestPortfolioDefinitions(t *testing.T) {
@@ -44,6 +46,32 @@ func TestAnalyzePortfolio(t *testing.T) {
 	var decoded Status
 	if err := json.Unmarshal(b, &decoded); err != nil {
 		t.Fatalf("json: %v", err)
+	}
+}
+
+func TestAnalyzeDoesNotFabricateDriftFromPrices(t *testing.T) {
+	s := &store.PriceStore{Dir: t.TempDir()}
+	if err := s.Save("spy", []store.PricePoint{{Date: "2026-05-01", Close: 500}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save("tlt", []store.PricePoint{{Date: "2026-05-01", Close: 90}}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := analyzeWithStore(Portfolio6040, s)
+	if err != nil {
+		t.Fatalf("analyzeWithStore: %v", err)
+	}
+	if status.DriftMax != 0 {
+		t.Fatalf("drift should be unknown/zero without actual holdings, got %.1f", status.DriftMax)
+	}
+	if status.RebalanceNeeded {
+		t.Fatal("rebalance should not trigger from target weights alone")
+	}
+	for _, a := range status.Assets {
+		if a.DriftPct != 0 {
+			t.Fatalf("%s drift should be zero without actual holdings, got %.1f", a.Asset, a.DriftPct)
+		}
 	}
 }
 

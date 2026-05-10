@@ -251,7 +251,7 @@ func isValidHorizonClass(hc string) bool {
 func peekAssetPrice(asset string) float64 {
 	s := &store.PriceStore{}
 	key := asset
-	if _, ok := map[string]bool{"btc": true, "qqq": true, "spy": true, "gold": true, "hs300": true}[asset]; !ok {
+	if _, ok := map[string]bool{"btc": true, "qqq": true, "spy": true, "gold": true}[asset]; !ok {
 		// Assume stock_X namespace.
 		key = client.StockKey(asset)
 	}

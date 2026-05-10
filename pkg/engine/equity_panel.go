@@ -59,8 +59,6 @@ func BuildEquityPanel(in *EquityPanelInput) *model.IndicatorPanel {
 		snap.QQQPrice = in.Price
 	case "spy":
 		snap.SPYPrice = in.Price
-	case "hs300":
-		snap.HS300Price = in.Price
 	case "gold":
 		snap.GoldPrice = in.Price
 	}
@@ -190,8 +188,8 @@ func calcRSI(closes []float64, period int) float64 {
 func computeMACDIndicator(history []float64) model.Indicator {
 	macd, signal, hist := calcMACD(history)
 	return model.Indicator{
-		Value: macd,
-		Label: fmt.Sprintf("MACD=%.4f sig=%.4f hist=%.4f", macd, signal, hist),
+		Value:  macd,
+		Label:  fmt.Sprintf("MACD=%.4f sig=%.4f hist=%.4f", macd, signal, hist),
 		Source: "price_store",
 	}
 }
@@ -242,10 +240,10 @@ func computeSMAIndicator(history []float64, period int, currentPrice float64) mo
 	sma := sum / float64(period)
 	dev := (currentPrice - sma) / sma * 100
 	return model.Indicator{
-		Value:  sma,
+		Value:    sma,
 		Quantile: 0,
-		Label:  fmt.Sprintf("$%.2f (price %+.1f%%)", sma, dev),
-		Source: "price_store",
+		Label:    fmt.Sprintf("$%.2f (price %+.1f%%)", sma, dev),
+		Source:   "price_store",
 	}
 }
 
@@ -352,8 +350,8 @@ func computeMomentum(history []float64, days int) model.Indicator {
 	}
 	pct := (history[0] - history[days-1]) / history[days-1] * 100
 	return model.Indicator{
-		Value: pct,
-		Label: fmt.Sprintf("%+.1f%% (%dd)", pct, days),
+		Value:  pct,
+		Label:  fmt.Sprintf("%+.1f%% (%dd)", pct, days),
 		Source: "price_store",
 	}
 }
@@ -370,8 +368,8 @@ func computeDrawdown(history []float64, currentPrice float64) model.Indicator {
 	}
 	dd := (currentPrice - peak) / peak * 100
 	return model.Indicator{
-		Value: dd,
-		Label: fmt.Sprintf("%+.1f%% from 200d high $%.2f", dd, peak),
+		Value:  dd,
+		Label:  fmt.Sprintf("%+.1f%% from 200d high $%.2f", dd, peak),
 		Source: "price_store",
 	}
 }
@@ -424,12 +422,12 @@ func peLabel(pe float64) string {
 // BuildEquityVerdict produces a simple multi-domain verdict for equity ETFs.
 func BuildEquityVerdict(panel *model.IndicatorPanel) *Verdict {
 	v := &Verdict{
-		Date:         panel.Date,
-		Confidence:   "中",
-		Domains:      make([]DomainVote, 0),
-		Reasons:      make([]string, 0),
+		Date:            panel.Date,
+		Confidence:      "中",
+		Domains:         make([]DomainVote, 0),
+		Reasons:         make([]string, 0),
 		CounterEvidence: make([]string, 0),
-		KillCriteria: make([]string, 0),
+		KillCriteria:    make([]string, 0),
 	}
 
 	// Technical domain

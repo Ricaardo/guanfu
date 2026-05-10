@@ -1,6 +1,6 @@
 // Asset interface + registry — the core abstraction for multi-asset support.
 //
-// Every asset (BTC, QQQ, SPY, Gold, HS300) implements this interface.
+// Every asset (BTC, QQQ, SPY, Gold) implements this interface.
 // The registry maps asset keys ("btc", "qqq", ...) to implementations,
 // enabling CLI subcommand routing and MCP tool dispatch.
 //
@@ -45,10 +45,10 @@ type Asset interface {
 // AssetSnapshot holds the data needed to build a panel for a specific asset.
 // This is a generic container — each asset populates the fields it needs.
 type AssetSnapshot struct {
-	Asset      string  `json:"asset"`
-	Date       string  `json:"date"`
-	Price      float64 `json:"price"`
-	PriceAsOf  string  `json:"price_as_of,omitempty"`
+	Asset     string  `json:"asset"`
+	Date      string  `json:"date"`
+	Price     float64 `json:"price"`
+	PriceAsOf string  `json:"price_as_of,omitempty"`
 
 	// Price history (newest-first, for MA/indicator computation)
 	PriceHistory []float64 `json:"price_history,omitempty"`
@@ -57,7 +57,7 @@ type AssetSnapshot struct {
 	CrossAssetPrices map[string]float64 `json:"cross_asset_prices,omitempty"`
 
 	// Valuation data
-	PE float64 `json:"pe,omitempty"` // QQQ/SPY/HS300
+	PE float64 `json:"pe,omitempty"` // QQQ/SPY
 	PB float64 `json:"pb,omitempty"`
 
 	// Macro context

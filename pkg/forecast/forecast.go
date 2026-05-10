@@ -65,7 +65,7 @@ type Options struct {
 	UseMahalanobis      bool               `json:"-"` // use Mahalanobis distance
 	LearnWeights        bool               `json:"-"` // learn feature weights from data
 	Frequency           string             `json:"-"` // "daily" or "monthly"
-	// Asset is the canonical key (btc/qqq/spy/gold/hs300) used for
+	// Asset is the canonical key (btc/qqq/spy/gold) used for
 	// per-asset reliability lookups. Empty means "no asset claim" — Build
 	// will skip writing ReliabilityNote on each HorizonForecast.
 	Asset string `json:"-"`
@@ -172,12 +172,12 @@ type HorizonForecast struct {
 	// corrected split-conformal interval at the specified alpha level.
 	// Under analog exchangeability, the interval [ConformalLow, ConformalHigh]
 	// contains a future observation with probability ≥ 1-α. See conformal.go.
-	ConformalLowPct     float64 `json:"conformal_low_pct,omitempty"`     // % return, lower bound
-	ConformalHighPct    float64 `json:"conformal_high_pct,omitempty"`    // % return, upper bound
-	ConformalAlpha      float64 `json:"conformal_alpha,omitempty"`       // e.g. 0.20 for 80% interval
-	ConformalCoverage   float64 `json:"conformal_coverage,omitempty"`    // finite-sample achievable coverage ∈ [0,1]
-	ConformalLowPrice   float64 `json:"conformal_low_price,omitempty"`
-	ConformalHighPrice  float64 `json:"conformal_high_price,omitempty"`
+	ConformalLowPct    float64 `json:"conformal_low_pct,omitempty"`  // % return, lower bound
+	ConformalHighPct   float64 `json:"conformal_high_pct,omitempty"` // % return, upper bound
+	ConformalAlpha     float64 `json:"conformal_alpha,omitempty"`    // e.g. 0.20 for 80% interval
+	ConformalCoverage  float64 `json:"conformal_coverage,omitempty"` // finite-sample achievable coverage ∈ [0,1]
+	ConformalLowPrice  float64 `json:"conformal_low_price,omitempty"`
+	ConformalHighPrice float64 `json:"conformal_high_price,omitempty"`
 
 	// Ensemble cross-check fields (G4). A ridge regression fit on the
 	// same (candidate_features, forward_return) pairs predicts the

@@ -16,8 +16,11 @@ import (
 )
 
 func runBacktest(asset string, jsonOut, pretty, plain bool) {
-	if asset == "" {
-		asset = "btc"
+	var ok bool
+	asset, ok = normalizeBacktestAsset(asset)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "backtest %s: unsupported asset (available: btc, qqq, spy, gold, all)\n", asset)
+		os.Exit(1)
 	}
 	s := &store.PriceStore{}
 	pricePoints, err := s.Load(asset)
@@ -66,10 +69,10 @@ func runBacktestJSON(asset string, points []forecast.Point, hasCrossAsset bool, 
 		CRPS        float64 `json:"crps"`
 	}
 	type btR struct {
-		Version    string  `json:"version"`
-		Features   string  `json:"features"`
-		TotalTests int     `json:"total_tests"`
-		Horizons   []btH   `json:"horizons"`
+		Version    string `json:"version"`
+		Features   string `json:"features"`
+		TotalTests int    `json:"total_tests"`
+		Horizons   []btH  `json:"horizons"`
 	}
 
 	results := []btR{}
@@ -178,4 +181,17 @@ func runBacktestHuman(asset string, points []forecast.Point, hasCrossAsset bool,
 	fmt.Println(strings.Repeat("─", 72))
 	fmt.Println("方向命中 >50% = 优于随机。Δ = v2-v1 差异。PIT~0.5=校准好。CRPS↓=优。")
 	fmt.Println("不是投资建议。")
+}
+
+func normalizeBacktestAsset(asset string) (string, bool) {
+	asset = strings.ToLower(strings.TrimSpace(asset))
+	if asset == "" {
+		asset = "btc"
+	}
+	switch asset {
+	case "btc", "qqq", "spy", "gold":
+		return asset, true
+	default:
+		return asset, false
+	}
 }

@@ -28,7 +28,7 @@ const (
 type RegimeResult struct {
 	Label    RegimeLabel `json:"label"`
 	Desc     string      `json:"desc"`
-	Score    float64     `json:"score"`    // -1.0 (bear) to +1.0 (bull)
+	Score    float64     `json:"score"` // -1.0 (bear) to +1.0 (bull)
 	Evidence []string    `json:"evidence"`
 }
 

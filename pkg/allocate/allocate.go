@@ -24,34 +24,34 @@ import (
 
 // Portfolio defines a target allocation.
 type Portfolio struct {
-	Name    string            `json:"name"`
-	Assets  map[string]float64 `json:"assets"` // asset → target weight (0-1)
+	Name   string             `json:"name"`
+	Assets map[string]float64 `json:"assets"` // asset → target weight (0-1)
 }
 
 // Status holds current allocation status for a portfolio.
 type Status struct {
-	Portfolio string            `json:"portfolio"`
-	Date      string            `json:"date"`
-	Assets    []AssetStatus     `json:"assets"`
-	DriftMax  float64           `json:"max_drift_pct"` // largest absolute drift
-	RebalanceNeeded bool        `json:"rebalance_needed"`
-	OverallZone     string      `json:"overall_zone"`
+	Portfolio       string        `json:"portfolio"`
+	Date            string        `json:"date"`
+	Assets          []AssetStatus `json:"assets"`
+	DriftMax        float64       `json:"max_drift_pct"` // largest absolute drift
+	RebalanceNeeded bool          `json:"rebalance_needed"`
+	OverallZone     string        `json:"overall_zone"`
 }
 
 // AssetStatus holds current state for a single portfolio asset.
 type AssetStatus struct {
-	Asset       string  `json:"asset"`
-	TargetPct   float64 `json:"target_pct"`
+	Asset        string  `json:"asset"`
+	TargetPct    float64 `json:"target_pct"`
 	CurrentPrice float64 `json:"current_price"`
-	Zone        string  `json:"zone"`
-	DriftPct    float64 `json:"drift_pct"` // absolute deviation from target
-	Hint        string  `json:"hint"`
+	Zone         string  `json:"zone"`
+	DriftPct     float64 `json:"drift_pct"` // 0 when actual holdings are unavailable
+	Hint         string  `json:"hint"`
 }
 
 // Predefined portfolios
 var (
 	Portfolio6040 = Portfolio{
-		Name: "60/40",
+		Name:   "60/40",
 		Assets: map[string]float64{"spy": 0.60, "tlt": 0.40},
 	}
 	PortfolioAllWeather = Portfolio{
@@ -84,9 +84,18 @@ var (
 // RebalanceThreshold is the absolute drift that triggers a rebalance warning.
 const RebalanceThreshold = 5.0 // 5%
 
-// Analyze computes the current status of a portfolio against PriceStore data.
 func Analyze(pf Portfolio) (*Status, error) {
-	s := &store.PriceStore{}
+	return analyzeWithStore(pf, &store.PriceStore{})
+}
+
+// analyzeWithStore computes the current status of a model portfolio against
+// PriceStore data. PriceStore contains market prices, not user holdings or
+// lots, so drift remains unknown here rather than being fabricated from target
+// weights.
+func analyzeWithStore(pf Portfolio, s *store.PriceStore) (*Status, error) {
+	if s == nil {
+		s = &store.PriceStore{}
+	}
 	status := &Status{
 		Portfolio: pf.Name,
 		Date:      time.Now().UTC().Format("2006-01-02"),
@@ -94,10 +103,10 @@ func Analyze(pf Portfolio) (*Status, error) {
 	}
 
 	type pricedAsset struct {
-		asset string
+		asset  string
 		target float64
-		price float64
-		zone string
+		price  float64
+		zone   string
 	}
 	var priced []pricedAsset
 
@@ -113,20 +122,8 @@ func Analyze(pf Portfolio) (*Status, error) {
 	}
 	sort.Slice(priced, func(i, j int) bool { return priced[i].asset < priced[j].asset })
 
-	// Compute drift as absolute deviation from target
 	maxDrift := 0.0
 	for _, pa := range priced {
-		drift := pa.target * 100 // target pct
-		// Absolute drift: how far the actual weight would deviate
-		// Simplified: treat price changes as proxy for weight changes
-		driftAbs := 0.0
-		if pa.price > 0 {
-			driftAbs = drift
-		}
-		if driftAbs > maxDrift {
-			maxDrift = driftAbs
-		}
-
 		hint := ""
 		switch {
 		case pa.zone == "无数据":
@@ -144,7 +141,7 @@ func Analyze(pf Portfolio) (*Status, error) {
 			TargetPct:    pa.target * 100,
 			CurrentPrice: pa.price,
 			Zone:         pa.zone,
-			DriftPct:     driftAbs,
+			DriftPct:     0,
 			Hint:         hint,
 		})
 	}
@@ -193,19 +190,19 @@ func assetValuationZone(asset string, price float64) string {
 
 // ConsensusResult shows whether multiple assets are sending aligned signals.
 type ConsensusResult struct {
-	Date       string          `json:"date"`
-	Direction  string          `json:"direction"`  // "risk_on", "risk_off", "mixed"
-	Confidence float64         `json:"confidence"` // 0-1
-	Signals    []AssetSignal   `json:"signals"`
-	Summary    string          `json:"summary"`
+	Date       string        `json:"date"`
+	Direction  string        `json:"direction"`  // "risk_on", "risk_off", "mixed"
+	Confidence float64       `json:"confidence"` // 0-1
+	Signals    []AssetSignal `json:"signals"`
+	Summary    string        `json:"summary"`
 }
 
 // AssetSignal is a single asset's directional signal.
 type AssetSignal struct {
-	Asset     string  `json:"asset"`
-	Price     float64 `json:"price"`
-	Momentum  float64 `json:"momentum_30d_pct"`
-	Signal    string  `json:"signal"` // "bullish", "bearish", "neutral"
+	Asset    string  `json:"asset"`
+	Price    float64 `json:"price"`
+	Momentum float64 `json:"momentum_30d_pct"`
+	Signal   string  `json:"signal"` // "bullish", "bearish", "neutral"
 }
 
 // ConsensusScan scans all tracked assets for directional consensus.
@@ -339,9 +336,9 @@ type OverviewItem struct {
 
 // RiskMetrics holds portfolio risk characteristics.
 type RiskMetrics struct {
-	AnnualVolPct     float64 `json:"annual_vol_pct"`
-	MaxDrawdownPct   float64 `json:"max_drawdown_pct"`
-	SharpeApprox     float64 `json:"sharpe_approx"`
+	AnnualVolPct   float64 `json:"annual_vol_pct"`
+	MaxDrawdownPct float64 `json:"max_drawdown_pct"`
+	SharpeApprox   float64 `json:"sharpe_approx"`
 }
 
 // ComputeRiskMetrics estimates portfolio risk from asset histories.

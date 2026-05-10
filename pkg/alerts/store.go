@@ -29,12 +29,12 @@ type Alert struct {
 	ID            string    `json:"id"`
 	Triggered     time.Time `json:"triggered"`
 	Asset         string    `json:"asset"`
-	Expression    string    `json:"expression"`     // the raw --when clause
-	Metric        string    `json:"metric,omitempty"`      // parsed operand (for filter/grouping)
+	Expression    string    `json:"expression"`       // the raw --when clause
+	Metric        string    `json:"metric,omitempty"` // parsed operand (for filter/grouping)
 	Operator      string    `json:"operator,omitempty"`
 	Threshold     float64   `json:"threshold,omitempty"`
 	ObservedValue float64   `json:"observed_value"`
-	Dispatched    []string  `json:"dispatched,omitempty"`  // e.g. ["osascript"]
+	Dispatched    []string  `json:"dispatched,omitempty"` // e.g. ["osascript"]
 	Note          string    `json:"note,omitempty"`
 	SchemaVersion int       `json:"schema_version"`
 }

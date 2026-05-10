@@ -13,7 +13,6 @@ tier: 1
 - **BTC**:8 域 40+ 指标(Cycle / Valuation / Network / Positioning / Macro / Flow / Technical / CrossAsset)
 - **QQQ / SPY**:6 域(Technical / Macro / Valuation / Positioning / 其余 BTC 专域不适用)
 - **Gold**:同 QQQ/SPY 但 Valuation 侧重实际利率 / DXY / COT
-- **HS300**:同 QQQ/SPY 但 Macro 侧重中国 PMI / M2 / LPR / Northbound / CNY
 - **任意美股**(`stock TICKER`):Technical + Macro(无 CAPE,无 per-name 基本面)
 
 ## 2. 盘面字段结构
@@ -25,7 +24,7 @@ tier: 1
 - `source` / `updated_at` / `note`
 
 盘面顶层:
-- `asset` — "btc"/"qqq"/"spy"/"gold"/"hs300"/"stock_aapl"/...
+- `asset` — "btc"/"qqq"/"spy"/"gold"/"stock_aapl"/...
 - `stale_warnings` — 非致命数据缺失 / 过期
 - **`source_health`** — 每个数据源的状态表:
   - `status` ∈ ok / partial / stale / missing / warning
@@ -52,8 +51,6 @@ tier: 1
 | QQQ | 70% ✓ | 75% ✓ | **80%** ✓ | 也有 63d / 252d |
 | SPY | 60% ✓ | 75% ✓ | **85%** ✓ | 也有 63d / 252d |
 | Gold | 51% ⚠ | 55% ✓ | **49% ✗** | 180d hard-block,也有 60d / 120d |
-| HS300 | 47% ✗ | 45% ✗ | 49% ✗ | **所有 horizon hard-block** |
-
 ✓ = 可用 | ⚠ = 接近随机需附 caveat | ✗ = hard-block,不输出数值
 
 ## 4. 关键指标阈值(决策密度最高的 15 个)

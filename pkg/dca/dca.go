@@ -45,16 +45,16 @@ type Params struct {
 
 // Result holds the output of a DCA simulation.
 type Result struct {
-	Strategy     string  `json:"strategy"`
-	StartDate    string  `json:"start_date"`
-	EndDate      string  `json:"end_date"`
+	Strategy      string  `json:"strategy"`
+	StartDate     string  `json:"start_date"`
+	EndDate       string  `json:"end_date"`
 	TotalInvested float64 `json:"total_invested"`
-	TotalBTC     float64 `json:"total_btc"`
-	CurrentValue float64 `json:"current_value"`
-	ROIPct       float64 `json:"roi_pct"`
+	TotalBTC      float64 `json:"total_btc"`
+	CurrentValue  float64 `json:"current_value"`
+	ROIPct        float64 `json:"roi_pct"`
 	AnnualizedROI float64 `json:"annualized_roi_pct"`
-	CostBasis    float64 `json:"cost_basis"`
-	MaxDrawdown  float64 `json:"max_drawdown_pct"`
+	CostBasis     float64 `json:"cost_basis"`
+	MaxDrawdown   float64 `json:"max_drawdown_pct"`
 
 	// Zone analysis
 	ValuationZone      string  `json:"valuation_zone"`
@@ -68,10 +68,10 @@ type Result struct {
 
 // ComparisonResult compares multiple strategies.
 type ComparisonResult struct {
-	Date     string    `json:"date"`
-	Price    float64   `json:"price"`
-	Results  []Result  `json:"results"`
-	Best     string    `json:"best_strategy"`
+	Date    string   `json:"date"`
+	Price   float64  `json:"price"`
+	Results []Result `json:"results"`
+	Best    string   `json:"best_strategy"`
 }
 
 // Run executes a DCA simulation.
@@ -171,19 +171,19 @@ func Run(points []Point, params Params) (*Result, error) {
 	zone := currentValuationZone(points, endIdx)
 
 	r := &Result{
-		Strategy:       string(params.Strategy),
-		StartDate:      points[startIdx].Date,
-		EndDate:        points[endIdx].Date,
-		TotalInvested:  totalInvested,
-		TotalBTC:       totalBTC,
-		CurrentValue:   currentValue,
-		ROIPct:         roi,
-		AnnualizedROI:  annROI,
-		CostBasis:      costBasis,
-		MaxDrawdown:    maxDD,
-		ValuationZone:  zone,
+		Strategy:        string(params.Strategy),
+		StartDate:       points[startIdx].Date,
+		EndDate:         points[endIdx].Date,
+		TotalInvested:   totalInvested,
+		TotalBTC:        totalBTC,
+		CurrentValue:    currentValue,
+		ROIPct:          roi,
+		AnnualizedROI:   annROI,
+		CostBasis:       costBasis,
+		MaxDrawdown:     maxDD,
+		ValuationZone:   zone,
 		MonthlyInvested: investedAmounts,
-		MonthlyBTC:     btcAmounts,
+		MonthlyBTC:      btcAmounts,
 	}
 
 	// Historical win rate in similar valuation zones
@@ -431,9 +431,9 @@ func normalizeDCA(points []Point) []Point {
 
 // ZoneReplayResult holds DCA performance broken down by valuation zone and period.
 type ZoneReplayResult struct {
-	CurrentZone string        `json:"current_zone"`
+	CurrentZone  string       `json:"current_zone"`
 	CurrentPrice float64      `json:"current_price"`
-	Periods     []ZonePeriod  `json:"periods"`
+	Periods      []ZonePeriod `json:"periods"`
 }
 
 // ZonePeriod holds DCA stats for a specific lookback period.
@@ -549,4 +549,3 @@ func minInt(a, b int) int {
 	}
 	return b
 }
-

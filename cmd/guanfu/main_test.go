@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/Ricaardo/guanfu/pkg/model"
+	"github.com/Ricaardo/guanfu/pkg/portfolio"
+	"github.com/Ricaardo/guanfu/pkg/store"
 )
 
 func TestFilterDomainPreservesMetadata(t *testing.T) {
@@ -73,6 +75,32 @@ func TestPrintHumanPanelPlainOmitsEmojiAndBoxDrawing(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("plain output missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestPortfolioPricesForVerdictRequiresAllNonCashPrices(t *testing.T) {
+	ps := &store.PriceStore{Dir: t.TempDir()}
+	p := &portfolio.Portfolio{
+		Holdings: map[string]portfolio.Holding{
+			"btc":  {Amount: 0.1},
+			"qqq":  {Shares: 10},
+			"cash": {USD: 1000},
+		},
+	}
+
+	if _, ok := portfolioPricesForVerdict(p, ps, "btc", 80000); ok {
+		t.Fatal("missing qqq price should suppress portfolio weight calculation")
+	}
+
+	if err := ps.Save("qqq", []store.PricePoint{{Date: "2026-05-01", Close: 500}}); err != nil {
+		t.Fatal(err)
+	}
+	prices, ok := portfolioPricesForVerdict(p, ps, "btc", 80000)
+	if !ok {
+		t.Fatal("expected complete price map")
+	}
+	if prices["btc"] != 80000 || prices["qqq"] != 500 {
+		t.Fatalf("unexpected prices: %+v", prices)
 	}
 }
 

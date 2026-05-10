@@ -115,8 +115,8 @@ func fetchDefillamaStablecoin(ctx context.Context) ([]store.PricePoint, error) {
 		return nil, err
 	}
 	var raw []struct {
-		Date                 any                    `json:"date"`
-		TotalCirculatingUSD  map[string]any         `json:"totalCirculatingUSD"`
+		Date                any            `json:"date"`
+		TotalCirculatingUSD map[string]any `json:"totalCirculatingUSD"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("defillama stablecoin parse: %w", err)

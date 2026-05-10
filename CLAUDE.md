@@ -8,18 +8,18 @@
 
 ## 项目一句话
 
-多资产投资盘面 CLI + MCP 服务。覆盖 **BTC / QQQ / SPY / Gold / HS300 + 任意美股**。**不输出单一评分、不输出交易指令**——输出 8 域 40+ 指标的原始值 + 历史分位 + kNN 历史相似走势推演。
+多资产投资盘面 CLI + MCP 服务。覆盖 **BTC / QQQ / SPY / Gold + 任意美股**。**不输出单一评分、不输出交易指令**——输出 8 域 40+ 指标的原始值 + 历史分位 + kNN 历史相似走势推演。
 
 ## 二进制入口
 
 | 路径 | 用途 |
 |---|---|
-| `cmd/guanfu` | 主 CLI。子命令：`btc`(默认) / `qqq` / `spy` / `gold` / `hs300` / `stock TICKER` / `import-stock TICKER` / `market` / `dca` / `allocate` / `backtest [ASSET\|all]` / `status` / `refresh` |
+| `cmd/guanfu` | 主 CLI。子命令：`btc`(默认) / `qqq` / `spy` / `gold` / `stock TICKER` / `import-stock TICKER` / `market` / `dca` / `allocate` / `backtest [ASSET\|all]` / `status` / `refresh` |
 | `cmd/guanfu-mcp` | MCP stdio server。Claude Desktop / Cursor 可直调 |
 | `cmd/guanfu-similar` | 历史相似度独立工具 |
 | `cmd/guanfu-backtest` | 回测 CLI（独立于 `guanfu backtest` 子命令） |
 
-`cmd/guanfu/*_backtest.go` 大多带 `// +build ignore`，是 ad-hoc 调参脚本，不是产品代码。`akshare_import.go` 同理（CSI300 一次性导入）。
+ad-hoc 调参脚本不要放进 `cmd/guanfu/` 主 CLI 目录；需要保留时新建独立 `cmd/guanfu-<task>/`。
 
 ## 核心抽象
 
@@ -52,7 +52,6 @@ type FeatureExtractor func(points []Point, i int) ([]FeatureValue, bool)
 - `CoreExtractors()` — BTC 专用（halving cycle / AHR999）
 - `EquityExtractors(s)` — QQQ/SPY（CAPE + DGS10 + DXY + HY + curve + VIX）
 - `GoldExtractors(s)` — Gold（real yield + breakeven + DXY + COT + VIX）
-- `HS300Extractors(s)` — HS300（PMI + M2 + LPR + Northbound）
 - `USStockExtractors(s)` — 任意美股（同 Equity 但**无 CAPE**——单股没有 per-name CAPE）
 
 ### `store.PriceStore`（`pkg/store/price.go`）
@@ -61,10 +60,9 @@ JSON 日频文件：`~/.guanfu/prices/<key>.json`。**Namespace 约定**：
 
 | 前缀 / 形态 | 含义 | 示例 |
 |---|---|---|
-| 无前缀核心资产 | 5 个核心资产价格 | `btc.json` `qqq.json` `spy.json` `gold.json` `hs300.json` |
+| 无前缀核心资产 | 4 个核心资产价格 | `btc.json` `qqq.json` `spy.json` `gold.json` |
 | 无前缀链上 / 估值 | BTC 链上 + Shiller CAPE | `btc_mvrv.json` `spx_cape.json` |
 | `fred_*` | FRED 宏观 | `fred_dxy.json` `fred_dgs10.json` `fred_dfii10.json` `fred_yield_curve.json` |
-| `hs300_*` | A 股宏观 | `hs300_pmi.json` `hs300_m2.json` `hs300_lpr.json` `hs300_northbound.json` `hs300_cny.json` |
 | `gold_*` | 黄金附加 | `gold_cot.json` |
 | 其他 ETF | Futu/Yahoo 拉取 | `vixy.json` `tlt.json` `uup.json` |
 | `stock_<ticker>` | 任意美股（D1 namespace） | `stock_aapl.json` `stock_msft.json` |
@@ -82,16 +80,15 @@ JSON 日频文件：`~/.guanfu/prices/<key>.json`。**Namespace 约定**：
 
 | 类别 | Source 实现 | 文件 | 数据键 |
 |---|---|---|---|
-| 核心价格 | `BTCSource` / `GoldSource` / `HS300Source` | `refresh_native.go` | `btc` / `gold` / `hs300` |
-| Yahoo ETF | `YahooETFSource` | `yahoo_history.go` | `qqq` `spy` `vixy` `tlt` `uup` `hs300_cny`(CNY=X) |
+| 核心价格 | `BTCSource` / `GoldSource` | `refresh_native.go` | `btc` / `gold` |
+| Yahoo ETF | `YahooETFSource` | `yahoo_history.go` | `qqq` `spy` `vixy` `tlt` `uup` `usd_cny`(CNY=X) |
 | FRED 宏观 | `FREDSource` | `fred_history.go` | `fred_{dxy,dgs10,dfii10,yield_curve,breakeven,hy_spread}` |
-| 中国宏观 | `AkshareSource` | `akshare_history.go` | `hs300_{pmi,m2,lpr,volume,northbound,cpi}`（走 `scripts/akshare_bridge.py`） |
 | Shiller CAPE | `CAPESource` | `cape_history.go` | `spx_cape`（走 `scripts/import_cape.py`，月频 28d TTL） |
 | 任意美股 | `StockKeysSource` | `refresh_native.go` | 已 import 的 `stock_*`（依靠 `FetchAndCacheStock` 30h TTL 自动跳过） |
 
 **增量协议** (`refresh.go: staleThreshold`)：
 - `last_date` 在 24h 以内 → `mode="skip"`，不发请求
-- `last_date` 缺失 / 超过 24h → fetch（FRED/Yahoo 拉 `lastDate+1 → today`；akshare 全量返回再 Append+dedup）
+- `last_date` 缺失 / 超过 24h → fetch（FRED/Yahoo 拉 `lastDate+1 → today`）
 - CAPE 单独走 28 天 TTL（月频）
 
 **失败容忍**：单个 source 失败不影响其他；`fail` 状态在最终表中显式 surface，CLI exit code 1，但 stdout 表保留所有结果。
@@ -132,7 +129,7 @@ FetchSnapshot → AssetSnapshot          (cmd/guanfu/main.go 或 cmd/guanfu-mcp/
 |---|---|---|
 | QQQ / SPY | `30, 63, 90, 180, 252` | 季度 + 年度 |
 | Gold | `30, 60, 90, 120` | **180d 已删除**——n=51 上 49% dir_hit ≈ 硬币 |
-| BTC / HS300 / 任意 stock | `30, 90, 180` | 默认 |
+| BTC / 任意 stock | `30, 90, 180` | 默认 |
 
 ## Horizon 可靠性提示（reliability.go）
 
@@ -143,10 +140,10 @@ FetchSnapshot → AssetSnapshot          (cmd/guanfu/main.go 或 cmd/guanfu-mcp/
 ## Walk-forward 视图（backtest）
 
 `TestBacktestBundles` 现按 `(year, horizon)` 输出 dir_hit/n 矩阵。低整体命中率可能是：
-- **均匀差**（如 HS300 各年都 25-50%）→ 策略本身没 alpha
+- **均匀差**（各年都接近或低于 50%）→ 策略本身没 alpha
 - **regime-依赖**（如 Gold 2017-2022 ≤50%，2023-2025 50-100%）→ 在某些 regime 下能用，过拟合到训练分布之外
 
-现有结论：BTC/QQQ/SPY 大多数年份稳健；Gold 强 regime 依赖；HS300 全 regime 弱信号。
+现有结论：BTC/QQQ/SPY 大多数年份稳健；Gold 强 regime 依赖。
 
 **DefaultOptions 陷阱**（B5 fix）：旧代码里 `if len(opts.Horizons) == 0 { opts = forecast.DefaultOptions() }` 会**整个替换 opts**，理论上能 clobber 调用方设置的 `Extractors`/`TopK`。在当前所有调用路径里，asset 在这一行之后立刻又写一次 `opts.Extractors`，所以**事实上没有 bug 触发过**——是防御性修正而不是热修。新代码统一只补字段，避免后续重构无意中触雷：
 
@@ -172,7 +169,7 @@ CLI flag `--forecast-horizons` 默认 `auto` → 走 per-asset；显式传 `30,9
 | `get_domain` | — | 单 domain |
 | `get_indicator` | — | 单指标 |
 
-Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/latest/{...}` `guanfu://forecast/latest/{...}` + `guanfu://knowledge/skill.md`。
+Resources：`guanfu://panel/latest/{btc,qqq,spy,gold}` `guanfu://verdict/latest/{...}` `guanfu://forecast/latest/{...}` + `guanfu://knowledge/skill.md`。
 
 **别名维护规则**：alias case 必须在 `main_test.go: TestHandleToolCallAliasesDispatchSameAsBTCNames` 里有断言。**不要悄悄删**——deprecated 但保留至少一个版本。
 
@@ -181,7 +178,7 @@ Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/l
 | 命令 | 用途 |
 |---|---|
 | `go test ./...` | 全套（store 包有日期敏感 fixture，2026 年偶尔会假阳性失败） |
-| `go test ./pkg/engine -run TestBacktestBundles -v` | **核心回归基线**，5 资产 × 3 horizons 方向命中率 + PIT |
+| `go test ./pkg/engine -run TestBacktestBundles -v` | **核心回归基线**，核心资产 × horizons 方向命中率 + PIT |
 | `go test ./pkg/forecast/features -run TestUSStockExtractors_AcceptanceAAPL` | D2 任意 stock 路径验收 |
 | `go vet ./...` | 静态检查 |
 | `make build` / `make mcp` / `make all` | 二进制构建 |
@@ -248,28 +245,25 @@ Resources：`guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` `guanfu://verdict/l
 | 文件 | 责任 |
 |---|---|
 | `pkg/engine/asset.go` | Asset 接口 + 注册表 |
-| `pkg/engine/asset_{btc,qqq,spy,gold,hs300}.go` | 5 个核心资产实现 |
+| `pkg/engine/asset_{btc,qqq,spy,gold}.go` | 4 个核心资产实现 |
 | `pkg/engine/equity_panel.go` / `equity_dashboard.go` / `equity_valuation.go` | 权益类共用 panel 构造 |
-| `pkg/engine/hs300_dashboard.go` | HS300 专用 panel 构造（含中国宏观字段） |
 | `pkg/engine/calculator.go` | 各类指标计算（MA / RSI / Mayer / drawdown ...） |
 | `pkg/engine/verdict.go` | BTC verdict 构造 |
 | `pkg/engine/backtest.go` / `backtest_bundles_test.go` | 回测引擎 + 基线测试 |
 | `pkg/forecast/forecast.go` | kNN 主流程 + Options + HorizonsForAsset |
 | `pkg/forecast/features/bundles.go` | 每资产 extractor bundle |
-| `pkg/forecast/features/{core,enhanced,china_macro,cross_asset,positioning}.go` | extractor 实现 |
+| `pkg/forecast/features/{core,enhanced,cross_asset,positioning}.go` | extractor 实现 |
 | `pkg/forecast/projection.go` | ASCII fan chart 路径推演 |
 | `pkg/forecast/regime.go` | regime classification |
 | `pkg/forecast/backtest/backtest.go` | 独立回测引擎（vs `pkg/engine/backtest.go`） |
 | `pkg/client/btc_history.go` | BTC 历史拉取（CoinMetrics + Binance） |
 | `pkg/client/fetch_stock.go` | 任意美股 Yahoo fetch + namespace（D1） |
-| `pkg/client/fred.go` `gold.go` `hs300.go` `cross_asset.go` | 各数据源专用 |
+| `pkg/client/fred.go` `gold.go` `cross_asset.go` | 各数据源专用 |
 | `pkg/client/refresh.go` | 统一刷新框架（Source 接口 + RefreshAll） |
-| `pkg/client/refresh_native.go` | BTC/Gold/HS300/Stock 的 Source 实现 |
+| `pkg/client/refresh_native.go` | BTC/Gold/Stock 的 Source 实现 |
 | `pkg/client/yahoo_history.go` | YahooETFSource（QQQ/SPY/VIXY/TLT/UUP/CNY=X） |
 | `pkg/client/fred_history.go` | FREDSource（DXY/DGS10/DFII10/curve/breakeven/HY） |
-| `pkg/client/akshare_history.go` | AkshareSource（HS300 macros 走 Python bridge） |
 | `pkg/client/cape_history.go` | CAPESource（Shiller CAPE 走 Python script） |
-| `scripts/akshare_bridge.py` | AkShare CLI 桥（CSI300 + macros，stdin JSON 协议） |
 | `scripts/import_cape.py` | Shiller CAPE 一次性导入（XLS → JSON）|
 | `pkg/store/price.go` | PriceStore JSON 持久化 |
 | `pkg/model/types.go` | `MarketSnapshot` / `IndicatorPanel` / `Indicator` / `SnapshotData` |

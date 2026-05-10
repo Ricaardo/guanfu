@@ -221,20 +221,19 @@ func TestHandleRequestResourceReadUsesDeclaredMimeType(t *testing.T) {
 
 func TestResourceMimeTypeMatchesDeclaredResources(t *testing.T) {
 	cases := map[string]string{
-		"guanfu://knowledge/skill.md": "text/markdown",
-		"guanfu://skill/tier1":        "text/markdown",
-		"guanfu://skill/tier2":        "text/markdown",
-		"guanfu://skill/tier3":        "text/markdown",
-		"guanfu://ledger/summary":     "application/json",
-		"guanfu://panel/latest":       "application/json",
-		"guanfu://verdict/latest":     "application/json",
-		"guanfu://forecast/latest":    "application/json",
-		"guanfu://panel/latest/btc":   "application/json",
-		"guanfu://panel/latest/qqq":   "application/json",
-		"guanfu://verdict/latest/spy": "application/json",
-		"guanfu://forecast/latest/gold":"application/json",
-		"guanfu://forecast/latest/hs300":"application/json",
-		"guanfu://unknown":            "text/plain",
+		"guanfu://knowledge/skill.md":   "text/markdown",
+		"guanfu://skill/tier1":          "text/markdown",
+		"guanfu://skill/tier2":          "text/markdown",
+		"guanfu://skill/tier3":          "text/markdown",
+		"guanfu://ledger/summary":       "application/json",
+		"guanfu://panel/latest":         "application/json",
+		"guanfu://verdict/latest":       "application/json",
+		"guanfu://forecast/latest":      "application/json",
+		"guanfu://panel/latest/btc":     "application/json",
+		"guanfu://panel/latest/qqq":     "application/json",
+		"guanfu://verdict/latest/spy":   "application/json",
+		"guanfu://forecast/latest/gold": "application/json",
+		"guanfu://unknown":              "text/plain",
 	}
 	for uri, want := range cases {
 		if got := resourceMimeType(uri); got != want {
@@ -308,7 +307,7 @@ func TestParseResourceURI(t *testing.T) {
 		{"guanfu://panel/latest/btc", "panel", "btc", true},
 		{"guanfu://panel/latest/qqq", "panel", "qqq", true},
 		{"guanfu://verdict/latest/gold", "verdict", "gold", true},
-		{"guanfu://forecast/latest/hs300", "forecast", "hs300", true},
+		{"guanfu://forecast/latest/eth", "", "", false},
 		{"guanfu://panel/latest/eth", "", "", false}, // unsupported asset
 		{"guanfu://knowledge/skill.md", "", "", false},
 		{"guanfu://panel/old", "", "", false}, // not "latest"
@@ -324,7 +323,7 @@ func TestParseResourceURI(t *testing.T) {
 	}
 }
 
-// C3: resources/list must include per-asset URIs for all 4 equity assets.
+// C3: resources/list must include per-asset URIs for supported non-BTC assets.
 func TestToolsListIncludesPerAssetResources(t *testing.T) {
 	resp := handleRequest(&rpcRequest{
 		JSONRPC: "2.0",
@@ -334,11 +333,14 @@ func TestToolsListIncludesPerAssetResources(t *testing.T) {
 	b, _ := json.Marshal(resp)
 	body := string(b)
 	for _, suffix := range []string{
-		"/latest/qqq", "/latest/spy", "/latest/gold", "/latest/hs300",
+		"/latest/qqq", "/latest/spy", "/latest/gold",
 	} {
 		if !strings.Contains(body, suffix) {
 			t.Fatalf("per-asset URI %q not in resources/list: %s", suffix, body)
 		}
+	}
+	if strings.Contains(body, "/latest/eth") {
+		t.Fatalf("unsupported asset resource should not be listed: %s", body)
 	}
 	// Legacy unsuffixed URIs must still be present.
 	for _, suffix := range []string{"/latest", "/skill.md"} {

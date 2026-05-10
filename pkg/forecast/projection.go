@@ -16,14 +16,14 @@ import (
 
 // PathProjection holds the forward path and fan sectors for visualization.
 type PathProjection struct {
-	Date         string        `json:"date"`
-	CurrentPrice float64       `json:"current_price"`
-	Horizon      int           `json:"horizon_days"` // max horizon
-	Mainline     []PathPoint   `json:"mainline"`     // P50
-	UpperFan     []PathPoint   `json:"upper_fan"`    // P75
-	LowerFan     []PathPoint   `json:"lower_fan"`    // P25
-	P10Floor     []PathPoint   `json:"p10_floor"`    // P10 worst case
-	P90Ceiling   []PathPoint   `json:"p90_ceiling"`  // P90 best case
+	Date         string      `json:"date"`
+	CurrentPrice float64     `json:"current_price"`
+	Horizon      int         `json:"horizon_days"` // max horizon
+	Mainline     []PathPoint `json:"mainline"`     // P50
+	UpperFan     []PathPoint `json:"upper_fan"`    // P75
+	LowerFan     []PathPoint `json:"lower_fan"`    // P25
+	P10Floor     []PathPoint `json:"p10_floor"`    // P10 worst case
+	P90Ceiling   []PathPoint `json:"p90_ceiling"`  // P90 best case
 }
 
 // PathPoint is a single point on the projection path.

@@ -86,7 +86,7 @@ btc 180d walk-forward:
 |---|---|---|
 | 各年均衡 50-70% | 信号在全 regime 可用 | 正常使用 |
 | 少数年份极端低 (<30%) | 某个 regime(通常是 2018/2022 风险去杠杆)失效 | 在类似 regime 到来时降级,或加 regime gating (Track G2) |
-| 多数年份都低 (<50%) | 全 regime 弱信号 | **hard-block**(如 HS300 全 horizon) |
+| 多数年份都低 (<50%) | 全 regime 弱信号 | **hard-block** |
 | 前 N 年好、后 N 年差 | 结构性失效,特征老化 | 可能需 recency-weighted kNN (Track G5) 或删特征 |
 
 ### 当前观察(2026-05-09 post-refresh,v6 baseline)
@@ -100,7 +100,6 @@ btc 180d walk-forward:
 | SPY 180d | 85% | 2018 例外,其余年份 ≥75%;SPY 比 QQQ 更低波动,walk-forward 更稳 |
 | Gold 90d | 55% | **强 regime 依赖** — 2017-2022 ≤50%,2023-2025 50-100%,央行购金 regime 改变了主导变量 |
 | Gold 180d | 49% | 同上但更严重 → hard-block |
-| HS300 全 horizon | 45-49% | **全 regime 弱**,无论牛熊年份都接近随机 → hard-block |
 
 ### 如何生成最新矩阵
 

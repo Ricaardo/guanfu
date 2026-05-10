@@ -24,25 +24,9 @@ func TestHorizonCaveatFlagsWeakHistory(t *testing.T) {
 		t.Errorf("gold/30d (51%%) should hit approaching-random caveat, got: %s", c30)
 	}
 
-	// HS300 at every horizon (46.8%, 44.7%, 48.9%) all < 0.50 → hard-block
-	for _, h := range []int{30, 90, 180} {
-		c := HorizonCaveat("hs300", h)
-		if c == "" {
-			t.Errorf("hs300/%dd expected caveat, got empty", h)
-		}
-		if !strings.Contains(c, "低于随机") {
-			t.Errorf("hs300/%dd should hit hard-block caveat, got: %s", h, c)
-		}
-	}
 }
 
 func TestIsHardBlocked(t *testing.T) {
-	// HS300 every horizon dir_hit < 0.50 → blocked
-	for _, h := range []int{30, 90, 180} {
-		if !IsHardBlocked("hs300", h) {
-			t.Errorf("hs300/%dd dir_hit < 0.50 should be hard-blocked", h)
-		}
-	}
 	// Gold 180d at 0.49 → blocked; 30d at 0.51 → not blocked
 	if !IsHardBlocked("gold", 180) {
 		t.Error("gold/180 at 49%% should be hard-blocked")

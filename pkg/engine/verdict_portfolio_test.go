@@ -65,8 +65,8 @@ func TestAnnotateReportsRoomWhenUnderCeiling(t *testing.T) {
 	p := &portfolio.Portfolio{
 		SchemaVersion: 1,
 		Holdings: map[string]portfolio.Holding{
-			"btc":  {Amount: 0.1},   // 8000 at 80k
-			"cash": {USD: 92000},    // total 100k, BTC weight 8%
+			"btc":  {Amount: 0.1}, // 8000 at 80k
+			"cash": {USD: 92000},  // total 100k, BTC weight 8%
 		},
 		Preferences: portfolio.Preferences{
 			HorizonYears: 5,

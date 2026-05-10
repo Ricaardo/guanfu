@@ -25,10 +25,10 @@ import (
 type Kind string
 
 const (
-	KindFOMC     Kind = "fomc"      // FOMC rate decision
-	KindCPI      Kind = "cpi"       // CPI release
-	KindHalving  Kind = "halving"   // BTC halving
-	KindEarnings Kind = "earnings"  // quarterly earnings peak week
+	KindFOMC     Kind = "fomc"     // FOMC rate decision
+	KindCPI      Kind = "cpi"      // CPI release
+	KindHalving  Kind = "halving"  // BTC halving
+	KindEarnings Kind = "earnings" // quarterly earnings peak week
 )
 
 // Event is a single dated market-impact event.

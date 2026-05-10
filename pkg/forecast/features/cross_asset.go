@@ -185,4 +185,3 @@ func (ca *CrossAssetData) vixLevel(points []forecast.Point, i int) ([]forecast.F
 		Normalized: round4(clip(normVix, 3)), Weight: 0.50,
 	}}, true
 }
-

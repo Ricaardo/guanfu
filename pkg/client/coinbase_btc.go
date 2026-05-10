@@ -39,8 +39,10 @@ const (
 // premium-vs-Binance signal. Key: coinbase_btc.
 type CoinbaseBTCSource struct{}
 
-func (CoinbaseBTCSource) Key() string         { return "coinbase_btc" }
-func (CoinbaseBTCSource) DisplayName() string { return "coinbase_btc (BTC-USD daily, F8 premium proxy)" }
+func (CoinbaseBTCSource) Key() string { return "coinbase_btc" }
+func (CoinbaseBTCSource) DisplayName() string {
+	return "coinbase_btc (BTC-USD daily, F8 premium proxy)"
+}
 
 func (c CoinbaseBTCSource) Refresh(ctx context.Context, ps *store.PriceStore) (*RefreshResult, error) {
 	stale, lastDate := staleThreshold(ps, c.Key())

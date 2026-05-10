@@ -45,8 +45,37 @@ func TestMedianOfHandlesEvenAndOdd(t *testing.T) {
 	}
 }
 
+func TestResolveActualReturnEnforcesFiveDayTolerance(t *testing.T) {
+	asOf := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := claim.Claim{Asset: "btc", Horizon: 30, AsOf: asOf, PriceAtClaim: 100}
+
+	t.Run("within tolerance", func(t *testing.T) {
+		ps := &store.PriceStore{Dir: t.TempDir()}
+		if err := ps.Save("btc", []store.PricePoint{{Date: "2026-02-03", Close: 110}}); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := resolveActualReturn(base, ps)
+		if !ok {
+			t.Fatal("expected target price within +5d to resolve")
+		}
+		if got != 10 {
+			t.Fatalf("actual return = %v, want 10", got)
+		}
+	})
+
+	t.Run("beyond tolerance", func(t *testing.T) {
+		ps := &store.PriceStore{Dir: t.TempDir()}
+		if err := ps.Save("btc", []store.PricePoint{{Date: "2026-02-06", Close: 110}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := resolveActualReturn(base, ps); ok {
+			t.Fatal("price beyond +5d should not resolve")
+		}
+	})
+}
+
 func TestIsCoreAsset(t *testing.T) {
-	for _, a := range []string{"btc", "qqq", "spy", "gold", "hs300"} {
+	for _, a := range []string{"btc", "qqq", "spy", "gold"} {
 		if !isCoreAsset(a) {
 			t.Errorf("%s should be core", a)
 		}

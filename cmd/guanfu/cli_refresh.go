@@ -32,16 +32,12 @@ func allRefreshSources() []client.Source {
 	srcs := []client.Source{
 		client.BTCSource{},
 		client.GoldSource{},
-		client.HS300Source{},
 	}
 	for _, y := range client.DefaultYahooETFSources() {
 		srcs = append(srcs, y)
 	}
 	for _, f := range client.DefaultFREDSources() {
 		srcs = append(srcs, f)
-	}
-	for _, a := range client.DefaultAkshareSources() {
-		srcs = append(srcs, a)
 	}
 	srcs = append(srcs, client.CAPESource{})
 	srcs = append(srcs, client.DefillamaStablecoinSource{})

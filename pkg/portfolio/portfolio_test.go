@@ -193,7 +193,7 @@ func TestCurrencyPairUSDRateFallbacks(t *testing.T) {
 		{"USD", 0, 1.0, false},
 		{"", 0, 1.0, false},
 		{"CNY", 7.15, 7.15, false},
-		{"CNY", 0, 7.2, false},    // fallback
+		{"CNY", 0, 7.2, false}, // fallback
 		{"JPY", 0, 150.0, false},
 		{"EUR", 0, 0.92, false},
 		{"nonsense", 0, 0, true},

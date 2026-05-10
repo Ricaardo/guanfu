@@ -33,7 +33,6 @@ func TestBacktestBundles(t *testing.T) {
 		{"qqq", "qqq", features.EquityExtractors},
 		{"spy", "spy", features.EquityExtractors},
 		{"gold", "gold", features.GoldExtractors},
-		{"hs300", "hs300", features.HS300Extractors},
 	}
 
 	for _, a := range assets {

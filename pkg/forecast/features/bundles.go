@@ -53,23 +53,6 @@ func GoldExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
 	return exts
 }
 
-// HS300Extractors returns the bundle for HS300 (China A-shares):
-// generic technicals + PMI + M2 + LPR + northbound flow.
-func HS300Extractors(s *store.PriceStore) []forecast.FeatureExtractor {
-	exts := GenericTechnicalExtractors()
-	for _, ex := range []forecast.FeatureExtractor{
-		PMIExtractor(s),
-		M2Extractor(s),
-		LPRExtractor(s),
-		NorthboundExtractor(s),
-	} {
-		if ex != nil {
-			exts = append(exts, ex)
-		}
-	}
-	return exts
-}
-
 // USStockExtractors returns the bundle for arbitrary US stocks (D2).
 // Same macro context as EquityExtractors but without CAPE — there's
 // no per-name CAPE proxy for an arbitrary single stock, only for

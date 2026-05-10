@@ -98,7 +98,6 @@ func TestHorizonsForAsset(t *testing.T) {
 		{"spy", []int{30, 63, 90, 180, 252}},
 		{"gold", []int{30, 60, 90, 120}}, // 180d removed 2026-05-09 (49% dir_hit, n=51)
 		{"btc", []int{30, 90, 180}},
-		{"hs300", []int{30, 90, 180}},
 		{"AAPL", []int{30, 90, 180}}, // arbitrary stock falls back to default
 		{"", []int{30, 90, 180}},
 	}
@@ -126,42 +125,64 @@ func testOpts() Options {
 	opts := DefaultOptions()
 	opts.Extractors = []FeatureExtractor{
 		func(points []Point, i int) ([]FeatureValue, bool) {
-			if i < 30 { return nil, false }
+			if i < 30 {
+				return nil, false
+			}
 			r := points[i].Close/points[i-30].Close - 1
 			return []FeatureValue{{Name: "return_30d", Value: r * 100, Normalized: r / 0.30, Weight: 1.10}}, true
 		},
 		func(points []Point, i int) ([]FeatureValue, bool) {
-			if i < 90 { return nil, false }
+			if i < 90 {
+				return nil, false
+			}
 			r := points[i].Close/points[i-90].Close - 1
 			return []FeatureValue{{Name: "return_90d", Value: r * 100, Normalized: r / 0.60, Weight: 1.00}}, true
 		},
 		func(points []Point, i int) ([]FeatureValue, bool) {
-			if i < 180 { return nil, false }
+			if i < 180 {
+				return nil, false
+			}
 			r := points[i].Close/points[i-180].Close - 1
 			return []FeatureValue{{Name: "return_180d", Value: r * 100, Normalized: r / 1.00, Weight: 0.80}}, true
 		},
 		func(points []Point, i int) ([]FeatureValue, bool) {
-			if i < 14 { return nil, false }
+			if i < 14 {
+				return nil, false
+			}
 			gains, losses := 0.0, 0.0
 			for j := i - 13; j <= i; j++ {
 				diff := points[j].Close - points[j-1].Close
-				if diff > 0 { gains += diff } else { losses -= diff }
+				if diff > 0 {
+					gains += diff
+				} else {
+					losses -= diff
+				}
 			}
-			if losses == 0 { return []FeatureValue{{Name: "rsi_14", Value: 100, Normalized: 2.0, Weight: 0.80}}, true }
+			if losses == 0 {
+				return []FeatureValue{{Name: "rsi_14", Value: 100, Normalized: 2.0, Weight: 0.80}}, true
+			}
 			rsi := 100 - 100/(1+(gains/14)/(losses/14))
 			return []FeatureValue{{Name: "rsi_14", Value: rsi, Normalized: (rsi - 50) / 25, Weight: 0.80}}, true
 		},
 		func(points []Point, i int) ([]FeatureValue, bool) {
-			if i < 200 { return nil, false }
+			if i < 200 {
+				return nil, false
+			}
 			sum := 0.0
-			for j := i - 199; j <= i; j++ { sum += points[j].Close }
+			for j := i - 199; j <= i; j++ {
+				sum += points[j].Close
+			}
 			mayer := points[i].Close / (sum / 200)
 			return []FeatureValue{{Name: "mayer_multiple", Value: mayer, Normalized: mayer / 2.4, Weight: 1.20}}, true
 		},
 		func(points []Point, i int) ([]FeatureValue, bool) {
-			if i < 200 { return nil, false }
+			if i < 200 {
+				return nil, false
+			}
 			sum := 0.0
-			for j := i - 199; j <= i; j++ { sum += points[j].Close }
+			for j := i - 199; j <= i; j++ {
+				sum += points[j].Close
+			}
 			sma := sum / 200
 			dev := points[i].Close/sma - 1
 			return []FeatureValue{{Name: "sma_200_dev", Value: dev * 100, Normalized: dev / 0.50, Weight: 0.70}}, true

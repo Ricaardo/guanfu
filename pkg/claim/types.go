@@ -31,10 +31,10 @@ const SchemaVersion = 1
 // Every BuildForecast call produces one Claim per horizon.
 type Claim struct {
 	// Identity.
-	ID     string `json:"id"`      // uuid-v7-like (time-sortable)
-	Asset  string `json:"asset"`   // btc / qqq / spy / gold / hs300 / stock_aapl
-	AsOf   time.Time `json:"as_of"`   // snapshot time of the source panel
-	Horizon int   `json:"horizon"` // days; 1 Claim per (asset, horizon, as_of)
+	ID      string    `json:"id"`      // uuid-v7-like (time-sortable)
+	Asset   string    `json:"asset"`   // btc / qqq / spy / gold / stock_aapl
+	AsOf    time.Time `json:"as_of"`   // snapshot time of the source panel
+	Horizon int       `json:"horizon"` // days; 1 Claim per (asset, horizon, as_of)
 
 	// Core numeric prediction (subject to HardBlocked — see below).
 	PriceAtClaim   float64 `json:"price_at_claim"`
@@ -48,9 +48,9 @@ type Claim struct {
 	ReliabilityNote string `json:"reliability_note,omitempty"`
 
 	// Evidence bundle — reconstructable on calibration.
-	SourceSnapshotSHA string   `json:"source_snapshot_sha"` // sha256 of panel JSON
-	FeatureCoverage   float64  `json:"feature_coverage"`    // 0-1
-	AnalogCount       int      `json:"analog_count"`
+	SourceSnapshotSHA string      `json:"source_snapshot_sha"` // sha256 of panel JSON
+	FeatureCoverage   float64     `json:"feature_coverage"`    // 0-1
+	AnalogCount       int         `json:"analog_count"`
 	DominantAnalogs   []AnalogRef `json:"dominant_analogs,omitempty"` // top 3 kNN analogs
 
 	// Narrative — optional, but recommended when emitting via SKILL.
@@ -74,16 +74,16 @@ type AnalogRef struct {
 // ScenarioProb is a human-framed probability bucket. Populated when SKILL
 // translates the quantile distribution into named scenarios (J4).
 type ScenarioProb struct {
-	Name       string  `json:"name"`       // "温和延续" / "区间震荡" / "下行压力"
-	Prob       float64 `json:"prob"`       // 0-1
-	Rationale  string  `json:"rationale"`  // one-liner
+	Name       string  `json:"name"`                  // "温和延续" / "区间震荡" / "下行压力"
+	Prob       float64 `json:"prob"`                  // 0-1
+	Rationale  string  `json:"rationale"`             // one-liner
 	AnalogDate string  `json:"analog_date,omitempty"` // YYYY-MM-DD if anchored
 }
 
 // InvalidationCond is a concrete indicator-level kill criterion.
 type InvalidationCond struct {
-	Metric      string  `json:"metric"`      // "funding_rate_pct"
-	Operator    string  `json:"operator"`    // ">" / "<" / "cross_above" / "cross_below"
+	Metric      string  `json:"metric"`   // "funding_rate_pct"
+	Operator    string  `json:"operator"` // ">" / "<" / "cross_above" / "cross_below"
 	Threshold   float64 `json:"threshold"`
 	Description string  `json:"description"` // "若 funding 连续 7d > 0.08%"
 }
@@ -91,11 +91,11 @@ type InvalidationCond struct {
 // Intent is a user-declared thesis. Separate from Claim to keep the two
 // regression loops (tool predictions vs user discipline) independent.
 type Intent struct {
-	ID           string   `json:"id"`
+	ID           string    `json:"id"`
 	AsOf         time.Time `json:"as_of"`
-	Asset        string   `json:"asset"`
-	HorizonClass string   `json:"horizon_class"` // "5y_hold" / "6m_rebalance" / "3m_trade"
-	Thesis       string   `json:"thesis"`        // free text, user's own words
+	Asset        string    `json:"asset"`
+	HorizonClass string    `json:"horizon_class"` // "5y_hold" / "6m_rebalance" / "3m_trade"
+	Thesis       string    `json:"thesis"`        // free text, user's own words
 
 	// Optional structured triggers — when satisfied, user plans to act.
 	TriggerBuy  []InvalidationCond `json:"trigger_buy,omitempty"`

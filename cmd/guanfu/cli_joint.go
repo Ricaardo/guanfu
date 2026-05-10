@@ -32,7 +32,7 @@ import (
 
 const jointUsage = `usage: guanfu joint --assets X,Y[,Z...] [--horizon N] [--json]
 
-  --assets   comma-separated asset keys (btc/qqq/spy/gold/hs300)
+  --assets   comma-separated asset keys (btc/qqq/spy/gold)
   --horizon  forward-return window in days (default 90)
   --json     structured JSON output
 `
@@ -53,11 +53,11 @@ type JointRow struct {
 
 // JointResult is the consensus payload.
 type JointResult struct {
-	Horizon    int        `json:"horizon"`
-	Rows       []JointRow `json:"rows"`
-	Consensus  string     `json:"consensus"` // "upside" / "range" / "downside" / "mixed"
-	Agreement  float64    `json:"agreement"` // 0-1, fraction of non-hard-blocked rows in the plurality scenario
-	Note       string     `json:"note"`
+	Horizon   int        `json:"horizon"`
+	Rows      []JointRow `json:"rows"`
+	Consensus string     `json:"consensus"` // "upside" / "range" / "downside" / "mixed"
+	Agreement float64    `json:"agreement"` // 0-1, fraction of non-hard-blocked rows in the plurality scenario
+	Note      string     `json:"note"`
 }
 
 func runJoint(args []string) {
@@ -144,7 +144,7 @@ func buildJointRow(ctx context.Context, asset string, horizon int) (JointRow, er
 }
 
 // summarizeConsensus counts agreement across non-hard-blocked rows.
-// Hard-blocked rows (HS300 all / Gold 180d) are excluded from both
+// Hard-blocked rows (for example Gold 180d) are excluded from both
 // numerator and denominator — we don't let noise vote.
 func summarizeConsensus(rows []JointRow, horizon int) JointResult {
 	eligible := 0

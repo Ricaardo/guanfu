@@ -29,37 +29,37 @@ type BacktestReport struct {
 }
 
 type AssetBacktestResult struct {
-	Asset       string  `json:"asset"`
-	DataDays    int     `json:"data_days"`
-	TestsRun    int     `json:"tests_run"`
-	DirHit30d   float64 `json:"dir_hit_30d_pct"`
-	DirHit90d   float64 `json:"dir_hit_90d_pct"`
-	DirHit180d  float64 `json:"dir_hit_180d_pct"`
-	PIT30d      float64 `json:"pit_30d"`
-	PIT90d      float64 `json:"pit_90d"`
-	PIT180d     float64 `json:"pit_180d"`
-	CRPS30d     float64 `json:"crps_30d"`
-	CRPS90d     float64 `json:"crps_90d"`
-	CRPS180d    float64 `json:"crps_180d"`
-	AvgHitRate  float64 `json:"avg_hit_rate_pct"`
-	AvgPIT      float64 `json:"avg_pit"`
-	AvgCRPS     float64 `json:"avg_crps"`
+	Asset      string  `json:"asset"`
+	DataDays   int     `json:"data_days"`
+	TestsRun   int     `json:"tests_run"`
+	DirHit30d  float64 `json:"dir_hit_30d_pct"`
+	DirHit90d  float64 `json:"dir_hit_90d_pct"`
+	DirHit180d float64 `json:"dir_hit_180d_pct"`
+	PIT30d     float64 `json:"pit_30d"`
+	PIT90d     float64 `json:"pit_90d"`
+	PIT180d    float64 `json:"pit_180d"`
+	CRPS30d    float64 `json:"crps_30d"`
+	CRPS90d    float64 `json:"crps_90d"`
+	CRPS180d   float64 `json:"crps_180d"`
+	AvgHitRate float64 `json:"avg_hit_rate_pct"`
+	AvgPIT     float64 `json:"avg_pit"`
+	AvgCRPS    float64 `json:"avg_crps"`
 }
 
 type ComparisonTable struct {
-	BestHitRate  string  `json:"best_hit_rate_asset"`
-	BestHitRateVal float64 `json:"best_hit_rate_val"`
-	BestCalibration string `json:"best_calibration_asset"`
-	BestCRPS     string  `json:"best_crps_asset"`
-	Consistent30d bool   `json:"all_above_random_30d"`
-	Consistent90d bool   `json:"all_above_random_90d"`
+	BestHitRate     string  `json:"best_hit_rate_asset"`
+	BestHitRateVal  float64 `json:"best_hit_rate_val"`
+	BestCalibration string  `json:"best_calibration_asset"`
+	BestCRPS        string  `json:"best_crps_asset"`
+	Consistent30d   bool    `json:"all_above_random_30d"`
+	Consistent90d   bool    `json:"all_above_random_90d"`
 }
 
 func runBacktestAll(jsonOut, pretty, plain bool) {
 	s := &store.PriceStore{}
 
 	// Assets to test (skip if no data)
-	candidates := []string{"btc", "qqq", "spy", "gold", "hs300"}
+	candidates := []string{"btc", "qqq", "spy", "gold"}
 	available := []string{}
 	unavailable := []string{}
 	for _, a := range candidates {
@@ -155,12 +155,12 @@ func runBacktestAll(jsonOut, pretty, plain bool) {
 	}
 
 	report.Comparison = ComparisonTable{
-		BestHitRate:    bestHR.Asset,
-		BestHitRateVal: bestHR.AvgHitRate,
+		BestHitRate:     bestHR.Asset,
+		BestHitRateVal:  bestHR.AvgHitRate,
 		BestCalibration: bestCal.Asset,
-		BestCRPS:       bestCRPS.Asset,
-		Consistent30d:  allAbove30d,
-		Consistent90d:  allAbove90d,
+		BestCRPS:        bestCRPS.Asset,
+		Consistent30d:   allAbove30d,
+		Consistent90d:   allAbove90d,
 	}
 
 	// Generate findings
@@ -273,7 +273,7 @@ func generateSuggestions(assets []AssetBacktestResult, comp ComparisonTable) []s
 	// 5. Data quality
 	s = append(s, "数据质量:")
 	s = append(s, "  a) 对齐跨资产数据日期（当前简化对齐可能引入偏差）")
-	s = append(s, "  b) CSI300 数据管道（AkShare）到位后可比较新兴市场 vs 发达市场")
+	s = append(s, "  b) 对非美资产应先建立独立数据与验证链路，再纳入核心回测")
 
 	return s
 }
@@ -330,11 +330,13 @@ func printBacktestReport(report BacktestReport, plain bool) {
 	// Suggestions
 	fmt.Println("四、模型改进建议")
 	fmt.Println(strings.Repeat("-", 76))
-	for i, s := range report.Suggestions {
+	suggestionNo := 1
+	for _, s := range report.Suggestions {
 		if strings.HasPrefix(s, "  ") {
 			fmt.Printf("    %s\n", strings.TrimSpace(s))
 		} else {
-			fmt.Printf("  %d. %s\n", i+1, s)
+			fmt.Printf("  %d. %s\n", suggestionNo, s)
+			suggestionNo++
 		}
 	}
 	fmt.Println()

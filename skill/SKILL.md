@@ -1,8 +1,8 @@
 ---
 name: btc-guanfu
 description: |
-  观复 v3 / 观察万物之周期回归 — 多资产投资盘面 + 解读知识库。覆盖 BTC/QQQ/SPY/Gold/HS300 + 任意美股。BTC 输出 8 域 40+ 指标，权益/黄金/HS300 输出 6 域面板含顶底检测、估值区间、中国宏观。支持 kNN 走势推演（含 reliability 标注 + conformal 区间 + ensemble disagreement）、claim/intent ledger 校准、portfolio 上下文、行为护栏、DCA 定投回放、多资产回测。**不输出单一评分或交易指令**。
-  当用户问「BTC/QQQ/SPY/黄金/沪深300 该不该买/卖」、「估值如何」、「顶/底在哪」、「定投」、「AHR999/MVRV/哈希率/ETF」、「周期位置」、「观复」时触发。
+  观复 v3 / 观察万物之周期回归 — 多资产投资盘面 + 解读知识库。覆盖 BTC/QQQ/SPY/Gold + 任意美股。BTC 输出 8 域 40+ 指标，权益/黄金输出 6 域面板含顶底检测、估值区间和宏观上下文。支持 kNN 走势推演（含 reliability 标注 + conformal 区间 + ensemble disagreement）、claim/intent ledger 校准、portfolio 上下文、行为护栏、DCA 定投回放、多资产回测。**不输出单一评分或交易指令**。
+  当用户问「BTC/QQQ/SPY/黄金 该不该买/卖」、「估值如何」、「顶/底在哪」、「定投」、「AHR999/MVRV/哈希率/ETF」、「周期位置」、「观复」时触发。
   NOT for: 仅查实时价格 → cmc-mcp；altcoin/memecoin → cmc-mcp/okx-dex；K线形态 → technical-analysis。
 license: MIT
 user-invocable: true
@@ -10,7 +10,7 @@ required_tools:
   - guanfu        # https://github.com/Ricaardo/guanfu — `go install github.com/Ricaardo/guanfu/cmd/guanfu@latest`
 optional_tools:
   - jq            # JSON 解析
-  - python3       # AkShare/Futu 桥接
+  - python3       # Futu / CAPE 数据桥接
 ---
 
 # 观复 v3 (btc-guanfu): 多资产投资盘面 + 解读手册
@@ -40,10 +40,9 @@ guanfu btc --forecast     # BTC kNN 历史相似走势推演
 guanfu qqq --verdict      # QQQ 6 域面板(技术/估值/宏观/情绪)
 guanfu spy --verdict      # SPY 6 域面板
 guanfu gold --verdict     # 黄金面板(估值:实际利率 / DXY / VIX)
-guanfu hs300              # 沪深 300 面板(中国宏观:PMI/CPI/M2/CNY)
 guanfu stock AAPL         # 任意美股(Yahoo 自动拉取 + kNN)
 guanfu import-stock MSFT 3650  # 手动导入美股全量历史
-guanfu refresh            # 统一刷新 23 个数据源(首次全量 / 后续增量)
+guanfu refresh            # 统一刷新数据源(首次全量 / 后续增量)
 guanfu refresh --dry-run  # 列出将刷新的 source,不真正拉数据
 guanfu dca                # DCA 定投策略对比(Fixed/AHR/Mayer)
 guanfu allocate           # 全天候懒人组合偏离检测
@@ -60,11 +59,11 @@ guanfu status             # PriceStore 数据状态诊断
 
 ## MCP 工具 (`guanfu-mcp`)
 
-通过 stdio 暴露 MCP 协议接口；Claude Desktop / Cursor / 任何 MCP 客户端可直调，无需 Bash 权限。所有工具支持 `asset` 参数切换 BTC/QQQ/SPY/Gold/HS300。
+通过 stdio 暴露 MCP 协议接口；Claude Desktop / Cursor / 任何 MCP 客户端可直调，无需 Bash 权限。所有工具支持 `asset` 参数切换 BTC/QQQ/SPY/Gold。
 
 | 工具 | 说明 | 关键参数 | 输出 |
 |---|---|---|---|
-| `get_panel` | 完整盘面(多资产)。BTC = 8 域 40+ 指标;权益/黄金/HS300 = 6 域 | `asset` (默认 btc), `timeout_seconds` (默认 90) | `IndicatorPanel` JSON:`asset` / `date` / `snapshot` / 8 个 domain map / `source_health` |
+| `get_panel` | 完整盘面(多资产)。BTC = 8 域 40+ 指标;权益/黄金 = 6 域 | `asset` (默认 btc), `timeout_seconds` (默认 90) | `IndicatorPanel` JSON:`asset` / `date` / `snapshot` / 8 个 domain map / `source_health` |
 | `get_verdict` | 结构化多域读盘 | `asset`, `timeout_seconds`, `include_panel` (默认 false) | `Verdict` JSON:`net_direction` / `regime` / `domains` / `top_proximity` / `bottom_proximity` |
 | `get_forecast` | kNN 历史相似走势推演 | `asset`, `horizons` (默认 auto = 资产专属),  `top_k` (默认 21,最小 5),`include_panel` | `Forecast` JSON:每个 horizon 的 reliability_note / hard_blocked / quantiles + 邻居 |
 | **`get_stock_forecast`** | **任意美股 kNN 推演**(Yahoo 自动拉取 + `USStockExtractors`) | `ticker` (必填,如 AAPL/MSFT), `horizons`, `top_k`, `days` (默认 3650) | 同 `get_forecast`,但 asset 为 `stock_<ticker>` |
@@ -84,7 +83,7 @@ guanfu status             # PriceStore 数据状态诊断
 | `guanfu://skill/tier3`(当前同下) | 深度细节(追问原理时读) |
 | `guanfu://knowledge/skill.md` | 完整版 SKILL.md(向后兼容,新客户端优先 tier) |
 | `guanfu://panel/latest` | BTC 盘面(deprecated alias,= `/latest/btc`) |
-| `guanfu://panel/latest/{btc,qqq,spy,gold,hs300}` | 每资产盘面 |
+| `guanfu://panel/latest/{btc,qqq,spy,gold}` | 每资产盘面 |
 | `guanfu://verdict/latest/{asset}` | 每资产 verdict |
 | `guanfu://forecast/latest/{asset}` | 每资产 forecast |
 
@@ -97,10 +96,10 @@ guanfu status             # PriceStore 数据状态诊断
   "arguments":{"asset":"qqq","timeout_seconds":60}
 }}
 
-// tools/call get_forecast for HS300, custom horizons
+// tools/call get_forecast for Gold, custom horizons
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
   "name":"get_forecast",
-  "arguments":{"asset":"hs300","horizons":[30,90],"top_k":15}
+  "arguments":{"asset":"gold","horizons":[30,90],"top_k":15}
 }}
 ```
 
@@ -122,13 +121,13 @@ guanfu status             # PriceStore 数据状态诊断
 
 ## 数据架构 (PriceStore)
 
-30+ 数据集，`~/.guanfu/prices/` JSON 日频存档；统一 `guanfu refresh` 拉取（23 个 Source 实现 + BTC 链上 ad-hoc）。
+数据集存于 `~/.guanfu/prices/` JSON 日频存档；统一 `guanfu refresh` 拉取。
 
 完整源列表 + 增量协议 + 降级路径见 [`docs/DATA-SOURCES.md`](../docs/DATA-SOURCES.md)。
 
 ## kNN 预测引擎 + 可靠性标注
 
-Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / HS300 / USStock），Mahalanobis 距离，状态匹配，动态 TopK。
+Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。
 
 每个 `HorizonForecast` 附 `reliability_note` + `hard_blocked` 字段。三档规则、当前 (asset, horizon) 命中率表、`hard_blocked` 时的契约（数值字段保留但不渲染），全部见 [`tier1.md`](tier1.md) § 3 "可靠性标注"——**AI 读盘必载**。真源 `pkg/forecast/reliability.go`。
 

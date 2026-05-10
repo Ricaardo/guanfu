@@ -34,11 +34,11 @@ func TestValidateStockTickerRejectsCollisions(t *testing.T) {
 		ticker  string
 		wantErr string
 	}{
-		{"BTC", "conflicts"},        // core asset
-		{"vixy", "conflicts"},       // feature data
-		{"", "empty"},               // empty
-		{"AA PL", "invalid"},        // whitespace inside
-		{"NEW/SYM", "invalid"},      // slash
+		{"BTC", "conflicts"},   // core asset
+		{"vixy", "conflicts"},  // feature data
+		{"", "empty"},          // empty
+		{"AA PL", "invalid"},   // whitespace inside
+		{"NEW/SYM", "invalid"}, // slash
 	}
 	for _, c := range cases {
 		err := ValidateStockTicker(s, c.ticker)
