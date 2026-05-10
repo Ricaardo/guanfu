@@ -49,7 +49,7 @@ func runBacktest(asset string, jsonOut, pretty, plain bool) {
 	horizons := []int{30, 90, 180}
 	optsV1 := forecast.Options{
 		Horizons: horizons, TopK: 21, StepDays: 30,
-		Extractors: features.CoreExtractors(), MinFeatures: 6,
+		Extractors: backtestExtractorsForAsset(asset, s), MinFeatures: 6,
 	}
 
 	if jsonOut || pretty {
@@ -78,7 +78,7 @@ func runBacktestJSON(asset string, points []forecast.Point, hasCrossAsset bool, 
 	results := []btR{}
 	r1, _ := backtest.Run(points, 800, 60, optsV1.Extractors, horizons)
 	if r1 != nil {
-		br := btR{Version: "v1_core", Features: "11 core price", TotalTests: r1.TotalTests}
+		br := btR{Version: "v1_asset_bundle", Features: backtestFeatureLabel(asset), TotalTests: r1.TotalTests}
 		for _, h := range horizons {
 			if hm := r1.ByHorizon[h]; hm != nil {
 				br.Horizons = append(br.Horizons, btH{
@@ -137,7 +137,7 @@ func runBacktestHuman(asset string, points []forecast.Point, hasCrossAsset bool,
 	fmt.Printf("  历史: %d 天  跨资产数据: %v\n", len(points), hasCrossAsset)
 	fmt.Println(strings.Repeat("─", 72))
 
-	fmt.Println("V1 — 纯价格特征 (11 core)")
+	fmt.Printf("V1 — %s\n", backtestFeatureLabel(asset))
 	r1, err := backtest.Run(points, 800, 60, optsV1.Extractors, horizons)
 	if err != nil {
 		fmt.Printf("  失败: %v\n", err)
@@ -193,5 +193,31 @@ func normalizeBacktestAsset(asset string) (string, bool) {
 		return asset, true
 	default:
 		return asset, false
+	}
+}
+
+func backtestExtractorsForAsset(asset string, s *store.PriceStore) []forecast.FeatureExtractor {
+	switch asset {
+	case "btc":
+		return features.CoreExtractors()
+	case "qqq", "spy":
+		return features.EquityExtractors(s)
+	case "gold":
+		return features.GoldExtractors(s)
+	default:
+		return features.GenericTechnicalExtractors()
+	}
+}
+
+func backtestFeatureLabel(asset string) string {
+	switch asset {
+	case "btc":
+		return "BTC core price/cycle features"
+	case "qqq", "spy":
+		return "US equity technical + macro features"
+	case "gold":
+		return "gold technical + macro features"
+	default:
+		return "generic technical features"
 	}
 }

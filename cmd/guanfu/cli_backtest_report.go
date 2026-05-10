@@ -16,7 +16,6 @@ import (
 
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/forecast/backtest"
-	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/store"
 )
 
@@ -94,7 +93,7 @@ func runBacktestAll(jsonOut, pretty, plain bool) {
 			points[i] = forecast.Point{Date: p.Date, Close: p.Close}
 		}
 
-		extractors := features.CoreExtractors()
+		extractors := backtestExtractorsForAsset(asset, s)
 		r, err := backtest.Run(points, len(points)/3, 60, extractors, horizons)
 		if err != nil {
 			continue
