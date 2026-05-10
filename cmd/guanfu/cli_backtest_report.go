@@ -28,21 +28,30 @@ type BacktestReport struct {
 }
 
 type AssetBacktestResult struct {
-	Asset      string  `json:"asset"`
-	DataDays   int     `json:"data_days"`
-	TestsRun   int     `json:"tests_run"`
-	DirHit30d  float64 `json:"dir_hit_30d_pct"`
-	DirHit90d  float64 `json:"dir_hit_90d_pct"`
-	DirHit180d float64 `json:"dir_hit_180d_pct"`
-	PIT30d     float64 `json:"pit_30d"`
-	PIT90d     float64 `json:"pit_90d"`
-	PIT180d    float64 `json:"pit_180d"`
-	CRPS30d    float64 `json:"crps_30d"`
-	CRPS90d    float64 `json:"crps_90d"`
-	CRPS180d   float64 `json:"crps_180d"`
-	AvgHitRate float64 `json:"avg_hit_rate_pct"`
-	AvgPIT     float64 `json:"avg_pit"`
-	AvgCRPS    float64 `json:"avg_crps"`
+	Asset              string   `json:"asset"`
+	FeatureBundle      string   `json:"feature_bundle"`
+	MissingFeatures    []string `json:"missing_features,omitempty"`
+	DataDays           int      `json:"data_days"`
+	TestsRun           int      `json:"tests_run"`
+	DirHit30d          float64  `json:"dir_hit_30d_pct"`
+	DirHit90d          float64  `json:"dir_hit_90d_pct"`
+	DirHit180d         float64  `json:"dir_hit_180d_pct"`
+	PIT30d             float64  `json:"pit_30d"`
+	PIT90d             float64  `json:"pit_90d"`
+	PIT180d            float64  `json:"pit_180d"`
+	CRPS30d            float64  `json:"crps_30d"`
+	CRPS90d            float64  `json:"crps_90d"`
+	CRPS180d           float64  `json:"crps_180d"`
+	FeatureCov30d      float64  `json:"feature_coverage_30d_pct"`
+	FeatureCov90d      float64  `json:"feature_coverage_90d_pct"`
+	FeatureCov180d     float64  `json:"feature_coverage_180d_pct"`
+	ConformalCov30d    float64  `json:"conformal_realized_coverage_30d_pct,omitempty"`
+	ConformalCov90d    float64  `json:"conformal_realized_coverage_90d_pct,omitempty"`
+	ConformalCov180d   float64  `json:"conformal_realized_coverage_180d_pct,omitempty"`
+	AvgHitRate         float64  `json:"avg_hit_rate_pct"`
+	AvgPIT             float64  `json:"avg_pit"`
+	AvgCRPS            float64  `json:"avg_crps"`
+	AvgFeatureCoverage float64  `json:"avg_feature_coverage_pct"`
 }
 
 type ComparisonTable struct {
@@ -94,34 +103,44 @@ func runBacktestAll(jsonOut, pretty, plain bool) {
 		}
 
 		extractors := backtestExtractorsForAsset(asset, s)
+		diag := diagnoseFeatureBundle(asset, points, extractors)
 		r, err := backtest.Run(points, len(points)/3, 60, extractors, horizons)
 		if err != nil {
 			continue
 		}
 
 		abr := AssetBacktestResult{
-			Asset:    asset,
-			DataDays: len(points),
-			TestsRun: r.TotalTests,
+			Asset:           asset,
+			FeatureBundle:   backtestFeatureLabel(asset),
+			MissingFeatures: diag.MissingFeatures,
+			DataDays:        len(points),
+			TestsRun:        r.TotalTests,
 		}
 		if hm := r.ByHorizon[30]; hm != nil {
 			abr.DirHit30d = math.Round(hm.DirectionHitRate()*10000) / 100
 			abr.PIT30d = math.Round(hm.PITMean()*1000) / 1000
 			abr.CRPS30d = math.Round(hm.CRPSScore()*10000) / 10000
+			abr.FeatureCov30d = math.Round(hm.FeatureCoverageMean()*10000) / 100
+			abr.ConformalCov30d = math.Round(hm.ConformalHitRate()*10000) / 100
 		}
 		if hm := r.ByHorizon[90]; hm != nil {
 			abr.DirHit90d = math.Round(hm.DirectionHitRate()*10000) / 100
 			abr.PIT90d = math.Round(hm.PITMean()*1000) / 1000
 			abr.CRPS90d = math.Round(hm.CRPSScore()*10000) / 10000
+			abr.FeatureCov90d = math.Round(hm.FeatureCoverageMean()*10000) / 100
+			abr.ConformalCov90d = math.Round(hm.ConformalHitRate()*10000) / 100
 		}
 		if hm := r.ByHorizon[180]; hm != nil {
 			abr.DirHit180d = math.Round(hm.DirectionHitRate()*10000) / 100
 			abr.PIT180d = math.Round(hm.PITMean()*1000) / 1000
 			abr.CRPS180d = math.Round(hm.CRPSScore()*10000) / 10000
+			abr.FeatureCov180d = math.Round(hm.FeatureCoverageMean()*10000) / 100
+			abr.ConformalCov180d = math.Round(hm.ConformalHitRate()*10000) / 100
 		}
 		abr.AvgHitRate = math.Round((abr.DirHit30d+abr.DirHit90d+abr.DirHit180d)/3*100) / 100
 		abr.AvgPIT = math.Round((abr.PIT30d+abr.PIT90d+abr.PIT180d)/3*1000) / 1000
 		abr.AvgCRPS = math.Round((abr.CRPS30d+abr.CRPS90d+abr.CRPS180d)/3*10000) / 10000
+		abr.AvgFeatureCoverage = math.Round((abr.FeatureCov30d+abr.FeatureCov90d+abr.FeatureCov180d)/3*100) / 100
 
 		report.Assets = append(report.Assets, abr)
 	}
@@ -139,7 +158,7 @@ func runBacktestAll(jsonOut, pretty, plain bool) {
 		if a.AvgHitRate > bestHR.AvgHitRate {
 			bestHR = a
 		}
-		if a.AvgPIT > bestCal.AvgPIT {
+		if math.Abs(a.AvgPIT-0.5) < math.Abs(bestCal.AvgPIT-0.5) {
 			bestCal = a
 		}
 		if a.AvgCRPS < bestCRPS.AvgCRPS {
@@ -291,8 +310,8 @@ func printBacktestReport(report BacktestReport, plain bool) {
 	// Asset results table
 	fmt.Println("一、各资产回测结果")
 	fmt.Println(strings.Repeat("-", 76))
-	fmt.Printf("%-8s %6s %6s %8s %8s %8s %8s %8s\n",
-		"Asset", "Days", "Tests", "Hit30d", "Hit90d", "Hit180d", "PIT", "CRPS")
+	fmt.Printf("%-8s %6s %6s %8s %8s %8s %8s %8s %8s\n",
+		"Asset", "Days", "Tests", "Hit30d", "Hit90d", "Hit180d", "PIT", "CRPS", "FeatCov")
 	fmt.Println(strings.Repeat("-", 76))
 
 	sort.Slice(report.Assets, func(i, j int) bool {
@@ -300,10 +319,12 @@ func printBacktestReport(report BacktestReport, plain bool) {
 	})
 
 	for _, a := range report.Assets {
-		fmt.Printf("%-8s %5dd %5d  %6.1f%% %7.1f%% %7.1f%% %6.2f %7.4f\n",
+		fmt.Printf("%-8s %5dd %5d  %6.1f%% %7.1f%% %7.1f%% %6.2f %7.4f %7.0f%%\n",
 			a.Asset, a.DataDays, a.TestsRun,
 			a.DirHit30d, a.DirHit90d, a.DirHit180d,
-			a.AvgPIT, a.AvgCRPS)
+			a.AvgPIT, a.AvgCRPS, a.AvgFeatureCoverage)
+		fmt.Printf("         bundle: %s; missing: %s; conformal realized: 30d %.0f%% / 90d %.0f%% / 180d %.0f%%\n",
+			a.FeatureBundle, missingFeatureText(a.MissingFeatures), a.ConformalCov30d, a.ConformalCov90d, a.ConformalCov180d)
 	}
 	fmt.Println(strings.Repeat("-", 76))
 	fmt.Println()

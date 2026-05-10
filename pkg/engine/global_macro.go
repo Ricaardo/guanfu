@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/Ricaardo/guanfu/pkg/model"
@@ -31,12 +32,26 @@ func EnrichGlobalInvestorMacro(panel *model.IndicatorPanel, ps *store.PriceStore
 	}
 
 	fxAsOf, fxSpotOK, fxTrendOK := addUSDCNYMacro(panel, ps)
+	addCNYInvestorLens(panel, ps)
+	addEquityPutCallPositioning(panel, ps)
+	addAssetPriceSourceHealth(panel, ps)
+	addForecastBundleSourceHealth(panel, ps)
 	ratesAsOf, ratesAvailable := addCentralBankMacro(panel, ps)
+	fxStatus := combinedStatus(fxSpotOK, fxTrendOK)
+	if fxSpotOK && staleDate(fxAsOf, 3) {
+		fxStatus = "stale"
+	}
+	rateStatus := coverageStatus(ratesAvailable, globalCentralBankRateCoverage)
+	rateNote := "Fed, ECB, BOJ and China front-end rate context from refreshed macro PriceStore data"
+	if ratesAvailable > 0 && anyLatestStale(ps, 45, "fred_fed_funds", "fred_dgs3mo", "fred_ecb_deposit_rate", "fred_boj_call_rate", "fred_pboc_interbank_rate") {
+		rateStatus = "stale"
+		rateNote += "; one or more rates are stale, read as macro background rather than a forecast input"
+	}
 
 	panel.SourceHealth = append(panel.SourceHealth,
 		healthEntry(
 			investorFXSourceName,
-			combinedStatus(fxSpotOK, fxTrendOK),
+			fxStatus,
 			fxAsOf,
 			false,
 			"USD/CNY spot and 60d trend for CNY investor context",
@@ -44,13 +59,228 @@ func EnrichGlobalInvestorMacro(panel *model.IndicatorPanel, ps *store.PriceStore
 		),
 		healthEntry(
 			globalCentralBankRateSource,
-			coverageStatus(ratesAvailable, globalCentralBankRateCoverage),
+			rateStatus,
 			ratesAsOf,
 			false,
-			"Fed, ECB, BOJ and China front-end rate context from refreshed macro PriceStore data",
+			rateNote,
 			nil,
 		),
 	)
+}
+
+func addAssetPriceSourceHealth(panel *model.IndicatorPanel, ps *store.PriceStore) {
+	if panel != nil && strings.ToLower(strings.TrimSpace(panel.Asset)) == "btc" {
+		return
+	}
+	key := priceStoreKeyForPanel(panel)
+	if key == "" {
+		return
+	}
+	latest, ok := ps.Latest(key)
+	status := "missing"
+	asOf := ""
+	note := fmt.Sprintf("PriceStore daily closes for %s", strings.ToUpper(panel.Asset))
+	if ok {
+		status = "ok"
+		asOf = latest.Date
+		if staleDate(latest.Date, 5) {
+			status = "stale"
+		}
+	}
+	panel.SourceHealth = append(panel.SourceHealth, model.SourceHealth{
+		Source: "price_store_" + key,
+		Status: status,
+		AsOf:   asOf,
+		Impact: "both",
+		Note:   note,
+	})
+}
+
+func addForecastBundleSourceHealth(panel *model.IndicatorPanel, ps *store.PriceStore) {
+	for _, src := range forecastBundleSources(panel.Asset) {
+		latest, ok := ps.Latest(src.key)
+		status := "missing"
+		asOf := ""
+		if ok {
+			status = "ok"
+			asOf = latest.Date
+			if staleDate(latest.Date, src.maxAgeDays) {
+				status = "stale"
+			}
+		}
+		panel.SourceHealth = append(panel.SourceHealth, model.SourceHealth{
+			Source: "forecast_bundle_" + src.key,
+			Status: status,
+			AsOf:   asOf,
+			Impact: "forecast",
+			Note:   src.note,
+		})
+	}
+}
+
+type forecastBundleSource struct {
+	key        string
+	maxAgeDays int
+	note       string
+}
+
+func forecastBundleSources(asset string) []forecastBundleSource {
+	switch strings.ToLower(strings.TrimSpace(asset)) {
+	case "qqq", "spy":
+		return []forecastBundleSource{
+			{"spx_cape", 45, "Equity forecast valuation feature"},
+			{"fred_dgs10", 7, "Equity forecast rates feature"},
+			{"fred_dxy", 7, "Equity forecast USD feature"},
+			{"fred_hy_spread", 7, "Equity forecast credit-spread feature"},
+			{"fred_yield_curve", 7, "Equity forecast yield-curve feature"},
+			{"vixy", 5, "Equity forecast volatility feature"},
+			{"stooq_putcall", 5, "Equity forecast/options sentiment feature"},
+		}
+	case "gold":
+		return []forecastBundleSource{
+			{"fred_dfii10", 7, "Gold forecast real-yield feature"},
+			{"fred_breakeven", 7, "Gold forecast inflation-expectation feature"},
+			{"fred_dxy", 7, "Gold forecast USD feature"},
+			{"gold_cot", 10, "Gold forecast COT positioning feature"},
+			{"vixy", 5, "Gold forecast risk-off feature"},
+		}
+	default:
+		return nil
+	}
+}
+
+func addEquityPutCallPositioning(panel *model.IndicatorPanel, ps *store.PriceStore) {
+	if panel == nil || ps == nil || !isEquityLikePanel(panel.Asset) {
+		return
+	}
+	pts, err := ps.Load("stooq_putcall")
+	if err != nil || len(pts) == 0 {
+		return
+	}
+	latest := pts[len(pts)-1]
+	if latest.Close <= 0 {
+		return
+	}
+	if panel.Positioning == nil {
+		panel.Positioning = make(map[string]model.Indicator)
+	}
+	panel.Positioning["put_call_ratio"] = model.Indicator{
+		Value:     roundN(latest.Close, 3),
+		Label:     putCallRatioLabel(latest.Close),
+		Source:    sourceOr(latest.Source, "stooq:^PC"),
+		UpdatedAt: latest.Date,
+		Note:      "CBOE total put/call ratio via Stooq. >1.2 = hedging/fear; <0.7 = complacency/call chase.",
+	}
+	if pct, ok := percentileRankLast(pts, 252); ok {
+		panel.Positioning["put_call_252d_percentile"] = model.Indicator{
+			Value:     roundN(pct*100, 1),
+			Label:     putCallPercentileLabel(pct),
+			Source:    "computed:stooq_putcall",
+			UpdatedAt: latest.Date,
+			Note:      "Latest put/call ratio percentile versus trailing 252 observations.",
+		}
+	}
+	if past, ok := pointAtLeastDaysBack(pts, latest.Date, 30); ok && past.Close > 0 {
+		chg := latest.Close - past.Close
+		panel.Positioning["put_call_30d_change"] = model.Indicator{
+			Value:     roundN(chg, 3),
+			Label:     putCallChangeLabel(chg),
+			Source:    "computed:stooq_putcall",
+			UpdatedAt: latest.Date,
+			Note:      fmt.Sprintf("CBOE total put/call ratio change since %s.", past.Date),
+		}
+	}
+}
+
+func isEquityLikePanel(asset string) bool {
+	asset = strings.ToLower(strings.TrimSpace(asset))
+	if asset == "" || asset == "btc" || asset == "gold" {
+		return false
+	}
+	return true
+}
+
+func addCNYInvestorLens(panel *model.IndicatorPanel, ps *store.PriceStore) {
+	assetKey := priceStoreKeyForPanel(panel)
+	if assetKey == "" {
+		return
+	}
+	fxPts, err := ps.Load("usd_cny")
+	if err != nil || len(fxPts) == 0 {
+		return
+	}
+	assetPts, err := ps.Load(assetKey)
+	if err != nil || len(assetPts) == 0 {
+		return
+	}
+	latestFX := fxPts[len(fxPts)-1]
+	latestAsset := assetPts[len(assetPts)-1]
+	if latestFX.Close <= 0 || latestAsset.Close <= 0 {
+		return
+	}
+
+	panel.Macro["asset_price_cny"] = model.Indicator{
+		Value:     roundN(latestAsset.Close*latestFX.Close, 2),
+		Label:     "CNY local price",
+		Source:    "computed:price_store_asset*usd_cny",
+		UpdatedAt: latestAsOf(latestAsset.Date, latestFX.Date),
+		Note:      fmt.Sprintf("%s USD price %.2f × USD/CNY %.4f.", strings.ToUpper(panel.Asset), latestAsset.Close, latestFX.Close),
+	}
+	for _, days := range []int{30, 90} {
+		addCNYReturnLens(panel, assetPts, fxPts, latestAsset, latestFX, days)
+	}
+}
+
+func addCNYReturnLens(panel *model.IndicatorPanel, assetPts, fxPts []store.PricePoint, latestAsset, latestFX store.PricePoint, days int) {
+	pastAsset, okA := pointAtLeastDaysBack(assetPts, latestAsset.Date, days)
+	pastFX, okFX := pointAtLeastDaysBack(fxPts, latestFX.Date, days)
+	if !okA || !okFX || pastAsset.Close <= 0 || pastFX.Close <= 0 {
+		return
+	}
+	usdRet := latestAsset.Close/pastAsset.Close - 1
+	cnyRet := (latestAsset.Close*latestFX.Close)/(pastAsset.Close*pastFX.Close) - 1
+	spread := cnyRet - usdRet
+	suffix := fmt.Sprintf("%dd", days)
+	panel.Macro["asset_return_usd_"+suffix] = model.Indicator{
+		Value:     roundN(usdRet*100, 2),
+		Label:     "USD asset return",
+		Source:    "computed:price_store",
+		UpdatedAt: latestAsset.Date,
+		Note:      fmt.Sprintf("USD price return since %s.", pastAsset.Date),
+	}
+	panel.Macro["asset_return_cny_"+suffix] = model.Indicator{
+		Value:     roundN(cnyRet*100, 2),
+		Label:     cnyReturnLabel(cnyRet),
+		Source:    "computed:price_store*usd_cny",
+		UpdatedAt: latestAsOf(latestAsset.Date, latestFX.Date),
+		Note:      fmt.Sprintf("CNY investor return since %s using USD/CNY reference %s.", pastAsset.Date, pastFX.Date),
+	}
+	panel.Macro["asset_return_spread_cny_"+suffix] = model.Indicator{
+		Value:     roundN(spread*100, 2),
+		Label:     fxReturnSpreadLabel(spread, usdRet),
+		Source:    "computed:cny_return-usd_return",
+		UpdatedAt: latestAsOf(latestAsset.Date, latestFX.Date),
+		Note:      "Positive means CNY depreciation added to local-currency return; negative means CNY appreciation reduced it.",
+	}
+}
+
+func priceStoreKeyForPanel(panel *model.IndicatorPanel) string {
+	if panel == nil {
+		return ""
+	}
+	asset := strings.ToLower(strings.TrimSpace(panel.Asset))
+	switch asset {
+	case "", "btc", "qqq", "spy", "gold":
+		if asset == "" {
+			return "btc"
+		}
+		return asset
+	default:
+		if strings.HasPrefix(asset, "stock_") {
+			return asset
+		}
+		return "stock_" + asset
+	}
 }
 
 func addUSDCNYMacro(panel *model.IndicatorPanel, ps *store.PriceStore) (string, bool, bool) {
@@ -166,12 +396,68 @@ func pointAtLeastDaysBack(points []store.PricePoint, latestDate string, days int
 	return store.PricePoint{}, false
 }
 
+func percentileRankLast(points []store.PricePoint, window int) (float64, bool) {
+	if len(points) == 0 {
+		return 0, false
+	}
+	start := 0
+	if window > 0 && len(points) > window {
+		start = len(points) - window
+	}
+	latest := points[len(points)-1].Close
+	if latest <= 0 {
+		return 0, false
+	}
+	total := 0
+	le := 0
+	for _, p := range points[start:] {
+		if p.Close <= 0 {
+			continue
+		}
+		total++
+		if p.Close <= latest {
+			le++
+		}
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return float64(le) / float64(total), true
+}
+
 func dateDaysBefore(date string, days int) (string, bool) {
 	t, err := time.Parse("2006-01-02", date)
 	if err != nil {
 		return "", false
 	}
 	return t.AddDate(0, 0, -days).Format("2006-01-02"), true
+}
+
+func staleDate(date string, maxAgeDays int) bool {
+	if date == "" || maxAgeDays <= 0 {
+		return false
+	}
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return false
+	}
+	return time.Since(t) > time.Duration(maxAgeDays)*24*time.Hour
+}
+
+func anyLatestStale(ps *store.PriceStore, maxAgeDays int, keys ...string) bool {
+	if ps == nil {
+		return false
+	}
+	for _, key := range keys {
+		latest, ok := ps.Latest(key)
+		if !ok {
+			continue
+		}
+		if staleDate(latest.Date, maxAgeDays) {
+			return true
+		}
+	}
+	return false
 }
 
 func sourceOr(source, fallback string) string {
@@ -214,6 +500,69 @@ func usdCNYTrendLabel(v float64) string {
 		return "mild CNY appreciation"
 	default:
 		return "FX roughly stable"
+	}
+}
+
+func putCallRatioLabel(v float64) string {
+	switch {
+	case v >= 1.2:
+		return "hedging/fear elevated"
+	case v <= 0.7:
+		return "complacency/call chase"
+	default:
+		return "neutral options sentiment"
+	}
+}
+
+func putCallPercentileLabel(p float64) string {
+	switch {
+	case p >= 0.85:
+		return "high fear percentile"
+	case p <= 0.15:
+		return "low fear percentile"
+	default:
+		return "middle percentile"
+	}
+}
+
+func putCallChangeLabel(v float64) string {
+	switch {
+	case v >= 0.2:
+		return "hedging demand rising"
+	case v <= -0.2:
+		return "hedging demand falling"
+	default:
+		return "little change"
+	}
+}
+
+func cnyReturnLabel(v float64) string {
+	switch {
+	case v >= 0.10:
+		return "strong CNY return"
+	case v >= 0.03:
+		return "positive CNY return"
+	case v <= -0.10:
+		return "large CNY drawdown"
+	case v <= -0.03:
+		return "negative CNY return"
+	default:
+		return "flat CNY return"
+	}
+}
+
+func fxReturnSpreadLabel(spread, usdRet float64) string {
+	absSpread := math.Abs(spread)
+	absAsset := math.Abs(usdRet)
+	switch {
+	case absSpread >= 0.02 && absSpread > absAsset:
+		return "FX move dominates local return"
+	case spread >= 0.02:
+		return "CNY depreciation tailwind"
+	case spread <= -0.02:
+		return "CNY appreciation headwind"
+	default:
+		return "FX contribution small"
 	}
 }
 

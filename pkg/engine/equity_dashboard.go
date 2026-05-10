@@ -656,6 +656,15 @@ func scoreEquityDomainEnhanced(name string, data map[string]model.Indicator) (vo
 				vote--
 			}
 		}
+		if pc, ok := data["put_call_ratio"]; ok && pc.IsAvailable() {
+			if pc.Value > 1.2 {
+				bulls = append(bulls, "Put/Call高位→对冲恐惧")
+				vote++
+			} else if pc.Value < 0.7 {
+				bears = append(bears, "Put/Call低位→追涨拥挤")
+				vote--
+			}
+		}
 	}
 	return
 }
@@ -679,6 +688,10 @@ func calcTopProximity(panel *model.IndicatorPanel) float64 {
 		score += math.Max(0, (fg.Value-70)/30)
 		count++
 	}
+	if pc, ok := panel.Positioning["put_call_ratio"]; ok && pc.IsAvailable() {
+		score += math.Max(0, (0.7-pc.Value)/0.3)
+		count++
+	}
 	if count == 0 {
 		return 0
 	}
@@ -698,6 +711,10 @@ func calcBottomProximity(panel *model.IndicatorPanel) float64 {
 	}
 	if fg, ok := panel.Positioning["fear_greed"]; ok && fg.IsAvailable() {
 		score += math.Max(0, (25-fg.Value)/25)
+		count++
+	}
+	if pc, ok := panel.Positioning["put_call_ratio"]; ok && pc.IsAvailable() {
+		score += math.Max(0, (pc.Value-1.2)/0.6)
 		count++
 	}
 	if dd, ok := panel.Cycle["drawdown_200d"]; ok && dd.IsAvailable() {

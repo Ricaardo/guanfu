@@ -31,7 +31,7 @@ return math.Sqrt(sum / weightSum), matched, true
 曾考虑在 `Build()` 内部把 weight 按 `Σ=1` 归一化。结论:**不做**,原因:
 
 1. 把调参的自由度留给 maintainer。显式归一化后,要降一个 feature 的权重必须提高其他所有 feature,改一处等于改整个 bundle。
-2. 目前回测稳。v2 B2/B3 波加 VIX (0.55) + CAPE → 0.8 后 EquityExtractors 权重总和从 2.45 升到 3.25,分布明显变化;回测未恶化。证明当前非归一化策略**具备鲁棒性**。
+2. 目前回测稳。v2 B2/B3 波加 VIX (0.55) + CAPE → 0.8 后 EquityExtractors 权重总和从 2.45 升到 3.25;再加入 put/call ratio / 30d change / 252d percentile 后到 4.00,分布明显变化;回测未恶化时才保留权重。证明当前非归一化策略**具备鲁棒性**,但新增源仍需按回归预算观察。
 3. G3 coverage 改为 weight 比率后,跨 bundle 比较的 coverage 已经 apples-to-apples(Σ(有效 weight)/Σ(bundle 总 weight))—— 没有再次归一化的必要。
 
 ### 新 feature 加权原则
@@ -45,7 +45,7 @@ return math.Sqrt(sum / weightSum), matched, true
 
 ### 何时走 RFC 引入显式归一化
 
-如果有一天加 feature 导致 EquityExtractors 权重总和 > 5(当前 3.25 的 1.5 倍),或某个 bundle 的单 feature weight 占比超过 **40%** (当前 CAPE 0.8 / 3.25 ≈ 25% 是上限),则需要 RFC 决定是否统一归一化到 Σ=2.5 左右。
+如果有一天加 feature 导致 EquityExtractors 权重总和 > 6(当前 4.00 的 1.5 倍),或某个 bundle 的单 feature weight 占比超过 **40%** (当前 CAPE 0.8 / 4.00 = 20% 是上限),则需要 RFC 决定是否统一归一化到 Σ=2.5 左右。
 
 ---
 
@@ -53,7 +53,7 @@ return math.Sqrt(sum / weightSum), matched, true
 
 ### 现状
 
-`guanfu refresh` 注册了 26 个 `Source`,但 BTC 面板依赖的几个数据**不走 refresh 框架**:
+`guanfu refresh` 注册了 28 个 `Source`,但 BTC 面板依赖的几个数据**不走 refresh 框架**:
 
 | 源 | 走哪 | TTL |
 |---|---|---|
@@ -76,7 +76,7 @@ return math.Sqrt(sum / weightSum), matched, true
 
 什么情况下值得改成 `Source`:
 - 源的 API 限流到让 panel-build 被拖慢(目前 90s 冷启动可接受)
-- 用户要求 `guanfu refresh` 一次搞定所有数据(目前 26 个 source 之外的都靠 panel-build 触发拉取)
+- 用户要求 `guanfu refresh` 一次搞定所有数据(目前 28 个 source 之外的都靠 panel-build 触发拉取)
 - 新加 BTC 链上特征需要多年历史而非即时值
 
 短期内不做。**记录在此**,未来如果有人发起要改,先看这段再说。

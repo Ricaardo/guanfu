@@ -140,8 +140,26 @@ func healthEntry(source, status, asOf string, fallback bool, note string, warnin
 		Status:       status,
 		AsOf:         asOf,
 		FallbackUsed: fallback,
+		Impact:       sourceHealthImpact(source),
 		Note:         note,
 		Warnings:     warnings,
+	}
+}
+
+func sourceHealthImpact(source string) string {
+	switch source {
+	case "binance_spot":
+		return "both"
+	case "fred_macro", "cross_asset":
+		return "both"
+	case "investor_fx", "global_central_bank_rates":
+		return "market_reading"
+	case "binance_futures", "coingecko_market", "coingecko_top50",
+		"alternative_fear_greed", "mempool_space", "sosovalue_etf",
+		"deribit_options", "coinmetrics_onchain":
+		return "market_reading"
+	default:
+		return "optional"
 	}
 }
 

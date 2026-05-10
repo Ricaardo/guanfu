@@ -236,6 +236,7 @@ type SourceHealth struct {
 	Status       string   `json:"status"` // ok, partial, stale, missing, warning
 	AsOf         string   `json:"as_of,omitempty"`
 	FallbackUsed bool     `json:"fallback_used,omitempty"`
+	Impact       string   `json:"impact,omitempty"` // forecast, market_reading, both, optional
 	Note         string   `json:"note,omitempty"`
 	Warnings     []string `json:"warnings,omitempty"`
 }

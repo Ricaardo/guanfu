@@ -65,16 +65,22 @@ func (f *FREDSource) DisplayName() string { return f.StoreKey + " (" + f.Descrip
 // Refresh fetches the gap between PriceStore last_date and today from FRED.
 // On full import, walks back to f.StartDate.
 func (f *FREDSource) Refresh(ctx context.Context, s *store.PriceStore) (*RefreshResult, error) {
+	stale, lastDate := staleThreshold(s, f.StoreKey)
 	apiKey := strings.TrimSpace(os.Getenv("FRED_API_KEY"))
 	if apiKey == "" {
+		count, _ := s.Count(f.StoreKey)
 		return &RefreshResult{
 			Key: f.StoreKey, DisplayName: f.DisplayName(),
-			Mode:  "skip",
-			Error: "FRED_API_KEY not set",
+			Mode:       "skip",
+			SkipReason: "config",
+			Stale:      stale,
+			Action:     "configure",
+			Total:      count,
+			LastDate:   lastDate,
+			Error:      "FRED_API_KEY not set",
 		}, nil
 	}
 
-	stale, lastDate := staleThreshold(s, f.StoreKey)
 	if !stale {
 		return freshSkipResult(f.StoreKey, f.DisplayName(), lastDate, s), nil
 	}
@@ -100,7 +106,7 @@ func (f *FREDSource) Refresh(ctx context.Context, s *store.PriceStore) (*Refresh
 		count, _ := s.Count(f.StoreKey)
 		return &RefreshResult{
 			Key: f.StoreKey, DisplayName: f.DisplayName(),
-			Mode: mode, Added: 0, Total: count, LastDate: lastDate,
+			Mode: mode, SkipReason: "no_new_data", Added: 0, Total: count, LastDate: lastDate,
 		}, nil
 	}
 

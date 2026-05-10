@@ -58,12 +58,19 @@ func (s StooqPutCallSource) Refresh(ctx context.Context, ps *store.PriceStore) (
 			Key:         s.Key(),
 			DisplayName: s.DisplayName(),
 			Mode:        "skip",
+			SkipReason:  "config",
+			Stale:       stale,
+			Action:      "configure",
 			Total:       count,
 			LastDate:    lastDate,
 			Error:       stooqAPIKeyEnv + " not set; Stooq now requires an API key for CSV downloads",
 		}, nil
 	}
 
+	mode := "full"
+	if lastDate != "" {
+		mode = "incremental"
+	}
 	points, err := fetchStooqCSV(ctx, stooqURLWithAPIKey(stooqPutCallURL, apiKey), "stooq:^PC")
 	if err != nil {
 		return nil, err
@@ -71,11 +78,10 @@ func (s StooqPutCallSource) Refresh(ctx context.Context, ps *store.PriceStore) (
 	if len(points) == 0 {
 		return &RefreshResult{
 			Key: s.Key(), DisplayName: s.DisplayName(),
-			Mode: "full", Added: 0, LastDate: lastDate,
+			Mode: mode, SkipReason: "no_new_data", Added: 0, LastDate: lastDate,
 		}, nil
 	}
 
-	mode := "full"
 	var added int
 	if lastDate == "" {
 		if err := ps.Save(s.Key(), points); err != nil {

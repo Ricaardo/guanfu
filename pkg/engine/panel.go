@@ -40,7 +40,8 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	panel := &model.IndicatorPanel{
-		Date: dataDate,
+		Asset: "btc",
+		Date:  dataDate,
 		Snapshot: model.SnapshotData{
 			BTCPrice:            f(snap.BTCPrice),
 			ETHPrice:            f(snap.ETHPrice),

@@ -260,6 +260,48 @@ func VIXExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	}
 }
 
+// PutCallRatioExtractor returns CBOE total put/call ratio features for broad
+// US equity forecasts. High values mean hedging/fear; low values mean
+// complacency or call-chasing.
+func PutCallRatioExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	pts, err := s.Load("stooq_putcall")
+	if err != nil || len(pts) < 60 {
+		return nil
+	}
+	byDate := makeDateMap(pts)
+	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		if i < 30 {
+			return nil, false
+		}
+		now := lookupDate(pts, byDate, points[i].Date)
+		past := lookupDate(pts, byDate, points[i-30].Date)
+		if now <= 0 || past <= 0 {
+			return nil, false
+		}
+		change := now - past
+		out := []forecast.FeatureValue{
+			{
+				Name: "put_call_ratio", Value: math.Round(now*1000) / 1000,
+				Normalized: math.Round(clipE((now-0.95)/0.35, 3)*1000) / 1000,
+				Weight:     0.30, Note: "CBOE total put/call ratio",
+			},
+			{
+				Name: "put_call_30d_change", Value: math.Round(change*1000) / 1000,
+				Normalized: math.Round(clipE(change/0.25, 3)*1000) / 1000,
+				Weight:     0.20, Note: "CBOE total put/call 30d change",
+			},
+		}
+		if pct, ok := trailingPercentile(pts, points[i].Date, 252, now); ok {
+			out = append(out, forecast.FeatureValue{
+				Name: "put_call_252d_percentile", Value: math.Round(pct*1000) / 10,
+				Normalized: math.Round(clipE((pct-0.5)/0.25, 3)*1000) / 1000,
+				Weight:     0.25, Note: "CBOE total put/call trailing 252-observation percentile",
+			})
+		}
+		return out, true
+	}
+}
+
 // ─── Cross-asset Lead-Lag ───────────────────────────────
 
 // LeadLagExtractor computes if this asset leads/lags another at 7d lag.
@@ -328,6 +370,41 @@ func lookupDate(pts []store.PricePoint, dateMap map[string]float64, date string)
 		}
 	}
 	return 0
+}
+
+func trailingPercentile(pts []store.PricePoint, date string, window int, value float64) (float64, bool) {
+	if len(pts) == 0 || value <= 0 {
+		return 0, false
+	}
+	end := -1
+	for i := len(pts) - 1; i >= 0; i-- {
+		if pts[i].Date <= date {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		return 0, false
+	}
+	start := 0
+	if window > 0 && end+1 > window {
+		start = end + 1 - window
+	}
+	total := 0
+	le := 0
+	for _, p := range pts[start : end+1] {
+		if p.Close <= 0 {
+			continue
+		}
+		total++
+		if p.Close <= value {
+			le++
+		}
+	}
+	if total < 60 {
+		return 0, false
+	}
+	return float64(le) / float64(total), true
 }
 
 func pearsonE(x, y []float64) float64 {

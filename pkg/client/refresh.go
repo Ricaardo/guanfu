@@ -33,7 +33,11 @@ type Source interface {
 type RefreshResult struct {
 	Key         string `json:"key"`
 	DisplayName string `json:"display_name"`
-	Mode        string `json:"mode"` // "skip" | "full" | "incremental" | "fail"
+	Mode        string `json:"mode"`                  // "skip" | "full" | "incremental" | "fail"
+	SkipReason  string `json:"skip_reason,omitempty"` // fresh | config | no_new_data | not_applicable
+	Stale       bool   `json:"stale,omitempty"`
+	Action      string `json:"action,omitempty"` // ignore | configure | refresh | investigate
+	Impact      string `json:"impact,omitempty"` // forecast | market_reading | both | optional
 	Added       int    `json:"added"`
 	Total       int    `json:"total"`
 	LastDate    string `json:"last_date"`
@@ -58,6 +62,7 @@ func RefreshAll(ctx context.Context, s *store.PriceStore, sources []Source) []*R
 			r.Mode = "fail"
 			r.Error = err.Error()
 		}
+		enrichRefreshResult(r)
 		r.Duration = time.Since(start).Round(time.Millisecond).String()
 		out = append(out, r)
 	}
@@ -85,6 +90,8 @@ func freshSkipResult(key, name, lastDate string, s *store.PriceStore) *RefreshRe
 		Key:         key,
 		DisplayName: name,
 		Mode:        "skip",
+		SkipReason:  "fresh",
+		Action:      "ignore",
 		Total:       count,
 		LastDate:    lastDate,
 	}
@@ -95,21 +102,86 @@ func FormatRefreshTable(results []*RefreshResult) string {
 	if len(results) == 0 {
 		return "no refresh sources configured"
 	}
-	out := fmt.Sprintf("%-22s %-12s %8s %12s %10s\n", "DATASET", "MODE", "ADDED", "TOTAL", "LAST_DATE")
-	out += fmt.Sprintf("%-22s %-12s %8s %12s %10s\n", "-------", "----", "-----", "-----", "---------")
+	out := fmt.Sprintf("%-22s %-14s %-11s %-11s %8s %12s %10s\n", "DATASET", "MODE", "REASON", "ACTION", "ADDED", "TOTAL", "LAST_DATE")
+	out += fmt.Sprintf("%-22s %-14s %-11s %-11s %8s %12s %10s\n", "-------", "----", "------", "------", "-----", "-----", "---------")
 	for _, r := range results {
 		mode := r.Mode
 		if r.Error != "" {
 			if r.Mode == "skip" {
-				mode = "SKIP: " + truncate(r.Error, 40)
+				mode = "SKIP"
 			} else {
-				mode = "FAIL: " + truncate(r.Error, 40)
+				mode = "FAIL"
 			}
 		}
-		out += fmt.Sprintf("%-22s %-12s %8d %12d %10s\n",
-			truncate(r.Key, 22), mode, r.Added, r.Total, r.LastDate)
+		reason := r.SkipReason
+		if reason == "" && r.Error != "" {
+			reason = truncate(r.Error, 11)
+		}
+		action := r.Action
+		if action == "" {
+			action = refreshAction(r)
+		}
+		last := r.LastDate
+		if r.Stale && last != "" {
+			last += "*"
+		}
+		out += fmt.Sprintf("%-22s %-14s %-11s %-11s %8d %12d %10s\n",
+			truncate(r.Key, 22), truncate(mode, 14), truncate(reason, 11), truncate(action, 11), r.Added, r.Total, last)
+		if r.Error != "" {
+			out += fmt.Sprintf("  %-22s %s\n", "", truncate(r.Error, 96))
+		}
 	}
+	out += "\n* last_date is stale for its source cadence\n"
 	return out
+}
+
+func enrichRefreshResult(r *RefreshResult) {
+	if r == nil {
+		return
+	}
+	if r.Impact == "" {
+		r.Impact = refreshImpact(r.Key)
+	}
+	if r.Action == "" {
+		r.Action = refreshAction(r)
+	}
+}
+
+func refreshAction(r *RefreshResult) string {
+	if r == nil {
+		return ""
+	}
+	switch {
+	case r.Mode == "fail":
+		return "investigate"
+	case r.Mode == "skip" && r.SkipReason == "config":
+		return "configure"
+	case r.Mode == "skip" && r.SkipReason == "fresh":
+		return "ignore"
+	case r.Stale:
+		return "refresh"
+	case r.Mode == "full" || r.Mode == "incremental":
+		return "ignore"
+	default:
+		return "investigate"
+	}
+}
+
+func refreshImpact(key string) string {
+	switch key {
+	case "btc", "qqq", "spy", "gold", "spx_cape", "fred_dxy", "fred_dgs10",
+		"fred_dfii10", "fred_yield_curve", "fred_breakeven", "fred_hy_spread",
+		"fred_dgs3mo", "vixy", "uup", "tlt", "stooq_putcall":
+		return "forecast"
+	case "usd_cny", "fred_fed_funds", "fred_ecb_deposit_rate",
+		"fred_boj_call_rate", "fred_pboc_interbank_rate", "cmc_market_context",
+		"deribit_options", "deribit_dvol", "deribit_skew_25d_pct", "deribit_skew_expiry_days":
+		return "market_reading"
+	case "defillama_stablecoin_supply", "coinbase_btc", "stock_*":
+		return "optional"
+	default:
+		return "optional"
+	}
 }
 
 func truncate(s string, n int) string {

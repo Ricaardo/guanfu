@@ -47,7 +47,7 @@ make all   # vet + test + build 3 binary 到 bin/
 
 ```bash
 guanfu --version                    # 确认版本
-guanfu refresh --dry-run            # 列 26 个数据源(不拉数据)
+guanfu refresh --dry-run            # 列 28 个数据源(不拉数据)
 guanfu status --frank               # 按可靠性分类 (asset, horizon)
 ```
 
@@ -59,7 +59,7 @@ guanfu status --frank               # 按可靠性分类 (asset, horizon)
 
 ```bash
 export FRED_API_KEY=your_key
-guanfu refresh                       # 26 个 source 串行拉
+guanfu refresh                       # 28 个 source 串行拉
 ```
 
 - 数据落在 `~/.guanfu/prices/<asset>.json`
@@ -318,6 +318,7 @@ guanfu refresh --dry-run             # 不拉数据,只列计划
 │   ├── btc.json / qqq.json / spy.json / gold.json
 │   ├── fred_*.json / spx_cape.json
 │   ├── defillama_stablecoin_supply.json / stooq_putcall.json / coinbase_btc.json
+│   ├── deribit_dvol.json / deribit_skew_25d_pct.json / deribit_skew_expiry_days.json
 │   └── stock_*.json         # 任意美股
 ├── history.db               # SQLite:15 非价格指标分位(730d 滚动)
 ├── panels/                  # (可选)每日盘面 archive

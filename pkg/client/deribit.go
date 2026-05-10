@@ -26,6 +26,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/Ricaardo/guanfu/pkg/store"
 )
 
 // DeribitOptionsData — DVOL + skew. Available bool tells caller whether to use it.
@@ -48,7 +50,109 @@ const (
 	deribitBase         = "https://www.deribit.com/api/v2/public"
 	deribitDVOLLookback = 365 // 1 year of daily DVOL
 	deribitTimeout      = 10 * time.Second
+
+	deribitOptionsSourceKey = "deribit_options"
+	deribitDVOLStoreKey     = "deribit_dvol"
+	deribitSkewStoreKey     = "deribit_skew_25d_pct"
+	deribitSkewExpiryKey    = "deribit_skew_expiry_days"
 )
+
+// DeribitOptionsSource persists BTC option-market context for local history.
+// DVOL is a one-year daily history pull; 25Δ skew is a latest daily snapshot.
+type DeribitOptionsSource struct{}
+
+func (DeribitOptionsSource) Key() string { return deribitOptionsSourceKey }
+func (DeribitOptionsSource) DisplayName() string {
+	return "deribit_options (BTC DVOL + 25d skew)"
+}
+
+func (d DeribitOptionsSource) Refresh(ctx context.Context, ps *store.PriceStore) (*RefreshResult, error) {
+	staleDVOL, lastDate := staleThreshold(ps, deribitDVOLStoreKey)
+	skewLatest, skewOK := ps.LatestSeries(deribitSkewStoreKey)
+	staleSkew := !skewOK || dateOlderThan(skewLatest.Date, 24*time.Hour)
+	if !staleDVOL && !staleSkew {
+		total, _ := ps.Count(deribitDVOLStoreKey)
+		return &RefreshResult{
+			Key: d.Key(), DisplayName: d.DisplayName(),
+			Mode: "skip", SkipReason: "fresh", Action: "ignore",
+			Total: total, LastDate: lastDate,
+		}, nil
+	}
+
+	mode := "full"
+	if lastDate != "" {
+		mode = "incremental"
+	}
+	hc := &http.Client{Timeout: deribitTimeout}
+	added := 0
+
+	dvolPoints, _, errDVOL := fetchDVOLDailyPoints(ctx, hc, deribitDVOLLookback)
+	if errDVOL == nil && len(dvolPoints) > 0 {
+		before, _ := ps.Count(deribitDVOLStoreKey)
+		if lastDate == "" {
+			if err := ps.Save(deribitDVOLStoreKey, dvolPoints); err != nil {
+				return nil, fmt.Errorf("%s save: %w", deribitDVOLStoreKey, err)
+			}
+		} else {
+			if err := ps.Append(deribitDVOLStoreKey, dvolPoints); err != nil {
+				return nil, fmt.Errorf("%s append: %w", deribitDVOLStoreKey, err)
+			}
+		}
+		after, _ := ps.Count(deribitDVOLStoreKey)
+		if after > before {
+			added += after - before
+		}
+	}
+
+	skew, expiry, asOf, errSkew := fetch25DSkewNearTerm(ctx, hc)
+	if errSkew == nil {
+		date := asOf.UTC().Format("2006-01-02")
+		before, _ := ps.CountSeries(deribitSkewStoreKey)
+		if err := ps.AppendSeries(deribitSkewStoreKey, []store.PricePoint{{
+			Date: date, Close: skew, Source: "deribit:25d_skew",
+		}}); err != nil {
+			return nil, fmt.Errorf("%s append: %w", deribitSkewStoreKey, err)
+		}
+		after, _ := ps.CountSeries(deribitSkewStoreKey)
+		if after > before {
+			added += after - before
+		}
+
+		if days, ok := deribitExpiryDays(expiry, asOf); ok {
+			beforeExpiry, _ := ps.Count(deribitSkewExpiryKey)
+			if err := ps.Append(deribitSkewExpiryKey, []store.PricePoint{{
+				Date: date, Close: days, Source: "deribit:25d_skew_expiry",
+			}}); err != nil {
+				return nil, fmt.Errorf("%s append: %w", deribitSkewExpiryKey, err)
+			}
+			afterExpiry, _ := ps.Count(deribitSkewExpiryKey)
+			if afterExpiry > beforeExpiry {
+				added += afterExpiry - beforeExpiry
+			}
+		}
+	}
+
+	if errDVOL != nil && errSkew != nil {
+		return nil, fmt.Errorf("deribit options unavailable: DVOL: %v; skew: %v", errDVOL, errSkew)
+	}
+	total, _ := ps.Count(deribitDVOLStoreKey)
+	last, _ := ps.LastDate(deribitDVOLStoreKey)
+	return &RefreshResult{
+		Key: d.Key(), DisplayName: d.DisplayName(),
+		Mode: mode, Added: added, Total: total, LastDate: last,
+	}, nil
+}
+
+func dateOlderThan(date string, age time.Duration) bool {
+	if date == "" {
+		return true
+	}
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return true
+	}
+	return time.Since(t) > age
+}
 
 // FetchBTCDeribitOptions — best-effort. Never returns an error; failures show up
 // as Available=false on individual sub-fields so the caller can keep going.
@@ -95,6 +199,21 @@ type dvolResp struct {
 }
 
 func fetchDVOLDaily(ctx context.Context, hc *http.Client, lookbackDays int) (current float64, hist []float64, asOf time.Time, err error) {
+	points, asOf, err := fetchDVOLDailyPoints(ctx, hc, lookbackDays)
+	if err != nil {
+		return 0, nil, time.Time{}, err
+	}
+	hist = make([]float64, 0, len(points))
+	for _, p := range points {
+		hist = append(hist, p.Close)
+	}
+	if len(hist) == 0 {
+		return 0, nil, time.Time{}, fmt.Errorf("deribit DVOL all rows invalid")
+	}
+	return hist[len(hist)-1], hist, asOf, nil
+}
+
+func fetchDVOLDailyPoints(ctx context.Context, hc *http.Client, lookbackDays int) ([]store.PricePoint, time.Time, error) {
 	end := time.Now().UnixMilli()
 	start := time.Now().Add(-time.Duration(lookbackDays+5) * 24 * time.Hour).UnixMilli()
 	url := fmt.Sprintf("%s/get_volatility_index_data?currency=BTC&start_timestamp=%d&end_timestamp=%d&resolution=86400",
@@ -102,18 +221,17 @@ func fetchDVOLDaily(ctx context.Context, hc *http.Client, lookbackDays int) (cur
 
 	body, err := getBody(ctx, hc, url)
 	if err != nil {
-		return 0, nil, time.Time{}, err
+		return nil, time.Time{}, err
 	}
 	var parsed dvolResp
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return 0, nil, time.Time{}, fmt.Errorf("deribit DVOL parse: %w", err)
+		return nil, time.Time{}, fmt.Errorf("deribit DVOL parse: %w", err)
 	}
 	if len(parsed.Result.Data) == 0 {
-		return 0, nil, time.Time{}, fmt.Errorf("deribit DVOL returned empty data")
+		return nil, time.Time{}, fmt.Errorf("deribit DVOL returned empty data")
 	}
-	// Each row: [ts_ms, open, high, low, close]. Take close.
-	closes := make([]float64, 0, len(parsed.Result.Data))
-	var lastTs int64
+	points := make([]store.PricePoint, 0, len(parsed.Result.Data))
+	var last time.Time
 	for _, row := range parsed.Result.Data {
 		if len(row) < 5 {
 			continue
@@ -122,13 +240,30 @@ func fetchDVOLDaily(ctx context.Context, hc *http.Client, lookbackDays int) (cur
 		if math.IsNaN(c) || math.IsInf(c, 0) || c <= 0 {
 			continue
 		}
-		closes = append(closes, c)
-		lastTs = int64(row[0])
+		ts := time.UnixMilli(int64(row[0])).UTC()
+		last = ts
+		points = append(points, store.PricePoint{
+			Date:   ts.Format("2006-01-02"),
+			Close:  c,
+			Source: "deribit:DVOL",
+		})
 	}
-	if len(closes) == 0 {
-		return 0, nil, time.Time{}, fmt.Errorf("deribit DVOL all rows invalid")
+	if len(points) == 0 {
+		return nil, time.Time{}, fmt.Errorf("deribit DVOL all rows invalid")
 	}
-	return closes[len(closes)-1], closes, time.UnixMilli(lastTs).UTC(), nil
+	return store.NormalizePricePoints(points), last, nil
+}
+
+func deribitExpiryDays(expiry string, asOf time.Time) (float64, bool) {
+	exp, err := time.Parse("2006-01-02", expiry)
+	if err != nil {
+		return 0, false
+	}
+	days := math.Ceil(exp.Sub(asOf.UTC().Truncate(24*time.Hour)).Hours() / 24)
+	if days <= 0 || math.IsNaN(days) || math.IsInf(days, 0) {
+		return 0, false
+	}
+	return days, true
 }
 
 // --- 25-delta skew ---

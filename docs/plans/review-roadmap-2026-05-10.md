@@ -1,5 +1,9 @@
 # Guanfu Review Roadmap - 2026-05-10
 
+Status: implemented in this work pass. P3 candidate sources are wired with
+source-health gates; promotion weight should still be reviewed by ablation when
+fresh historical coverage is available.
+
 This plan turns the latest project review into an implementation roadmap. The
 goal is to improve two product modes without reintroducing China A-share or Hong
 Kong stock logic:
@@ -34,6 +38,8 @@ Current state:
 
 - BTC source health exists.
 - USD/CNY and global central-bank rates have been added to source health.
+- QQQ/SPY put/call and BTC Deribit options now expose source health through
+  refreshed PriceStore keys or live BTC source health.
 
 Acceptance:
 
@@ -54,6 +60,8 @@ Known cases:
 - `stooq_putcall` currently skips when `STOOQ_APIKEY` is not set.
 - `fred_pboc_interbank_rate` is stale and should be treated as macro background,
   not as a strong forecast input.
+- `deribit_options` is market-reading impact only; if skew/DVOL is unavailable,
+  BTC price history and forecast remain usable.
 
 Acceptance:
 
@@ -205,7 +213,9 @@ Rule:
 
 Candidate sources:
 
-- put/call replacement source or `STOOQ_APIKEY` configuration
+- put/call replacement source or `STOOQ_APIKEY` configuration (implemented via
+  `stooq_putcall`; panel and forecast bundle now expose ratio, 30d change, and
+  252-observation percentile when data exists)
 - historical PE/PB if a reliable source exists
 - CAPE ablation against current equity bundle
 

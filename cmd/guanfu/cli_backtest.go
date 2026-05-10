@@ -62,30 +62,37 @@ func runBacktest(asset string, jsonOut, pretty, plain bool) {
 
 func runBacktestJSON(asset string, points []forecast.Point, hasCrossAsset bool, horizons []int, optsV1 forecast.Options, pretty bool) {
 	type btH struct {
-		Days        int     `json:"days"`
-		SampleCount int     `json:"sample_count"`
-		DirHitRate  float64 `json:"dir_hit_rate_pct"`
-		PITMean     float64 `json:"pit_mean"`
-		CRPS        float64 `json:"crps"`
+		Days              int     `json:"days"`
+		SampleCount       int     `json:"sample_count"`
+		DirHitRate        float64 `json:"dir_hit_rate_pct"`
+		PITMean           float64 `json:"pit_mean"`
+		CRPS              float64 `json:"crps"`
+		FeatureCoverage   float64 `json:"feature_coverage_pct"`
+		ConformalCoverage float64 `json:"conformal_realized_coverage_pct,omitempty"`
 	}
 	type btR struct {
-		Version    string `json:"version"`
-		Features   string `json:"features"`
-		TotalTests int    `json:"total_tests"`
-		Horizons   []btH  `json:"horizons"`
+		Version            string   `json:"version"`
+		Features           string   `json:"features"`
+		CurrentCoveragePct float64  `json:"current_feature_coverage_pct"`
+		MissingFeatures    []string `json:"missing_features,omitempty"`
+		TotalTests         int      `json:"total_tests"`
+		Horizons           []btH    `json:"horizons"`
 	}
 
 	results := []btR{}
 	r1, _ := backtest.Run(points, 800, 60, optsV1.Extractors, horizons)
 	if r1 != nil {
-		br := btR{Version: "v1_asset_bundle", Features: backtestFeatureLabel(asset), TotalTests: r1.TotalTests}
+		diag := diagnoseFeatureBundle(asset, points, optsV1.Extractors)
+		br := btR{Version: "v1_asset_bundle", Features: backtestFeatureLabel(asset), CurrentCoveragePct: diag.CurrentCoveragePct, MissingFeatures: diag.MissingFeatures, TotalTests: r1.TotalTests}
 		for _, h := range horizons {
 			if hm := r1.ByHorizon[h]; hm != nil {
 				br.Horizons = append(br.Horizons, btH{
 					Days: h, SampleCount: hm.SampleCount,
-					DirHitRate: math.Round(hm.DirectionHitRate()*10000) / 100,
-					PITMean:    math.Round(hm.PITMean()*1000) / 1000,
-					CRPS:       math.Round(hm.CRPSScore()*10000) / 10000,
+					DirHitRate:        math.Round(hm.DirectionHitRate()*10000) / 100,
+					PITMean:           math.Round(hm.PITMean()*1000) / 1000,
+					CRPS:              math.Round(hm.CRPSScore()*10000) / 10000,
+					FeatureCoverage:   math.Round(hm.FeatureCoverageMean()*10000) / 100,
+					ConformalCoverage: math.Round(hm.ConformalHitRate()*10000) / 100,
 				})
 			}
 		}
@@ -103,9 +110,11 @@ func runBacktestJSON(asset string, points []forecast.Point, hasCrossAsset bool, 
 				if hm := r2.ByHorizon[h]; hm != nil {
 					br.Horizons = append(br.Horizons, btH{
 						Days: h, SampleCount: hm.SampleCount,
-						DirHitRate: math.Round(hm.DirectionHitRate()*10000) / 100,
-						PITMean:    math.Round(hm.PITMean()*1000) / 1000,
-						CRPS:       math.Round(hm.CRPSScore()*10000) / 10000,
+						DirHitRate:        math.Round(hm.DirectionHitRate()*10000) / 100,
+						PITMean:           math.Round(hm.PITMean()*1000) / 1000,
+						CRPS:              math.Round(hm.CRPSScore()*10000) / 10000,
+						FeatureCoverage:   math.Round(hm.FeatureCoverageMean()*10000) / 100,
+						ConformalCoverage: math.Round(hm.ConformalHitRate()*10000) / 100,
 					})
 				}
 			}
@@ -138,16 +147,19 @@ func runBacktestHuman(asset string, points []forecast.Point, hasCrossAsset bool,
 	fmt.Println(strings.Repeat("─", 72))
 
 	fmt.Printf("V1 — %s\n", backtestFeatureLabel(asset))
+	diag := diagnoseFeatureBundle(asset, points, optsV1.Extractors)
+	fmt.Printf("  特征覆盖: 当前 %.0f%% (%d/%d); missing: %s\n",
+		diag.CurrentCoveragePct, diag.CurrentFeatureCount, diag.ExpectedFeatureCount, missingFeatureText(diag.MissingFeatures))
 	r1, err := backtest.Run(points, 800, 60, optsV1.Extractors, horizons)
 	if err != nil {
 		fmt.Printf("  失败: %v\n", err)
 	} else {
 		fmt.Printf("  测试窗口: %d\n", r1.TotalTests)
-		fmt.Printf("  %-6s %8s %10s %8s %8s\n", "周期", "样本数", "方向命中", "PIT", "CRPS")
+		fmt.Printf("  %-6s %8s %10s %8s %8s %8s %8s\n", "周期", "样本数", "方向命中", "PIT", "CRPS", "FeatCov", "ConfCov")
 		for _, h := range horizons {
 			if hm := r1.ByHorizon[h]; hm != nil {
-				fmt.Printf("  %3dd   %7d %9.1f%% %7.2f %7.4f\n",
-					h, hm.SampleCount, hm.DirectionHitRate()*100, hm.PITMean(), hm.CRPSScore())
+				fmt.Printf("  %3dd   %7d %9.1f%% %7.2f %7.4f %7.0f%% %7.0f%%\n",
+					h, hm.SampleCount, hm.DirectionHitRate()*100, hm.PITMean(), hm.CRPSScore(), hm.FeatureCoverageMean()*100, hm.ConformalHitRate()*100)
 			}
 		}
 	}
@@ -163,7 +175,7 @@ func runBacktestHuman(asset string, points []forecast.Point, hasCrossAsset bool,
 			fmt.Printf("  失败: %v\n", err)
 		} else {
 			fmt.Printf("  测试窗口: %d\n", r2.TotalTests)
-			fmt.Printf("  %-6s %8s %10s %8s %8s\n", "周期", "样本数", "方向命中", "PIT", "CRPS")
+			fmt.Printf("  %-6s %8s %10s %8s %8s %8s %8s\n", "周期", "样本数", "方向命中", "PIT", "CRPS", "FeatCov", "ConfCov")
 			for _, h := range horizons {
 				if hm := r2.ByHorizon[h]; hm != nil {
 					delta := ""
@@ -171,15 +183,15 @@ func runBacktestHuman(asset string, points []forecast.Point, hasCrossAsset bool,
 						d := hm.DirectionHitRate() - hm1.DirectionHitRate()
 						delta = fmt.Sprintf("  Δ%+.1f%%", d*100)
 					}
-					fmt.Printf("  %3dd   %7d %9.1f%% %7.2f %7.4f%s\n",
-						h, hm.SampleCount, hm.DirectionHitRate()*100, hm.PITMean(), hm.CRPSScore(), delta)
+					fmt.Printf("  %3dd   %7d %9.1f%% %7.2f %7.4f %7.0f%% %7.0f%%%s\n",
+						h, hm.SampleCount, hm.DirectionHitRate()*100, hm.PITMean(), hm.CRPSScore(), hm.FeatureCoverageMean()*100, hm.ConformalHitRate()*100, delta)
 				}
 			}
 		}
 	}
 
 	fmt.Println(strings.Repeat("─", 72))
-	fmt.Println("方向命中 >50% = 优于随机。Δ = v2-v1 差异。PIT~0.5=校准好。CRPS↓=优。")
+	fmt.Println("方向命中 >50% = 优于随机。Δ = v2-v1 差异。PIT~0.5=校准好。CRPS↓=优。FeatCov=实际特征覆盖。ConfCov=conformal 区间实际覆盖。")
 	fmt.Println("不是投资建议。")
 }
 
@@ -214,10 +226,82 @@ func backtestFeatureLabel(asset string) string {
 	case "btc":
 		return "BTC core price/cycle features"
 	case "qqq", "spy":
-		return "US equity technical + macro features"
+		return "US equity technical + macro + put/call features"
 	case "gold":
 		return "gold technical + macro features"
 	default:
 		return "generic technical features"
 	}
+}
+
+type featureDiagnostics struct {
+	CurrentCoveragePct   float64
+	CurrentFeatureCount  int
+	ExpectedFeatureCount int
+	MissingFeatures      []string
+}
+
+func diagnoseFeatureBundle(asset string, points []forecast.Point, extractors []forecast.FeatureExtractor) featureDiagnostics {
+	diag := featureDiagnostics{
+		ExpectedFeatureCount: len(expectedFeatureNamesForAsset(asset)),
+		MissingFeatures:      []string{},
+	}
+	if len(points) < 250 || len(extractors) == 0 {
+		diag.MissingFeatures = expectedFeatureNamesForAsset(asset)
+		return diag
+	}
+	opts := forecast.DefaultOptions()
+	opts.Horizons = []int{30}
+	opts.TopK = 21
+	opts.Asset = asset
+	opts.Extractors = extractors
+	fc, err := forecast.Build(points, opts)
+	if err != nil || fc == nil {
+		diag.MissingFeatures = expectedFeatureNamesForAsset(asset)
+		return diag
+	}
+	diag.CurrentCoveragePct = math.Round(fc.Coverage.FeatureCoverage*10000) / 100
+	diag.CurrentFeatureCount = fc.Coverage.FeatureCount
+	seen := map[string]bool{}
+	for _, fv := range fc.CurrentFeatures {
+		seen[fv.Name] = true
+	}
+	for _, name := range expectedFeatureNamesForAsset(asset) {
+		if !seen[name] {
+			diag.MissingFeatures = append(diag.MissingFeatures, name)
+		}
+	}
+	diag.ExpectedFeatureCount = len(expectedFeatureNamesForAsset(asset))
+	if diag.ExpectedFeatureCount > 0 {
+		diag.CurrentCoveragePct = math.Round(float64(diag.CurrentFeatureCount)/float64(diag.ExpectedFeatureCount)*10000) / 100
+	}
+	return diag
+}
+
+func expectedFeatureNamesForAsset(asset string) []string {
+	generic := []string{
+		"return_30d", "return_90d", "return_180d", "drawdown_90d",
+		"mayer_multiple", "realized_vol_30d", "rsi_14",
+	}
+	switch asset {
+	case "btc":
+		return append(append([]string{}, generic...),
+			"sma_200w_dev", "ahr999_compressed", "halving_cycle_sin", "halving_cycle_cos")
+	case "qqq", "spy":
+		return append(append([]string{}, generic...),
+			"cape", "dgs10_30d", "dxy_30d", "hy_spread_30d", "yield_curve", "vixy_level",
+			"put_call_ratio", "put_call_30d_change", "put_call_252d_percentile")
+	case "gold":
+		return append(append([]string{}, generic...),
+			"real_yield_10y", "breakeven_10y", "dxy_30d", "gold_cot_net", "vixy_level")
+	default:
+		return generic
+	}
+}
+
+func missingFeatureText(features []string) string {
+	if len(features) == 0 {
+		return "none"
+	}
+	return strings.Join(features, ", ")
 }

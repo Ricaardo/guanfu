@@ -450,8 +450,18 @@ func BuildEquityVerdict(panel *model.IndicatorPanel) *Verdict {
 		Coverage: coverageScore(panel.Macro),
 	})
 
+	// Positioning / options sentiment domain
+	posVote, posBull, posBear := scoreEquityPositioning(panel.Positioning)
+	v.Domains = append(v.Domains, DomainVote{
+		Domain:   "positioning",
+		Vote:     posVote,
+		Bullish:  posBull,
+		Bearish:  posBear,
+		Coverage: coverageScore(panel.Positioning),
+	})
+
 	// Aggregate
-	v.NetDirection = techVote + macroVote
+	v.NetDirection = techVote + macroVote + posVote
 	totalCoverage := 0.0
 	domainCount := 0
 	for _, d := range v.Domains {
@@ -487,6 +497,12 @@ func BuildEquityVerdict(panel *model.IndicatorPanel) *Verdict {
 	}
 	if len(macroBear) > 0 {
 		v.CounterEvidence = append(v.CounterEvidence, macroBear[0])
+	}
+	if len(posBull) > 0 {
+		v.Reasons = append(v.Reasons, posBull[0])
+	}
+	if len(posBear) > 0 {
+		v.CounterEvidence = append(v.CounterEvidence, posBear[0])
 	}
 
 	if v.Coverage < 0.5 {
@@ -544,6 +560,28 @@ func scoreEquityMacro(macro map[string]model.Indicator) (vote int, bull, bear []
 	return
 }
 
+func scoreEquityPositioning(pos map[string]model.Indicator) (vote int, bull, bear []string) {
+	if fg, ok := pos["fear_greed"]; ok && fg.IsAvailable() {
+		if fg.Value < 25 {
+			bull = append(bull, fmt.Sprintf("极度恐惧(%.0f)", fg.Value))
+			vote++
+		} else if fg.Value > 75 {
+			bear = append(bear, fmt.Sprintf("极度贪婪(%.0f)", fg.Value))
+			vote--
+		}
+	}
+	if pc, ok := pos["put_call_ratio"]; ok && pc.IsAvailable() {
+		if pc.Value > 1.2 {
+			bull = append(bull, fmt.Sprintf("Put/Call恐惧(%.2f)", pc.Value))
+			vote++
+		} else if pc.Value < 0.7 {
+			bear = append(bear, fmt.Sprintf("Put/Call追涨(%.2f)", pc.Value))
+			vote--
+		}
+	}
+	return
+}
+
 func coverageScore(m map[string]model.Indicator) float64 {
 	if len(m) == 0 {
 		return 0
@@ -561,12 +599,18 @@ func topProximityFromPanel(p *model.IndicatorPanel) float64 {
 	if rsi, ok := p.Technical["rsi_14"]; ok && rsi.IsAvailable() && rsi.Value > 70 {
 		return math.Min(1.0, (rsi.Value-70)/30)
 	}
+	if pc, ok := p.Positioning["put_call_ratio"]; ok && pc.IsAvailable() && pc.Value < 0.7 {
+		return math.Min(1.0, (0.7-pc.Value)/0.3)
+	}
 	return 0
 }
 
 func bottomProximityFromPanel(p *model.IndicatorPanel) float64 {
 	if rsi, ok := p.Technical["rsi_14"]; ok && rsi.IsAvailable() && rsi.Value < 30 {
 		return math.Min(1.0, (30-rsi.Value)/30)
+	}
+	if pc, ok := p.Positioning["put_call_ratio"]; ok && pc.IsAvailable() && pc.Value > 1.2 {
+		return math.Min(1.0, (pc.Value-1.2)/0.6)
 	}
 	return 0
 }

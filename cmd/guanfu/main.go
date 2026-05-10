@@ -444,7 +444,7 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 			out = filterDomain(panel, domainFilter)
 		}
 		if forecastOnly {
-			out = fc
+			out = forecastOnlyOutput(fc, panel)
 		} else if verdictOnly {
 			out = v
 		} else if verdict || forecastOut {
@@ -476,7 +476,7 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 		printHumanVerdict(v, plain)
 	}
 	if fc != nil {
-		printHumanForecast(fc, plain)
+		printHumanForecast(fc, plain, panel)
 	}
 	if forecastPath && fc != nil {
 		fmt.Println(forecast.BuildPathProjection(fc, 180).ASCIIFan(70))
@@ -582,7 +582,7 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 	}
 
 	if forecastOut || forecastOnly {
-		printHumanForecast(fc, plain)
+		printHumanForecast(fc, plain, panel)
 	}
 }
 
@@ -675,7 +675,7 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 	if jsonOut || pretty {
 		var out interface{} = panel
 		if forecastOnly {
-			out = fc
+			out = forecastOnlyOutput(fc, panel)
 		} else if verdictOnly {
 			out = v
 		} else if verdict || forecastOut {
@@ -707,7 +707,7 @@ func runEquityAsset(assetKey string, jsonOut, pretty, verdict, verdictOnly, fore
 		printHumanVerdict(v, plain)
 	}
 	if fc != nil {
-		printHumanForecast(fc, plain)
+		printHumanForecast(fc, plain, panel)
 	}
 }
 
@@ -950,7 +950,59 @@ func printHumanVerdict(v *engine.Verdict, plain bool) {
 	fmt.Println()
 }
 
-func printHumanForecast(fc *forecast.Forecast, plain bool) {
+func forecastOnlyOutput(fc *forecast.Forecast, panel *model.IndicatorPanel) any {
+	return struct {
+		*forecast.Forecast
+		SourceHealth []model.SourceHealth `json:"source_health,omitempty"`
+	}{
+		Forecast:     fc,
+		SourceHealth: forecastRelevantSourceHealth(panel),
+	}
+}
+
+func forecastRelevantSourceHealth(panel *model.IndicatorPanel) []model.SourceHealth {
+	if panel == nil {
+		return nil
+	}
+	out := make([]model.SourceHealth, 0, len(panel.SourceHealth))
+	for _, h := range panel.SourceHealth {
+		if h.Impact == "forecast" || h.Impact == "both" || h.Status != "ok" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func printForecastSourceHealth(panel *model.IndicatorPanel) {
+	items := forecastRelevantSourceHealth(panel)
+	if len(items) == 0 {
+		return
+	}
+	fmt.Println("  Source health:")
+	limit := len(items)
+	if limit > 8 {
+		limit = 8
+	}
+	for i := 0; i < limit; i++ {
+		h := items[i]
+		line := fmt.Sprintf("    - %s=%s", h.Source, h.Status)
+		if h.Impact != "" {
+			line += " impact=" + h.Impact
+		}
+		if h.AsOf != "" {
+			line += " as_of=" + h.AsOf
+		}
+		if h.FallbackUsed {
+			line += " fallback=true"
+		}
+		if h.Note != "" && h.Status != "ok" {
+			line += " — " + h.Note
+		}
+		fmt.Println(line)
+	}
+}
+
+func printHumanForecast(fc *forecast.Forecast, plain bool, panels ...*model.IndicatorPanel) {
 	bar := "═══════════════════════════════════════════════════════════"
 	title := "走势推演"
 	if plain {
@@ -975,6 +1027,9 @@ func printHumanForecast(fc *forecast.Forecast, plain bool) {
 		fc.Coverage.CandidateCount,
 		fc.Coverage.AverageSimilarity,
 		fc.Coverage.Confidence)
+	if len(panels) > 0 {
+		printForecastSourceHealth(panels[0])
+	}
 	fmt.Println()
 	fmt.Println("  Horizon scenarios:")
 	for _, h := range fc.Horizons {
@@ -1124,6 +1179,9 @@ func printHumanPanel(p *model.IndicatorPanel, filter string, plain bool) {
 			if h.FallbackUsed {
 				line += " fallback=true"
 			}
+			if h.Impact != "" {
+				line += fmt.Sprintf(" impact=%s", h.Impact)
+			}
 			if h.Note != "" {
 				line += fmt.Sprintf(" — %s", h.Note)
 			}
@@ -1170,12 +1228,14 @@ func formatValue(key string, v float64) string {
 	switch {
 	case key == "oil_proxy_usd" || key == "wti_crude_usd":
 		return fmt.Sprintf("$%7.2f", v)
-	case strings.Contains(key, "_pct") || strings.Contains(key, "_yoy"):
+	case strings.Contains(key, "_pct") || strings.Contains(key, "_yoy") || strings.Contains(key, "_return_"):
 		return fmt.Sprintf("%+7.2f%%", v)
 	case strings.Contains(key, "days_"):
 		return fmt.Sprintf("%7.0f", v)
-	case key == "cny_usd":
+	case key == "cny_usd" || key == "usd_cny":
 		return fmt.Sprintf("%7.4f", v)
+	case strings.Contains(key, "_cny"):
+		return fmt.Sprintf("¥%.2f", v)
 	case strings.Contains(key, "_usd"):
 		return fmt.Sprintf("$%.2fM", v/1e6)
 	case strings.Contains(key, "ratio") || strings.Contains(key, "multiple") || strings.Contains(key, "ahr") || strings.Contains(key, "nupl") || strings.Contains(key, "skew"):

@@ -84,6 +84,8 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 
 			hm := r.ByHorizon[h.Days]
 			hm.SampleCount++
+			hm.FeatureCoverageSum += fc.Coverage.FeatureCoverage
+			hm.FeatureCoverageCount++
 
 			// Direction hit
 			predictedUp := h.MedianReturnPct > 0
@@ -103,6 +105,13 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 			crps := calcCRPS(actualReturn, h.P10ReturnPct/100, h.P25ReturnPct/100,
 				h.MedianReturnPct/100, h.P75ReturnPct/100, h.P90ReturnPct/100)
 			hm.CRPSSum += crps
+
+			if h.ConformalAlpha > 0 {
+				hm.ConformalCount++
+				if actualReturn >= h.ConformalLowPct/100 && actualReturn <= h.ConformalHighPct/100 {
+					hm.ConformalHits++
+				}
+			}
 
 			// Year + per-horizon breakdown (walk-forward view).
 			year := extractYear(points, idx)
@@ -194,12 +203,16 @@ type Result struct {
 
 // HorizonMetrics holds metrics for a single forecast horizon.
 type HorizonMetrics struct {
-	Days          int     `json:"days"`
-	SampleCount   int     `json:"sample_count"`
-	DirectionHits int     `json:"direction_hits"`
-	PITSum        float64 `json:"-"`
-	PITCount      int     `json:"-"`
-	CRPSSum       float64 `json:"-"`
+	Days                 int     `json:"days"`
+	SampleCount          int     `json:"sample_count"`
+	DirectionHits        int     `json:"direction_hits"`
+	PITSum               float64 `json:"-"`
+	PITCount             int     `json:"-"`
+	CRPSSum              float64 `json:"-"`
+	ConformalHits        int     `json:"conformal_hits,omitempty"`
+	ConformalCount       int     `json:"conformal_count,omitempty"`
+	FeatureCoverageSum   float64 `json:"-"`
+	FeatureCoverageCount int     `json:"-"`
 }
 
 // DirectionHitRate returns direction accuracy as a fraction.
@@ -224,6 +237,23 @@ func (m *HorizonMetrics) CRPSScore() float64 {
 		return 0
 	}
 	return m.CRPSSum / float64(m.SampleCount)
+}
+
+// ConformalHitRate returns realized coverage of the conformal interval.
+func (m *HorizonMetrics) ConformalHitRate() float64 {
+	if m.ConformalCount == 0 {
+		return 0
+	}
+	return float64(m.ConformalHits) / float64(m.ConformalCount)
+}
+
+// FeatureCoverageMean returns the average forecast feature coverage seen
+// during this horizon's walk-forward test cells.
+func (m *HorizonMetrics) FeatureCoverageMean() float64 {
+	if m.FeatureCoverageCount == 0 {
+		return 0
+	}
+	return m.FeatureCoverageSum / float64(m.FeatureCoverageCount)
 }
 
 // YearMetrics holds yearly breakdown.

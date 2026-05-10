@@ -42,9 +42,11 @@ func (CAPESource) Refresh(ctx context.Context, s *store.PriceStore) (*RefreshRes
 
 	script, err := findCAPEScriptPath()
 	if err != nil {
+		count, _ := s.Count("spx_cape")
 		return &RefreshResult{
 			Key: "spx_cape", DisplayName: "spx_cape (Shiller CAPE, monthly)",
-			Mode: "skip", LastDate: last, Error: err.Error(),
+			Mode: "skip", SkipReason: "config", Stale: last != "", Action: "configure",
+			Total: count, LastDate: last, Error: err.Error(),
 		}, nil
 	}
 

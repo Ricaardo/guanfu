@@ -14,6 +14,7 @@ package store
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -74,9 +75,43 @@ func (s *PriceStore) Load(asset string) ([]PricePoint, error) {
 	return NormalizePricePoints(points), nil
 }
 
+// LoadSeries reads a generic indicator series, allowing zero and negative
+// values. Use this for rates, spreads, skew, and other non-price data.
+func (s *PriceStore) LoadSeries(asset string) ([]PricePoint, error) {
+	data, err := os.ReadFile(s.path(asset))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var points []PricePoint
+	if err := json.Unmarshal(data, &points); err != nil {
+		return nil, err
+	}
+	return NormalizeSeriesPoints(points), nil
+}
+
 // Save writes all price points (oldest-first) to the asset's JSON file.
 func (s *PriceStore) Save(asset string, points []PricePoint) error {
 	points = NormalizePricePoints(points)
+	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(points, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := cache.WriteFileAtomic(s.path(asset), data, 0o644); err != nil {
+		return err
+	}
+	return s.updateMeta(asset, points)
+}
+
+// SaveSeries writes a generic indicator series, allowing zero and negative
+// values. It shares the same on-disk format as Save.
+func (s *PriceStore) SaveSeries(asset string, points []PricePoint) error {
+	points = NormalizeSeriesPoints(points)
 	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
 		return err
 	}
@@ -98,6 +133,13 @@ func (s *PriceStore) Append(asset string, newPoints []PricePoint) error {
 	return s.Save(asset, merged)
 }
 
+// AppendSeries merges generic indicator points into the existing archive.
+func (s *PriceStore) AppendSeries(asset string, newPoints []PricePoint) error {
+	existing, _ := s.LoadSeries(asset)
+	merged := NormalizeSeriesPoints(append(existing, newPoints...))
+	return s.SaveSeries(asset, merged)
+}
+
 // LastDate returns the latest date in the asset archive, or empty string if empty.
 func (s *PriceStore) LastDate(asset string) (string, error) {
 	points, err := s.Load(asset)
@@ -114,6 +156,24 @@ func (s *PriceStore) Count(asset string) (int, error) {
 		return 0, err
 	}
 	return len(points), nil
+}
+
+// CountSeries returns the number of points in a generic indicator series.
+func (s *PriceStore) CountSeries(asset string) (int, error) {
+	points, err := s.LoadSeries(asset)
+	if err != nil {
+		return 0, err
+	}
+	return len(points), nil
+}
+
+// LatestSeries returns the most recent point from a generic indicator series.
+func (s *PriceStore) LatestSeries(asset string) (PricePoint, bool) {
+	points, err := s.LoadSeries(asset)
+	if err != nil || len(points) == 0 {
+		return PricePoint{}, false
+	}
+	return points[len(points)-1], true
 }
 
 // LoadHistory loads an asset's closes as []float64, newest-first (matching MarketSnapshot convention).
@@ -252,6 +312,28 @@ func NormalizePricePoints(points []PricePoint) []PricePoint {
 	byDate := make(map[string]PricePoint, len(points))
 	for _, p := range points {
 		if p.Close <= 0 {
+			continue
+		}
+		byDate[p.Date] = p
+	}
+	out := make([]PricePoint, 0, len(byDate))
+	for _, p := range byDate {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
+	return out
+}
+
+// NormalizeSeriesPoints deduplicates by date, filters NaN/Inf values, and
+// sorts oldest-first. Unlike NormalizePricePoints, signed and zero values are
+// valid because many macro/positioning series are not prices.
+func NormalizeSeriesPoints(points []PricePoint) []PricePoint {
+	if len(points) == 0 {
+		return points
+	}
+	byDate := make(map[string]PricePoint, len(points))
+	for _, p := range points {
+		if p.Date == "" || math.IsNaN(p.Close) || math.IsInf(p.Close, 0) {
 			continue
 		}
 		byDate[p.Date] = p

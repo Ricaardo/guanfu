@@ -26,6 +26,7 @@ func EquityExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
 		HYSpreadExtractor(s),
 		YieldCurveExtractor(s),
 		VIXExtractor(s),
+		PutCallRatioExtractor(s),
 	} {
 		if ex != nil {
 			exts = append(exts, ex)

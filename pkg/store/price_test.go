@@ -188,6 +188,34 @@ func TestInvalidCloseFiltered(t *testing.T) {
 	}
 }
 
+func TestSignedSeriesPreservesNegativeAndZeroValues(t *testing.T) {
+	s := tempStore(t)
+	points := []PricePoint{
+		{Date: "2026-05-01", Close: 1.2, Source: "test"},
+		{Date: "2026-05-02", Close: 0, Source: "test"},
+		{Date: "2026-05-03", Close: -2.5, Source: "test"},
+	}
+	if err := s.SaveSeries("deribit_skew_25d_pct", points); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := s.LoadSeries("deribit_skew_25d_pct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 3 {
+		t.Fatalf("expected 3 signed points, got %d: %+v", len(loaded), loaded)
+	}
+	if loaded[1].Close != 0 || loaded[2].Close != -2.5 {
+		t.Fatalf("signed values not preserved: %+v", loaded)
+	}
+
+	latest, ok := s.LatestSeries("deribit_skew_25d_pct")
+	if !ok || latest.Close != -2.5 {
+		t.Fatalf("LatestSeries = %+v ok=%v, want -2.5", latest, ok)
+	}
+}
+
 func TestIncrementalFetchDays(t *testing.T) {
 	s := tempStore(t)
 	// No data → full import needed
