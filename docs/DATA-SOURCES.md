@@ -21,6 +21,8 @@ guanfu refresh --skip=gold_cot        # 跳过指定 key
 - CAPE 月频 → 28 天 TTL
 - Stock 30h TTL(覆盖周末 gap)
 
+**Forecast feature lookup 不做无限 forward-fill**:进入 kNN 的外部序列有最大滞后门槛,超过就视为该日特征缺失。当前门槛:CBOE put/call 5d、FRED 7d、CAPE 45d、COT 10d、VIXY/ETF 5d。这避免 CBOE 2019-2025 历史缺口被错误当成有效特征。
+
 **失败容忍**:单个 source 失败不影响其他;`fail` 状态在最终表中 surface,CLI exit code 1,但 stdout 保留所有结果。
 
 **刷新状态语义**:

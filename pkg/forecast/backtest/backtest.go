@@ -28,14 +28,31 @@ import (
 //
 // Returns aggregated metrics for all horizons.
 func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.FeatureExtractor, horizons []int) (*Result, error) {
+	opts := forecast.Options{
+		Horizons:       horizons,
+		TopK:           21,
+		StepDays:       7,
+		Extractors:     extractors,
+		MinFeatures:    6,
+		UseMahalanobis: false, // hurts BTC baseline
+	}
+	return RunWithOptions(points, startIdx, stepDays, opts)
+}
+
+func RunWithOptions(points []forecast.Point, startIdx, stepDays int, opts forecast.Options) (*Result, error) {
 	if len(points) < startIdx+200 {
 		return nil, fmt.Errorf("backtest: need more history (have %d, need %d+200)", len(points), startIdx)
 	}
-	if len(extractors) == 0 {
+	if len(opts.Extractors) == 0 {
 		return nil, fmt.Errorf("backtest: no feature extractors provided")
 	}
 	if stepDays <= 0 {
 		stepDays = 30
+	}
+	horizons := opts.Horizons
+	if len(horizons) == 0 {
+		horizons = []int{30, 90, 180}
+		opts.Horizons = horizons
 	}
 
 	maxHorizon := 0
@@ -61,15 +78,6 @@ func Run(points []forecast.Point, startIdx, stepDays int, extractors []forecast.
 		history := points[:idx+1]
 
 		// Build forecast
-		opts := forecast.Options{
-			Horizons:       horizons,
-			TopK:           21,
-			StepDays:       7,
-			Extractors:     extractors,
-			MinFeatures:    6,
-			UseMahalanobis: false, // hurts BTC baseline
-		}
-
 		fc, err := forecast.Build(history, opts)
 		if err != nil {
 			continue // skip dates where forecast can't be built

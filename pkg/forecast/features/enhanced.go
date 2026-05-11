@@ -5,9 +5,18 @@ package features
 
 import (
 	"math"
+	"time"
 
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/store"
+)
+
+const (
+	capeMaxAgeDays    = 45
+	fredMaxAgeDays    = 7
+	cotMaxAgeDays     = 10
+	etfMaxAgeDays     = 5
+	putCallMaxAgeDays = 5
 )
 
 // ─── CAPE (Shiller PE) valuation ────────────────────────
@@ -23,7 +32,7 @@ func CAPEExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	capeByDate := makeDateMap(capePts)
 
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
-		v := lookupDate(capePts, capeByDate, points[i].Date)
+		v := lookupDateMaxAge(capePts, capeByDate, points[i].Date, capeMaxAgeDays)
 		// Sanity bound: real CAPE has been 5-50 since 1871. Anything outside
 		// signals corrupted source data — drop the feature rather than feed garbage.
 		if v < 5 || v > 80 {
@@ -53,8 +62,8 @@ func DGS10Extractor(s *store.PriceStore) forecast.FeatureExtractor {
 		if i < 30 {
 			return nil, false
 		}
-		now := lookupDate(pts, byDate, points[i].Date)
-		past := lookupDate(pts, byDate, points[i-30].Date)
+		now := lookupDateMaxAge(pts, byDate, points[i].Date, fredMaxAgeDays)
+		past := lookupDateMaxAge(pts, byDate, points[i-30].Date, fredMaxAgeDays)
 		if now == 0 || past == 0 {
 			return nil, false
 		}
@@ -79,8 +88,8 @@ func DXYExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 		if i < 30 {
 			return nil, false
 		}
-		now := lookupDate(pts, byDate, points[i].Date)
-		past := lookupDate(pts, byDate, points[i-30].Date)
+		now := lookupDateMaxAge(pts, byDate, points[i].Date, fredMaxAgeDays)
+		past := lookupDateMaxAge(pts, byDate, points[i-30].Date, fredMaxAgeDays)
 		if now == 0 || past == 0 {
 			return nil, false
 		}
@@ -126,14 +135,14 @@ func HYSpreadExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 		label := "BAA10Y spread 30d change (inverted)"
 		normalizer := 1.5
 		if minHYDate != "" && target >= minHYDate {
-			now = lookupDate(hyPts, hyByDate, target)
-			past = lookupDate(hyPts, hyByDate, pastTarget)
+			now = lookupDateMaxAge(hyPts, hyByDate, target, fredMaxAgeDays)
+			past = lookupDateMaxAge(hyPts, hyByDate, pastTarget, fredMaxAgeDays)
 			label = "HY spread 30d change (inverted)"
 			normalizer = 2.0
 		}
 		if now <= 0 || past <= 0 {
-			now = lookupDate(baaPts, baaByDate, target)
-			past = lookupDate(baaPts, baaByDate, pastTarget)
+			now = lookupDateMaxAge(baaPts, baaByDate, target, fredMaxAgeDays)
+			past = lookupDateMaxAge(baaPts, baaByDate, pastTarget, fredMaxAgeDays)
 		}
 		if now <= 0 || past <= 0 {
 			return nil, false
@@ -155,7 +164,7 @@ func YieldCurveExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	}
 	byDate := makeDateMap(pts)
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
-		v := lookupDate(pts, byDate, points[i].Date)
+		v := lookupDateMaxAge(pts, byDate, points[i].Date, fredMaxAgeDays)
 		if v == 0 {
 			return nil, false
 		}
@@ -179,7 +188,7 @@ func RealYield10YExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	}
 	byDate := makeDateMap(pts)
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
-		v := lookupDate(pts, byDate, points[i].Date)
+		v := lookupDateMaxAge(pts, byDate, points[i].Date, fredMaxAgeDays)
 		if v == 0 {
 			return nil, false
 		}
@@ -201,7 +210,7 @@ func BreakevenExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	}
 	byDate := makeDateMap(pts)
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
-		v := lookupDate(pts, byDate, points[i].Date)
+		v := lookupDateMaxAge(pts, byDate, points[i].Date, fredMaxAgeDays)
 		if v == 0 {
 			return nil, false
 		}
@@ -223,7 +232,7 @@ func GoldCOTExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	}
 	byDate := makeDateMap(pts)
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
-		v := lookupDate(pts, byDate, points[i].Date)
+		v := lookupDateMaxAge(pts, byDate, points[i].Date, cotMaxAgeDays)
 		if v == 0 {
 			return nil, false
 		}
@@ -248,7 +257,7 @@ func VIXExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	}
 	byDate := makeDateMap(pts)
 	return func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
-		v := lookupDate(pts, byDate, points[i].Date)
+		v := lookupDateMaxAge(pts, byDate, points[i].Date, etfMaxAgeDays)
 		if v == 0 {
 			return nil, false
 		}
@@ -260,10 +269,28 @@ func VIXExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 	}
 }
 
-// PutCallRatioExtractor returns CBOE total put/call ratio features for broad
-// US equity forecasts. High values mean hedging/fear; low values mean
+type PutCallFeatureMode int
+
+const (
+	PutCallNone PutCallFeatureMode = iota
+	PutCallRatioOnly
+	PutCallRatioAndChange
+	PutCallAll
+)
+
+// PutCallRatioExtractor returns all CBOE total put/call ratio features for
+// broad US equity forecasts. High values mean hedging/fear; low values mean
 // complacency or call-chasing.
 func PutCallRatioExtractor(s *store.PriceStore) forecast.FeatureExtractor {
+	return PutCallRatioExtractorWithMode(s, PutCallAll)
+}
+
+// PutCallRatioExtractorWithMode supports ablation tests for the equity
+// options feature family.
+func PutCallRatioExtractorWithMode(s *store.PriceStore, mode PutCallFeatureMode) forecast.FeatureExtractor {
+	if mode == PutCallNone {
+		return nil
+	}
 	pts, err := s.Load("stooq_putcall")
 	if err != nil || len(pts) < 60 {
 		return nil
@@ -273,25 +300,29 @@ func PutCallRatioExtractor(s *store.PriceStore) forecast.FeatureExtractor {
 		if i < 30 {
 			return nil, false
 		}
-		now := lookupDate(pts, byDate, points[i].Date)
-		past := lookupDate(pts, byDate, points[i-30].Date)
+		now := lookupDateMaxAge(pts, byDate, points[i].Date, putCallMaxAgeDays)
+		past := lookupDateMaxAge(pts, byDate, points[i-30].Date, putCallMaxAgeDays)
 		if now <= 0 || past <= 0 {
 			return nil, false
 		}
 		change := now - past
-		out := []forecast.FeatureValue{
-			{
-				Name: "put_call_ratio", Value: math.Round(now*1000) / 1000,
-				Normalized: math.Round(clipE((now-0.95)/0.35, 3)*1000) / 1000,
-				Weight:     0.30, Note: "CBOE total put/call ratio",
-			},
-			{
+		out := []forecast.FeatureValue{{
+			Name: "put_call_ratio", Value: math.Round(now*1000) / 1000,
+			Normalized: math.Round(clipE((now-0.95)/0.35, 3)*1000) / 1000,
+			Weight:     0.30, Note: "CBOE total put/call ratio",
+		}}
+		if mode >= PutCallRatioAndChange {
+			out = append(out, forecast.FeatureValue{
 				Name: "put_call_30d_change", Value: math.Round(change*1000) / 1000,
 				Normalized: math.Round(clipE(change/0.25, 3)*1000) / 1000,
 				Weight:     0.20, Note: "CBOE total put/call 30d change",
-			},
+			})
 		}
-		if pct, ok := trailingPercentile(pts, points[i].Date, 252, now); ok {
+		if mode >= PutCallAll {
+			pct, ok := trailingPercentileMaxAge(pts, points[i].Date, 252, now, putCallMaxAgeDays)
+			if !ok {
+				return out, true
+			}
 			out = append(out, forecast.FeatureValue{
 				Name: "put_call_252d_percentile", Value: math.Round(pct*1000) / 10,
 				Normalized: math.Round(clipE((pct-0.5)/0.25, 3)*1000) / 1000,
@@ -372,8 +403,43 @@ func lookupDate(pts []store.PricePoint, dateMap map[string]float64, date string)
 	return 0
 }
 
+func lookupDateMaxAge(pts []store.PricePoint, dateMap map[string]float64, date string, maxAgeDays int) float64 {
+	if maxAgeDays <= 0 {
+		return lookupDate(pts, dateMap, date)
+	}
+	target, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return 0
+	}
+	if v, ok := dateMap[date]; ok {
+		return v
+	}
+	for i := len(pts) - 1; i >= 0; i-- {
+		if pts[i].Date > date {
+			continue
+		}
+		asOf, err := time.Parse("2006-01-02", pts[i].Date)
+		if err != nil {
+			return 0
+		}
+		if target.Sub(asOf).Hours()/24 > float64(maxAgeDays) {
+			return 0
+		}
+		return pts[i].Close
+	}
+	return 0
+}
+
 func trailingPercentile(pts []store.PricePoint, date string, window int, value float64) (float64, bool) {
+	return trailingPercentileMaxAge(pts, date, window, value, 0)
+}
+
+func trailingPercentileMaxAge(pts []store.PricePoint, date string, window int, value float64, maxAgeDays int) (float64, bool) {
 	if len(pts) == 0 || value <= 0 {
+		return 0, false
+	}
+	target, err := time.Parse("2006-01-02", date)
+	if err != nil {
 		return 0, false
 	}
 	end := -1
@@ -385,6 +451,12 @@ func trailingPercentile(pts []store.PricePoint, date string, window int, value f
 	}
 	if end < 0 {
 		return 0, false
+	}
+	if maxAgeDays > 0 {
+		asOf, err := time.Parse("2006-01-02", pts[end].Date)
+		if err != nil || target.Sub(asOf).Hours()/24 > float64(maxAgeDays) {
+			return 0, false
+		}
 	}
 	start := 0
 	if window > 0 && end+1 > window {

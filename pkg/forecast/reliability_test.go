@@ -6,33 +6,32 @@ import (
 )
 
 func TestHorizonCaveatFlagsWeakHistory(t *testing.T) {
-	// Gold 180d at 49% / 51 tests → hard-block caveat (dir_hit < 0.50)
+	// Gold 180d at 53% / 51 tests → weak-history caveat (dir_hit < 0.55)
 	c := HorizonCaveat("gold", 180)
 	if c == "" {
 		t.Errorf("gold/180d expected caveat, got empty")
 	}
-	if !strings.Contains(c, "低于随机") {
-		t.Errorf("gold/180d (49%%) should hit hard-block caveat, got: %s", c)
+	if !strings.Contains(c, "接近随机") {
+		t.Errorf("gold/180d (53%%) should hit approaching-random caveat, got: %s", c)
 	}
 
-	// Gold 30d at 51% → within [0.50, 0.55): "approaching random" caveat
+	// Gold 30d at 45% → hard-block caveat (dir_hit < 0.50)
 	c30 := HorizonCaveat("gold", 30)
 	if c30 == "" {
 		t.Errorf("gold/30d expected caveat, got empty")
 	}
-	if !strings.Contains(c30, "接近随机") {
-		t.Errorf("gold/30d (51%%) should hit approaching-random caveat, got: %s", c30)
+	if !strings.Contains(c30, "低于随机") {
+		t.Errorf("gold/30d (45%%) should hit hard-block caveat, got: %s", c30)
 	}
-
 }
 
 func TestIsHardBlocked(t *testing.T) {
-	// Gold 180d at 0.49 → blocked; 30d at 0.51 → not blocked
-	if !IsHardBlocked("gold", 180) {
-		t.Error("gold/180 at 49%% should be hard-blocked")
+	// Gold 30d at 0.451 → blocked; 180d at 0.529 → not blocked.
+	if !IsHardBlocked("gold", 30) {
+		t.Error("gold/30 at 45%% should be hard-blocked")
 	}
-	if IsHardBlocked("gold", 30) {
-		t.Error("gold/30 at 51%% should NOT be hard-blocked (only above-random caveat)")
+	if IsHardBlocked("gold", 180) {
+		t.Error("gold/180 at 53%% should NOT be hard-blocked (only above-random caveat)")
 	}
 	// QQQ reliable → never blocked
 	for _, h := range []int{30, 90, 180} {

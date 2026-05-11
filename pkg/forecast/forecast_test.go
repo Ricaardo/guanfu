@@ -96,7 +96,7 @@ func TestHorizonsForAsset(t *testing.T) {
 		{"qqq", []int{30, 63, 90, 180, 252}},
 		{"QQQ", []int{30, 63, 90, 180, 252}},
 		{"spy", []int{30, 63, 90, 180, 252}},
-		{"gold", []int{30, 60, 90, 120}}, // 180d removed 2026-05-09 (49% dir_hit, n=51)
+		{"gold", []int{30, 60, 90, 120}}, // 180d remains opt-in because history is regime-dependent
 		{"btc", []int{30, 90, 180}},
 		{"AAPL", []int{30, 90, 180}}, // arbitrary stock falls back to default
 		{"", []int{30, 90, 180}},

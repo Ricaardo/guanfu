@@ -31,11 +31,11 @@ const (
 
 var defaultHorizons = []int{30, 90, 180}
 
-// assetHorizons holds per-asset default horizons (B5, revised 2026-05-09).
+// assetHorizons holds per-asset default horizons (B5, revised 2026-05-11).
 //
 // QQQ/SPY add 63d (quarterly) and 252d (yearly) on top of {30,90,180}.
 // Gold uses {30,60,90,120} — the 180d horizon was removed after the
-// post-refresh backtest exposed it as 49% dir_hit on n=51 (i.e. random).
+// post-refresh backtests exposed weak regime-dependent history.
 // Other assets fall back to defaultHorizons.
 var assetHorizons = map[string][]int{
 	"qqq":  {30, 63, 90, 180, 252},
@@ -82,6 +82,11 @@ type Options struct {
 	// penalized (×1.2). Directly addresses Gold's 2017-2022 / 2023-2025
 	// regime-splitting walk-forward observation. Cheap & additive.
 	RegimeGate bool `json:"-"`
+	// DisableHorizonWeights keeps legacy behavior where all forecast horizons
+	// share one analog ranking. Default false enables horizon-specific
+	// re-ranking so 30d emphasizes short-term technical/risk features while
+	// 180d emphasizes valuation/macro features.
+	DisableHorizonWeights bool `json:"-"`
 }
 
 // Point is an oldest-first daily close price.
@@ -178,6 +183,9 @@ type HorizonForecast struct {
 	ConformalCoverage  float64 `json:"conformal_coverage,omitempty"` // finite-sample achievable coverage ∈ [0,1]
 	ConformalLowPrice  float64 `json:"conformal_low_price,omitempty"`
 	ConformalHighPrice float64 `json:"conformal_high_price,omitempty"`
+	// ConformalCalibrationScale is set when a static asset+horizon calibration
+	// widens the interval based on walk-forward realized coverage.
+	ConformalCalibrationScale float64 `json:"conformal_calibration_scale,omitempty"`
 
 	// Ensemble cross-check fields (G4). A ridge regression fit on the
 	// same (candidate_features, forward_return) pairs predicts the
@@ -375,7 +383,7 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 	}
 
 	analogs := buildAnalogs(points, selected, opts.Horizons)
-	horizons := buildHorizonForecasts(points[currentIdx].Close, points, selected, opts.Horizons, currentFeatures, candidates)
+	horizons := buildHorizonForecasts(points[currentIdx].Close, points, selected, opts.Horizons, currentFeatures, candidates, opts)
 	// Annotate each horizon with its reliability caveat (if asset is set
 	// and a recorded reliability cell flags this horizon as weak/untested).
 	if opts.Asset != "" {
@@ -908,28 +916,159 @@ func buildAnalogs(points []Point, selected []candidate, horizons []int) []Analog
 	return out
 }
 
-func buildHorizonForecasts(currentPrice float64, points []Point, selected []candidate, horizons []int, currentFeatures featureSet, allCandidates []candidate) []HorizonForecast {
+func buildHorizonForecasts(currentPrice float64, points []Point, selected []candidate, horizons []int, currentFeatures featureSet, allCandidates []candidate, opts Options) []HorizonForecast {
 	out := make([]HorizonForecast, 0, len(horizons))
 	for _, h := range horizons {
-		returns := make([]float64, 0, len(selected))
-		for _, c := range selected {
-			if c.index+h >= len(points) {
-				continue
+		selectedForHorizon := selected
+		candidatesForHorizon := allCandidates
+		currentForHorizon := currentFeatures
+		if !opts.DisableHorizonWeights {
+			currentForHorizon = horizonWeightedFeatureSet(currentFeatures, h)
+			ranked := rankCandidatesForHorizon(currentFeatures, allCandidates, h, points, opts)
+			if len(ranked) > 0 {
+				picked := selectAnalogs(ranked, opts.TopK, opts.DiversifyWindowDays)
+				if len(picked) >= minSelectedAnalogs {
+					selectedForHorizon = picked
+					candidatesForHorizon = ranked
+				}
 			}
-			returns = append(returns, points[c.index+h].Close/points[c.index].Close-1)
 		}
+
+		returns := forwardReturnsForCandidates(points, selectedForHorizon, h)
 		if len(returns) == 0 {
 			continue
 		}
 		hf := summarizeHorizon(currentPrice, h, returns)
-		annotateHorizonConformal(&hf, returns, currentPrice)
+		calibrationReturns := forwardReturnsForCandidates(points, conformalCalibrationCandidates(candidatesForHorizon, selectedForHorizon, opts.TopK), h)
+		if len(calibrationReturns) < len(returns) {
+			calibrationReturns = returns
+		}
+		annotateHorizonConformalForAsset(&hf, calibrationReturns, currentPrice, opts.Asset)
 		// G4: ridge regression on the full candidate pool (not just
 		// selected top-K) — more samples give the linear model more
 		// to fit and better detect when kNN is an outlier view.
-		annotateHorizonEnsemble(&hf, currentFeatures, allCandidates, h, points)
+		annotateHorizonEnsemble(&hf, currentForHorizon, candidatesForHorizon, h, points)
 		out = append(out, hf)
 	}
 	return out
+}
+
+func forwardReturnsForCandidates(points []Point, candidates []candidate, horizonDays int) []float64 {
+	returns := make([]float64, 0, len(candidates))
+	for _, c := range candidates {
+		if c.index+horizonDays >= len(points) {
+			continue
+		}
+		returns = append(returns, points[c.index+horizonDays].Close/points[c.index].Close-1)
+	}
+	return returns
+}
+
+func conformalCalibrationCandidates(ranked []candidate, fallback []candidate, topK int) []candidate {
+	if len(ranked) == 0 {
+		return fallback
+	}
+	limit := topK * 4
+	if limit <= 0 {
+		limit = defaultTopK * 4
+	}
+	if limit > len(ranked) {
+		limit = len(ranked)
+	}
+	if limit < len(fallback) {
+		return fallback
+	}
+	return ranked[:limit]
+}
+
+func rankCandidatesForHorizon(current featureSet, candidates []candidate, horizonDays int, points []Point, opts Options) []candidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	currentWeighted := horizonWeightedFeatureSet(current, horizonDays)
+	out := make([]candidate, 0, len(candidates))
+	today := time.Time{}
+	cutoff := time.Time{}
+	if opts.RecencyWeighted && len(points) > 0 {
+		years := opts.RecencyWindowYears
+		if years <= 0 {
+			years = 5
+		}
+		today = mustParseDate(points[len(points)-1].Date)
+		cutoff = today.AddDate(-years, 0, 0)
+	}
+	currentRegime := 0
+	if opts.RegimeGate && len(points) > 0 {
+		currentRegime = regimeBucket(points, len(points)-1)
+	}
+	for _, c := range candidates {
+		cw := c
+		dist, matched, ok := distance(currentWeighted, horizonWeightedFeatureSet(c.features, horizonDays))
+		if !ok {
+			continue
+		}
+		if opts.RecencyWeighted && !today.IsZero() && c.date.After(cutoff) {
+			dist *= 0.8
+		}
+		if opts.RegimeGate && c.index >= 0 && c.index < len(points) && regimeBucket(points, c.index) != currentRegime {
+			dist *= 1.2
+		}
+		cw.dist = dist
+		cw.sim = similarityFromDistance(dist)
+		cw.matched = matched
+		out = append(out, cw)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].dist == out[j].dist {
+			return out[i].date.Before(out[j].date)
+		}
+		return out[i].dist < out[j].dist
+	})
+	return out
+}
+
+func horizonWeightedFeatureSet(fs featureSet, horizonDays int) featureSet {
+	out := featureSet{
+		values: make([]FeatureValue, 0, len(fs.values)),
+		byName: make(map[string]FeatureValue, len(fs.byName)),
+	}
+	for _, fv := range fs.values {
+		fv.Weight *= horizonWeightMultiplier(fv.Name, horizonDays)
+		out.values = append(out.values, fv)
+		out.byName[fv.Name] = fv
+	}
+	return out
+}
+
+func horizonWeightMultiplier(name string, horizonDays int) float64 {
+	if horizonDays <= 45 {
+		switch name {
+		case "return_30d", "drawdown_90d", "realized_vol_30d", "rsi_14", "vixy_level", "put_call_30d_change":
+			return 1.25
+		case "return_180d", "cape", "ahr999_compressed", "sma_200w_dev", "yield_curve", "put_call_252d_percentile":
+			return 0.75
+		default:
+			return 1
+		}
+	}
+	if horizonDays <= 120 {
+		switch name {
+		case "return_90d", "drawdown_90d", "dgs10_30d", "dxy_30d", "hy_spread_30d", "put_call_30d_change":
+			return 1.15
+		case "return_30d":
+			return 0.90
+		default:
+			return 1
+		}
+	}
+	switch name {
+	case "return_180d", "mayer_multiple", "sma_200w_dev", "ahr999_compressed", "cape", "real_yield_10y", "gold_cot_net", "yield_curve", "put_call_252d_percentile":
+		return 1.25
+	case "return_30d", "rsi_14":
+		return 0.75
+	default:
+		return 1
+	}
 }
 
 func summarizeHorizon(currentPrice float64, days int, returns []float64) HorizonForecast {

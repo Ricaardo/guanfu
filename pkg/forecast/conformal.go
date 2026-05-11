@@ -102,6 +102,10 @@ func computeConformalFromReturns(returns []float64, median float64, alpha float6
 // horizon (decimals). No-op when sample too small — the fields
 // stay at omitempty defaults.
 func annotateHorizonConformal(h *HorizonForecast, returns []float64, currentPrice float64) {
+	annotateHorizonConformalForAsset(h, returns, currentPrice, "")
+}
+
+func annotateHorizonConformalForAsset(h *HorizonForecast, returns []float64, currentPrice float64, asset string) {
 	if h == nil {
 		return
 	}
@@ -111,6 +115,12 @@ func annotateHorizonConformal(h *HorizonForecast, returns []float64, currentPric
 	if !ok {
 		return
 	}
+	scale := conformalCalibrationScale(asset, h.Days)
+	if scale > 0 && scale != 1 {
+		low = medianDec - (medianDec-low)*scale
+		high = medianDec + (high-medianDec)*scale
+		h.ConformalCalibrationScale = round4(scale)
+	}
 	h.ConformalLowPct = round2(low * 100)
 	h.ConformalHighPct = round2(high * 100)
 	h.ConformalAlpha = defaultConformalAlpha
@@ -119,4 +129,27 @@ func annotateHorizonConformal(h *HorizonForecast, returns []float64, currentPric
 		h.ConformalLowPrice = round2(currentPrice * (1 + low))
 		h.ConformalHighPrice = round2(currentPrice * (1 + high))
 	}
+}
+
+func conformalCalibrationScale(asset string, horizonDays int) float64 {
+	switch asset {
+	case "qqq":
+		switch horizonDays {
+		case 30, 63, 90, 180, 252:
+			return 1.80
+		}
+	case "spy":
+		switch horizonDays {
+		case 30, 63, 90:
+			return 1.60
+		case 180, 252:
+			return 1.90
+		}
+	case "gold":
+		switch horizonDays {
+		case 120, 180:
+			return 1.20
+		}
+	}
+	return 1
 }

@@ -49,7 +49,7 @@ func runBacktest(asset string, jsonOut, pretty, plain bool) {
 	horizons := []int{30, 90, 180}
 	optsV1 := forecast.Options{
 		Horizons: horizons, TopK: 21, StepDays: 30,
-		Extractors: backtestExtractorsForAsset(asset, s), MinFeatures: 6,
+		Extractors: backtestExtractorsForAsset(asset, s), MinFeatures: 6, Asset: asset,
 	}
 
 	if jsonOut || pretty {
@@ -80,7 +80,7 @@ func runBacktestJSON(asset string, points []forecast.Point, hasCrossAsset bool, 
 	}
 
 	results := []btR{}
-	r1, _ := backtest.Run(points, 800, 60, optsV1.Extractors, horizons)
+	r1, _ := backtest.RunWithOptions(points, 800, 60, optsV1)
 	if r1 != nil {
 		diag := diagnoseFeatureBundle(asset, points, optsV1.Extractors)
 		br := btR{Version: "v1_asset_bundle", Features: backtestFeatureLabel(asset), CurrentCoveragePct: diag.CurrentCoveragePct, MissingFeatures: diag.MissingFeatures, TotalTests: r1.TotalTests}
@@ -103,7 +103,8 @@ func runBacktestJSON(asset string, points []forecast.Point, hasCrossAsset bool, 
 		ca := features.NewCrossAssetData()
 		ca.LoadFromPriceStore()
 		allEx := append(features.CoreExtractors(), ca.Extractors()...)
-		r2, _ := backtest.Run(points, 800, 60, allEx, horizons)
+		optsV2 := forecast.Options{Horizons: horizons, TopK: 21, StepDays: 7, Extractors: allEx, MinFeatures: 6, Asset: asset}
+		r2, _ := backtest.RunWithOptions(points, 800, 60, optsV2)
 		if r2 != nil {
 			br := btR{Version: "v2_cross_asset", Features: "11 core + 6 cross", TotalTests: r2.TotalTests}
 			for _, h := range horizons {
@@ -150,7 +151,7 @@ func runBacktestHuman(asset string, points []forecast.Point, hasCrossAsset bool,
 	diag := diagnoseFeatureBundle(asset, points, optsV1.Extractors)
 	fmt.Printf("  特征覆盖: 当前 %.0f%% (%d/%d); missing: %s\n",
 		diag.CurrentCoveragePct, diag.CurrentFeatureCount, diag.ExpectedFeatureCount, missingFeatureText(diag.MissingFeatures))
-	r1, err := backtest.Run(points, 800, 60, optsV1.Extractors, horizons)
+	r1, err := backtest.RunWithOptions(points, 800, 60, optsV1)
 	if err != nil {
 		fmt.Printf("  失败: %v\n", err)
 	} else {
@@ -170,7 +171,8 @@ func runBacktestHuman(asset string, points []forecast.Point, hasCrossAsset bool,
 		ca := features.NewCrossAssetData()
 		ca.LoadFromPriceStore()
 		allEx := append(features.CoreExtractors(), ca.Extractors()...)
-		r2, err := backtest.Run(points, 800, 60, allEx, horizons)
+		optsV2 := forecast.Options{Horizons: horizons, TopK: 21, StepDays: 7, Extractors: allEx, MinFeatures: 6, Asset: asset}
+		r2, err := backtest.RunWithOptions(points, 800, 60, optsV2)
 		if err != nil {
 			fmt.Printf("  失败: %v\n", err)
 		} else {

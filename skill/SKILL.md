@@ -200,6 +200,8 @@ ETF / mempool / 资金费率 / 宏观等没有公开历史 API 的指标，guanf
 - Gold:价格动量、drawdown、Mayer、波动率、RSI、real yield、breakeven、DXY、COT、VIXY。
 - 任意美股:价格技术特征 + 通用宏观背景,不含 per-name 基本面。
 
+匹配时会按 horizon 重新加权：30d 偏短期技术/风险，90d 偏中期趋势与宏观边际变化，180d+ 偏估值/宏观/头寸。外部序列有最大 forward-fill 容忍（如 CBOE put/call 5 个交易日、FRED 7 天、CAPE 45 天），超过后该特征缺失，不参与距离计算。
+
 输出：
 - 30/90/180d 前向收益分布（avg/median/p10/p90）
 - 情景概率：上行延续 / 区间震荡 / 下行压力

@@ -104,6 +104,21 @@ func TestAnnotateHorizonConformalFillsFields(t *testing.T) {
 	}
 }
 
+func TestAnnotateHorizonConformalAppliesAssetHorizonCalibration(t *testing.T) {
+	returns := make([]float64, 40)
+	for i := range returns {
+		returns[i] = -0.10 + float64(i)*0.005
+	}
+	h := &HorizonForecast{Days: 90, MedianReturnPct: 0}
+	annotateHorizonConformalForAsset(h, returns, 100, "qqq")
+	if h.ConformalCalibrationScale != 1.8 {
+		t.Fatalf("ConformalCalibrationScale = %.2f, want 1.8", h.ConformalCalibrationScale)
+	}
+	if h.ConformalLowPct >= -10 || h.ConformalHighPct <= 10 {
+		t.Fatalf("expected calibrated interval to widen around median, got %.2f..%.2f", h.ConformalLowPct, h.ConformalHighPct)
+	}
+}
+
 func TestAnnotateHorizonConformalSkipsSmallSamples(t *testing.T) {
 	h := &HorizonForecast{Days: 30, MedianReturnPct: 1.0}
 	annotateHorizonConformal(h, []float64{0.01, 0.02}, 100)

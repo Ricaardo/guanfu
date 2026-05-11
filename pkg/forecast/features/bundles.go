@@ -18,6 +18,10 @@ import (
 // generic technicals + valuation (CAPE) + rates (DGS10) + USD (DXY)
 // + credit (HY spread) + curve (10Y-2Y) + risk (VIX).
 func EquityExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
+	return EquityExtractorsWithPutCallMode(s, PutCallAll)
+}
+
+func EquityExtractorsWithPutCallMode(s *store.PriceStore, putCallMode PutCallFeatureMode) []forecast.FeatureExtractor {
 	exts := GenericTechnicalExtractors()
 	for _, ex := range []forecast.FeatureExtractor{
 		CAPEExtractor(s),
@@ -26,7 +30,7 @@ func EquityExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
 		HYSpreadExtractor(s),
 		YieldCurveExtractor(s),
 		VIXExtractor(s),
-		PutCallRatioExtractor(s),
+		PutCallRatioExtractorWithMode(s, putCallMode),
 	} {
 		if ex != nil {
 			exts = append(exts, ex)

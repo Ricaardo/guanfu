@@ -160,33 +160,36 @@ Acceptance:
 
 Latest asset-specific backtest result:
 
-`go run ./cmd/guanfu backtest all --plain` on 2026-05-11:
+`go run ./cmd/guanfu backtest all --plain` on 2026-05-11 after stale-gated lookup,
+horizon-specific re-rank, and asset+horizon conformal calibration:
 
 | Asset | Days | Tests | Hit30d | Hit90d | Hit180d | PIT | CRPS | Coverage |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| spy | 2757 | 28 | 67.9% | 78.6% | 82.1% | 0.57 | 0.1297 | 100% |
-| qqq | 2757 | 28 | 60.7% | 85.7% | 78.6% | 0.56 | 0.1628 | 100% |
-| btc | 5777 | 62 | 59.7% | 66.1% | 71.0% | 0.45 | 0.5105 | 100% |
-| gold | 6447 | 69 | 52.2% | 62.3% | 62.3% | 0.50 | 0.1048 | 100% |
+| qqq | 2757 | 28 | 64.3% | 85.7% | 78.6% | 0.56 | 0.1724 | 100% |
+| spy | 2757 | 28 | 67.9% | 78.6% | 82.1% | 0.56 | 0.1224 | 100% |
+| btc | 5777 | 62 | 59.7% | 66.1% | 69.3% | 0.47 | 0.5030 | 100% |
+| gold | 6447 | 69 | 53.6% | 62.3% | 59.4% | 0.50 | 0.1154 | 100% |
 
 `go test ./pkg/engine -run TestBacktestBundles -v` on 2026-05-11 updated
 the static reliability table:
 
 | Asset | Tests | Hit30d | Hit90d | Hit180d |
 | --- | ---: | ---: | ---: | ---: |
-| btc | 46 | 58.7% | 60.9% | 58.7% |
-| qqq | 20 | 65.0% | 75.0% | 80.0% |
-| spy | 20 | 60.0% | 70.0% | 85.0% |
-| gold | 51 | 51.0% | 54.9% | 49.0% |
+| btc | 46 | 60.9% | 60.9% | 63.0% |
+| qqq | 20 | 70.0% | 75.0% | 80.0% |
+| spy | 20 | 60.0% | 75.0% | 85.0% |
+| gold | 51 | 45.1% | 62.7% | 52.9% |
 
 Interpretation:
 
-- Directional signal is usable across the four current assets.
+- Directional signal is usable across the four current assets except the
+  hard-blocked Gold 30d cell.
 - QQQ/SPY are slightly optimistic by PIT.
 - Gold calibration is currently best.
-- Equity feature coverage is now 100% after CBOE put/call refresh; Gold 180d
-  remains hard-blocked and Gold 90d needs a caveat because 54.9% is below the
-  55% reliability threshold.
+- Equity feature coverage is current-state 100%; CBOE put/call now has a max
+  age gate, so historical gaps no longer leak through unlimited forward-fill.
+- Gold 30d is now hard-blocked after horizon-specific re-rank; Gold 90d is the
+  usable gold forecast cell.
 
 Next steps:
 
@@ -243,8 +246,11 @@ Remaining TODO:
 
 - Optional: implement a cached full CBOE daily-page backfill for 2019-10-07 to
   the recent-window boundary if full post-2019 history becomes necessary.
-- Run ablation on the three put/call features after enough stable CBOE coverage
-  is present; keep them only if hit rate, PIT, and CRPS do not regress.
+- Put/call ablation is now reproducible via
+  `go run ./cmd/guanfu backtest all --ablate-putcall --plain`; latest run shows
+  no hit-rate lift from the three put/call variants yet, so promotion weight
+  should stay conservative until full CBOE history is backfilled or more current
+  samples accumulate.
 - Continue searching for reliable no-key PE/PB or NAAIM/AAII alternatives, but
   do not add latest-only snapshots to forecast bundles.
 
@@ -332,4 +338,6 @@ The roadmap starts after these recent fixes:
   numbers and confirmed QQQ/SPY include put/call features.
 - `go run ./cmd/guanfu backtest all --plain` passed for BTC/QQQ/SPY/Gold with
   100% feature coverage.
+- `go run ./cmd/guanfu backtest all --ablate-putcall --plain` added a
+  reproducible QQQ/SPY put/call ablation table.
 - Final gate for this pass: `go test ./...`, `go vet ./...`, `git diff --check`.

@@ -288,6 +288,10 @@ func main() {
 		runAllocate(*jsonOut, *pretty, *plain || *noEmoji)
 		return
 	case "backtest":
+		if hasArg(trailing[1:], "--ablate-putcall", "-ablate-putcall") {
+			runPutCallAblation(*jsonOut, *pretty, *plain || *noEmoji)
+			return
+		}
 		if backtestAsset == "all" {
 			runBacktestAll(*jsonOut, *pretty, *plain || *noEmoji)
 		} else {
@@ -481,6 +485,17 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 	if forecastPath && fc != nil {
 		fmt.Println(forecast.BuildPathProjection(fc, 180).ASCIIFan(70))
 	}
+}
+
+func hasArg(args []string, names ...string) bool {
+	for _, arg := range args {
+		for _, name := range names {
+			if arg == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // readStock reads an arbitrary US stock by ticker (D3 + A6).

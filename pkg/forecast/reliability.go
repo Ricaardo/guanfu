@@ -48,29 +48,29 @@ const minSamplesForClaim = 10
 // Source: TestBacktestBundles output 2026-05-11 (post data-refresh).
 var assetHorizonReliability = map[string]map[int]HorizonReliability{
 	"btc": {
-		30:  {DirHit: 0.587, NTests: 46, AsOf: "2026-05-11"},
+		30:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-11"},
 		90:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-11"},
-		180: {DirHit: 0.587, NTests: 46, AsOf: "2026-05-11"},
+		180: {DirHit: 0.630, NTests: 46, AsOf: "2026-05-11"},
 	},
 	"qqq": {
-		30:  {DirHit: 0.650, NTests: 20, AsOf: "2026-05-11"},
+		30:  {DirHit: 0.700, NTests: 20, AsOf: "2026-05-11"},
 		90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-11"},
 		180: {DirHit: 0.800, NTests: 20, AsOf: "2026-05-11"},
 	},
 	"spy": {
 		30:  {DirHit: 0.600, NTests: 20, AsOf: "2026-05-11"},
-		90:  {DirHit: 0.700, NTests: 20, AsOf: "2026-05-11"},
+		90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-11"},
 		180: {DirHit: 0.850, NTests: 20, AsOf: "2026-05-11"},
 	},
 	"gold": {
-		30: {DirHit: 0.510, NTests: 51, AsOf: "2026-05-11"},
-		90: {DirHit: 0.549, NTests: 51, AsOf: "2026-05-11"},
+		30: {DirHit: 0.451, NTests: 51, AsOf: "2026-05-11"},
+		90: {DirHit: 0.627, NTests: 51, AsOf: "2026-05-11"},
 		// 180d is intentionally retained here after being dropped from
 		// assetHorizons["gold"] (forecast.go). Users who override via
 		// --forecast-horizons 180 can still query this cell and get the
-		// hard-block caveat; removing it would silently suppress the
+		// reliability caveat; removing it would silently suppress the
 		// warning for explicit queries.
-		180: {DirHit: 0.490, NTests: 51, AsOf: "2026-05-11"},
+		180: {DirHit: 0.529, NTests: 51, AsOf: "2026-05-11"},
 	},
 }
 

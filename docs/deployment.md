@@ -231,6 +231,7 @@ guanfu digest                        # 每日 30 秒摘要(alerts + claims + pri
 # 回测与校准
 guanfu backtest btc                  # 单资产 kNN 回测
 guanfu backtest all                  # 全资产
+guanfu backtest all --ablate-putcall # QQQ/SPY put/call 特征消融
 guanfu calibrate [--asset btc]       # 读 ledger 对比实际价格,算 dir_hit / 区间覆盖率
 guanfu status --frank                # 按可靠性三桶分类
 

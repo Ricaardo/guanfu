@@ -104,7 +104,8 @@ func runBacktestAll(jsonOut, pretty, plain bool) {
 
 		extractors := backtestExtractorsForAsset(asset, s)
 		diag := diagnoseFeatureBundle(asset, points, extractors)
-		r, err := backtest.Run(points, len(points)/3, 60, extractors, horizons)
+		opts := forecast.Options{Horizons: horizons, TopK: 21, StepDays: 7, Extractors: extractors, MinFeatures: 6, Asset: asset}
+		r, err := backtest.RunWithOptions(points, len(points)/3, 60, opts)
 		if err != nil {
 			continue
 		}
@@ -263,7 +264,7 @@ func generateSuggestions(assets []AssetBacktestResult, comp ComparisonTable) []s
 
 	// 1. Horizon-specific weighting
 	if avg180 > avg30 {
-		s = append(s, "长周期(180d)命中率更高 → 增加长周期特征权重，减少短周期噪声")
+		s = append(s, "长周期(180d)命中率更高 → 已启用 horizon-specific analog re-rank；继续观察长周期权重是否改善校准")
 	} else {
 		s = append(s, "短周期(30d)命中率更高 → kNN 更适合短期形态匹配，考虑缩短匹配窗口")
 	}
@@ -283,7 +284,7 @@ func generateSuggestions(assets []AssetBacktestResult, comp ComparisonTable) []s
 
 	// 4. Ensemble approach
 	s = append(s, "模型架构改进:")
-	s = append(s, "  a) 多周期 ensemble: 分别训练 30d/90d/180d 专用模型")
+	s = append(s, "  a) 多周期 ensemble: horizon-specific re-rank 已落地，下一步验证是否需要独立 TopK / window")
 	s = append(s, "  b) 动态特征选择: 不同市场状态使用不同特征子集")
 	s = append(s, "  c) 引入 regime 先验: bull/bear/fracture 状态下调整候选池权重")
 	s = append(s, "  d) 时序交叉验证替代随机切分: 避免前视偏差")
