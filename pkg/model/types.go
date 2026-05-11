@@ -241,11 +241,26 @@ type SourceHealth struct {
 	Warnings     []string `json:"warnings,omitempty"`
 }
 
+// PanelDomainMeta describes the asset-specific reading lens for a rendered
+// panel. It is additive metadata; the indicator maps below remain stable for
+// backward-compatible JSON consumers.
+type PanelDomainMeta struct {
+	Key     string `json:"key"`
+	Title   string `json:"title,omitempty"`
+	Icon    string `json:"icon,omitempty"`
+	Purpose string `json:"purpose,omitempty"`
+}
+
 // IndicatorPanel CoinMan v2 主输出
 type IndicatorPanel struct {
-	Asset    string       `json:"asset,omitempty"` // qqq/spy/gold/btc; printers and verdict logic dispatch on this
-	Date     string       `json:"date"`
-	Snapshot SnapshotData `json:"snapshot"`
+	Asset           string            `json:"asset,omitempty"` // qqq/spy/gold/btc/stock_*; printers and verdict logic dispatch on this
+	ProfileKey      string            `json:"profile_key,omitempty"`
+	ProfileVersion  string            `json:"profile_version,omitempty"`
+	AssetClass      string            `json:"asset_class,omitempty"`
+	SkillProfileURI string            `json:"skill_profile_uri,omitempty"`
+	DomainMeta      []PanelDomainMeta `json:"domain_meta,omitempty"`
+	Date            string            `json:"date"`
+	Snapshot        SnapshotData      `json:"snapshot"`
 
 	// 8 个 domain（每个 domain 是 indicator name → Indicator 的 map）
 	Cycle       map[string]Indicator `json:"cycle"`

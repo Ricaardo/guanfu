@@ -75,6 +75,7 @@ func (c *Calculator) BuildPanel(snap *model.MarketSnapshot) *model.IndicatorPane
 	c.fillTechnical(panel, snap, now)
 	c.fillCrossAsset(panel, snap, now)
 	EnrichGlobalInvestorMacro(panel, c.PriceStore)
+	AnnotatePanelProfile(panel, "btc")
 
 	c.persistAndAnnotateHistory(panel, dataDate)
 	panel.StaleWarnings = dedupeStrings(panel.StaleWarnings)

@@ -544,9 +544,11 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 		PriceAsOf:    latest.Date,
 		PriceHistory: history,
 	})
+	stockKey := client.StockKey(ticker)
+	panel.Asset = stockKey
+	engine.AnnotatePanelProfile(panel, stockKey)
 	engine.EnrichGlobalInvestorMacro(panel, s)
 
-	stockKey := client.StockKey(ticker)
 	horizons, err := resolveHorizonsArg(forecastHorizonsArg, stockKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "parse horizons: %v\n", err)
@@ -738,29 +740,18 @@ func printEquityPanel(p *model.IndicatorPanel, plain bool) {
 	}
 	fmt.Println()
 
-	equityDomains := []struct {
-		Key   string
-		Title string
-		Icon  string
-	}{
-		{"technical", "Technical 技术指标", "📈"},
-		{"macro", "Macro 宏观", "🌍"},
-		{"positioning", "Sentiment 情绪", "📊"},
-		{"valuation", "Valuation 估值", "💰"},
+	domains := p.DomainMeta
+	if len(domains) == 0 {
+		domains = []model.PanelDomainMeta{
+			{Key: "technical", Title: "Technical 技术指标", Icon: "📈"},
+			{Key: "macro", Title: "Macro 宏观", Icon: "🌍"},
+			{Key: "positioning", Title: "Sentiment 情绪", Icon: "📊"},
+			{Key: "valuation", Title: "Valuation 估值", Icon: "💰"},
+		}
 	}
 
-	for _, d := range equityDomains {
-		var indicators map[string]model.Indicator
-		switch d.Key {
-		case "technical":
-			indicators = p.Technical
-		case "macro":
-			indicators = p.Macro
-		case "positioning":
-			indicators = p.Positioning
-		case "valuation":
-			indicators = p.Valuation
-		}
+	for _, d := range domains {
+		indicators := panelDomainIndicators(p, d.Key)
 		if len(indicators) == 0 {
 			continue
 		}
@@ -771,6 +762,29 @@ func printEquityPanel(p *model.IndicatorPanel, plain bool) {
 		}
 		printDomainTable(indicators)
 		fmt.Println()
+	}
+}
+
+func panelDomainIndicators(p *model.IndicatorPanel, key string) map[string]model.Indicator {
+	switch key {
+	case "cycle":
+		return p.Cycle
+	case "valuation":
+		return p.Valuation
+	case "network":
+		return p.Network
+	case "positioning":
+		return p.Positioning
+	case "macro":
+		return p.Macro
+	case "flow":
+		return p.Flow
+	case "technical":
+		return p.Technical
+	case "cross_asset":
+		return p.CrossAsset
+	default:
+		return nil
 	}
 }
 
@@ -1310,10 +1324,16 @@ func collectSourceHealthIssues(p *model.IndicatorPanel) []model.SourceHealth {
 // filterDomain 仅保留指定 domain
 func filterDomain(p *model.IndicatorPanel, name string) *model.IndicatorPanel {
 	out := &model.IndicatorPanel{
-		Date:          p.Date,
-		Snapshot:      p.Snapshot,
-		StaleWarnings: append([]string(nil), p.StaleWarnings...),
-		SourceHealth:  append([]model.SourceHealth(nil), p.SourceHealth...),
+		Asset:           p.Asset,
+		ProfileKey:      p.ProfileKey,
+		ProfileVersion:  p.ProfileVersion,
+		AssetClass:      p.AssetClass,
+		SkillProfileURI: p.SkillProfileURI,
+		DomainMeta:      append([]model.PanelDomainMeta(nil), p.DomainMeta...),
+		Date:            p.Date,
+		Snapshot:        p.Snapshot,
+		StaleWarnings:   append([]string(nil), p.StaleWarnings...),
+		SourceHealth:    append([]model.SourceHealth(nil), p.SourceHealth...),
 	}
 	switch name {
 	case "cycle":

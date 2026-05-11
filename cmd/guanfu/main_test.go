@@ -13,6 +13,14 @@ import (
 
 func TestFilterDomainPreservesMetadata(t *testing.T) {
 	panel := &model.IndicatorPanel{
+		Asset:           "btc",
+		ProfileKey:      "btc",
+		ProfileVersion:  "2026-05-11",
+		AssetClass:      "btc",
+		SkillProfileURI: "guanfu://skill/profiles/btc",
+		DomainMeta: []model.PanelDomainMeta{
+			{Key: "cycle", Title: "Cycle 周期定位"},
+		},
 		Date: "2026-05-02",
 		Snapshot: model.SnapshotData{
 			BTCPrice: 100000,
@@ -32,6 +40,9 @@ func TestFilterDomainPreservesMetadata(t *testing.T) {
 	got := filterDomain(panel, "cycle")
 	if got.Date != panel.Date || got.Snapshot.BTCPrice != panel.Snapshot.BTCPrice {
 		t.Fatalf("metadata not preserved: %+v", got)
+	}
+	if got.ProfileKey != "btc" || got.AssetClass != "btc" || len(got.DomainMeta) != 1 {
+		t.Fatalf("profile metadata not preserved: %+v", got)
 	}
 	if len(got.StaleWarnings) != 1 || got.StaleWarnings[0] != "coinmetrics unavailable" {
 		t.Fatalf("stale warnings not preserved: %+v", got.StaleWarnings)

@@ -149,6 +149,7 @@ func BuildEquityPanel(in *EquityPanelInput) *model.IndicatorPanel {
 		}
 	}
 
+	AnnotatePanelProfile(panel, in.Asset)
 	return panel
 }
 

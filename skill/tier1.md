@@ -17,6 +17,11 @@ tier: 1
 
 读盘必须同时加载对应 `skill/profiles/*.md`:BTC 用 `btc.md`,QQQ/SPY 用 `equity_index.md`,Gold 用 `gold.md`,任意美股用 `us_stock.md`。不要把 BTC 的 halving/AHR/network 语义套到非 BTC 资产。
 
+Panel JSON 会带 profile metadata:`profile_key`、`profile_version`、
+`asset_class`、`skill_profile_uri`、`domain_meta`。`domain_meta` 是当前资产
+的读盘 lens；AI 应按它决定哪些 domain 有语义,不要假设所有资产都有 BTC 的
+cycle/network/flow/cross_asset。
+
 Forecast JSON 会带 profile metadata:`profile_key`、`profile_version`、
 `asset_class`、`feature_bundle`、`skill_profile_uri`。这些字段来自
 `pkg/assetprofile/profile.go`;AI 消费方应优先按 `skill_profile_uri` 选择 profile。

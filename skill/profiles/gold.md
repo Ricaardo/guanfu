@@ -24,6 +24,10 @@ Domains:
 Gold must not be treated as an equity ETF. Shared technical calculations are
 allowed, but the reading lens and verdict rules are gold-specific.
 
+Current JSON compatibility note: until `IndicatorPanel` supports fully dynamic
+domain maps, the code maps Gold reading evidence into `valuation`, `macro`, and
+`technical` maps and exposes the gold-specific lens through `domain_meta`.
+
 ## Forecast Profile
 
 Default horizons: `30,60,90,120`.

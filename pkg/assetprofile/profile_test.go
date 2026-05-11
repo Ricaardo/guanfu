@@ -18,7 +18,7 @@ func TestForStockUsesUSStockProfile(t *testing.T) {
 	if !ok {
 		t.Fatal("stock profile not found")
 	}
-	if p.Class != ClassUSStock || p.SkillProfileURI == "" {
+	if p.Class != ClassUSStock || p.SkillProfileURI == "" || len(p.ReadingDomains) == 0 {
 		t.Fatalf("unexpected stock profile: %+v", p)
 	}
 }
@@ -59,9 +59,29 @@ func TestExpectedFeaturesFor(t *testing.T) {
 	}
 }
 
+func TestReadingDomainsFor(t *testing.T) {
+	gold := ReadingDomainsFor("gold")
+	if !containsDomain(gold, "macro") || containsDomain(gold, "network") {
+		t.Fatalf("gold reading domains should be gold-specific: %+v", gold)
+	}
+	gold[0].Title = "mutated"
+	if ReadingDomainsFor("gold")[0].Title == "mutated" {
+		t.Fatal("ReadingDomainsFor returned aliased slice")
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, v := range values {
 		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsDomain(values []DomainSpec, want string) bool {
+	for _, v := range values {
+		if v.Key == want {
 			return true
 		}
 	}

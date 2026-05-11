@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Ricaardo/guanfu/pkg/model"
@@ -56,6 +57,9 @@ func TestBuildEquityPanel_Basic(t *testing.T) {
 	// Macro domain
 	if vix, ok := panel.Macro["vix_level"]; !ok || vix.Value != 18 {
 		t.Fatal("expected vix_level indicator")
+	}
+	if panel.ProfileKey != "qqq" || panel.AssetClass != "equity_index" || len(panel.DomainMeta) == 0 {
+		t.Fatalf("expected profile metadata, got profile=%q class=%q domains=%+v", panel.ProfileKey, panel.AssetClass, panel.DomainMeta)
 	}
 
 	// Sentiment
@@ -140,6 +144,36 @@ func TestBuildEquityVerdict_Bearish(t *testing.T) {
 	}
 }
 
+func TestBuildGoldVerdictUsesGoldRiskOffSemantics(t *testing.T) {
+	panel := &model.IndicatorPanel{
+		Asset: "gold",
+		Date:  "2026-05-05",
+		Technical: map[string]model.Indicator{
+			"rsi_14": {Value: 50},
+		},
+		Macro: map[string]model.Indicator{
+			"vix_level": {Value: 35},
+		},
+		Valuation: map[string]model.Indicator{
+			"real_yield_proxy": {Value: 101},
+			"dxy_level":        {Value: 92},
+		},
+	}
+	AnnotatePanelProfile(panel, "gold")
+
+	verdict := BuildGoldVerdict(panel)
+	macro := findDomain(verdict, "macro")
+	if macro.Vote <= 0 || len(macro.Bullish) == 0 {
+		t.Fatalf("expected VIX risk-off to be gold-bullish, got %+v", macro)
+	}
+	if containsString(macro.Bearish, "VIX恐慌") {
+		t.Fatalf("gold macro should not use equity VIX-bearish semantics: %+v", macro)
+	}
+	if verdict.NetDirection <= 0 {
+		t.Fatalf("expected positive gold verdict, got %+v", verdict)
+	}
+}
+
 func TestCalcRSI(t *testing.T) {
 	// Newest-first increasing sequence: all gains → RSI should be 100
 	up := []float64{15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}
@@ -165,6 +199,15 @@ func TestComputeVol30d(t *testing.T) {
 	if vol.Value < 0 {
 		t.Fatalf("expected non-negative vol, got %f", vol.Value)
 	}
+}
+
+func containsString(values []string, needle string) bool {
+	for _, v := range values {
+		if strings.Contains(v, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestComputeDrawdown(t *testing.T) {

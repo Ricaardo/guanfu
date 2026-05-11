@@ -77,7 +77,7 @@ guanfu status             # PriceStore 数据状态诊断
 
 | 工具 | 说明 | 关键参数 | 输出 |
 |---|---|---|---|
-| `get_panel` | 完整盘面(多资产)。BTC = 8 域 40+ 指标;权益/黄金 = 6 域 | `asset` (默认 btc), `timeout_seconds` (默认 90) | `IndicatorPanel` JSON:`asset` / `date` / `snapshot` / 8 个 domain map / `source_health` |
+| `get_panel` | 完整盘面(多资产)。BTC = 8 域 40+ 指标;权益/黄金 = profile lens | `asset` (默认 btc), `timeout_seconds` (默认 90) | `IndicatorPanel` JSON:`asset` / `profile_key` / `domain_meta` / `date` / `snapshot` / domain maps / `source_health` |
 | `get_verdict` | 结构化多域读盘 | `asset`, `timeout_seconds`, `include_panel` (默认 false) | `Verdict` JSON:`net_direction` / `regime` / `domains` / `top_proximity` / `bottom_proximity` |
 | `get_forecast` | kNN 历史相似走势推演 | `asset`, `horizons` (默认 auto = 资产专属),  `top_k` (默认 21,最小 5),`include_panel` | `Forecast` JSON:每个 horizon 的 reliability_note / hard_blocked / quantiles + 邻居 |
 | **`get_stock_forecast`** | **任意美股 kNN 推演**(Yahoo 自动拉取 + `USStockExtractors`) | `ticker` (必填,如 AAPL/MSFT), `horizons`, `top_k`, `days` (默认 3650) | 同 `get_forecast`,但 asset 为 `stock_<ticker>` |
@@ -152,7 +152,7 @@ guanfu status             # PriceStore 数据状态诊断
 
 ## kNN 预测引擎 + 可靠性标注
 
-Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。`pkg/assetprofile` 已是 forecast 侧单一真源:profile 决定资产类、默认 horizon、feature bundle、horizon 权重、reliability、conformal calibration scale 和 skill profile URI。下一阶段还要把 raw feature normalization scale 与 ReadingLens / verdict policy 完整迁入 profile。
+Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。`pkg/assetprofile` 已是 forecast 侧单一真源:profile 决定资产类、默认 horizon、feature bundle、horizon 权重、reliability、conformal calibration scale、reading domain metadata 和 skill profile URI。下一阶段还要把 raw feature normalization scale 与剩余 verdict policy 完整迁入 profile。
 
 每个 `Forecast` 顶层附 `profile_key` / `profile_version` / `asset_class` / `feature_bundle` / `skill_profile_uri`；每个 `HorizonForecast` 附 `reliability_note` + `hard_blocked` 字段。三档规则、当前 (asset, horizon) 命中率表、`hard_blocked` 时的契约（数值字段保留但不渲染），全部见 [`tier1.md`](tier1.md) § 3 "可靠性标注"——**AI 读盘必载**。profile 真源 `pkg/assetprofile/profile.go`，渲染规则在 `pkg/forecast/reliability.go`。
 

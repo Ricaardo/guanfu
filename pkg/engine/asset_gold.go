@@ -106,10 +106,37 @@ func (a *GoldAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error)
 }
 
 func (a *GoldAsset) BuildVerdict(panel *model.IndicatorPanel) *Verdict {
-	// Extend equity verdict with gold-specific valuation
-	v := BuildEquityVerdict(panel)
+	return BuildGoldVerdict(panel)
+}
 
-	// Add valuation domain vote
+func BuildGoldVerdict(panel *model.IndicatorPanel) *Verdict {
+	v := &Verdict{
+		Date:            panel.Date,
+		Confidence:      "中",
+		Domains:         make([]DomainVote, 0, 3),
+		Reasons:         make([]string, 0),
+		CounterEvidence: make([]string, 0),
+		KillCriteria:    make([]string, 0),
+	}
+
+	techVote, techBull, techBear := scoreEquityTechnical(panel.Technical)
+	v.Domains = append(v.Domains, DomainVote{
+		Domain:   "technical",
+		Vote:     techVote,
+		Bullish:  techBull,
+		Bearish:  techBear,
+		Coverage: coverageScore(panel.Technical),
+	})
+
+	macroVote, macroBull, macroBear := scoreGoldMacro(panel.Macro)
+	v.Domains = append(v.Domains, DomainVote{
+		Domain:   "macro",
+		Vote:     macroVote,
+		Bullish:  macroBull,
+		Bearish:  macroBear,
+		Coverage: coverageScore(panel.Macro),
+	})
+
 	valVote, valBull, valBear := scoreGoldValuation(panel.Valuation)
 	v.Domains = append(v.Domains, DomainVote{
 		Domain:   "valuation",
@@ -119,7 +146,7 @@ func (a *GoldAsset) BuildVerdict(panel *model.IndicatorPanel) *Verdict {
 		Coverage: coverageScore(panel.Valuation),
 	})
 
-	v.NetDirection += valVote
+	v.NetDirection = techVote + macroVote + valVote
 
 	// Recompute coverage
 	totalCoverage := 0.0
@@ -134,11 +161,22 @@ func (a *GoldAsset) BuildVerdict(panel *model.IndicatorPanel) *Verdict {
 	switch {
 	case v.NetDirection >= 3:
 		v.Regime = "偏强积累区"
+		v.Stance = "实际利率/美元/技术面合力偏多"
 	case v.NetDirection <= -3:
 		v.Regime = "偏弱谨慎区"
+		v.Stance = "美元或实际利率压力偏强，黄金信号偏弱"
 	default:
 		v.Regime = "中性"
+		v.Stance = "黄金驱动不一致，等待实际利率/美元/风险偏好确认"
 	}
+
+	v.Reasons, v.CounterEvidence = pickEvidenceFromVotes(v.Domains, v.NetDirection)
+	if v.Coverage < 0.5 {
+		v.Confidence = "低"
+		v.Stance += " (低覆盖)"
+	}
+	v.TopProximity = topProximityFromPanel(panel)
+	v.BottomProximity = bottomProximityFromPanel(panel)
 
 	return v
 }
@@ -224,9 +262,10 @@ func goldRealYieldLabel(tltPrice float64) string {
 }
 
 func goldDXYLabel(dxy float64) string {
-	if dxy > 30 {
+	vote, _ := scoreGoldDXY(dxy)
+	if vote < 0 {
 		return "美元偏强 (压制黄金)"
-	} else if dxy < 25 {
+	} else if vote > 0 {
 		return "美元偏弱 (利好黄金)"
 	}
 	return "美元中性"
@@ -253,16 +292,51 @@ func scoreGoldValuation(v map[string]model.Indicator) (vote int, bull, bear []st
 			vote--
 		}
 	}
-	if vix, ok := v["vix_level"]; ok && vix.IsAvailable() {
-		if vix.Value > 30 {
-			bull = append(bull, fmt.Sprintf("VIX恐慌(%.0f)→避险", vix.Value))
+	if dxy, ok := v["dxy_level"]; ok && dxy.IsAvailable() {
+		dxyVote, note := scoreGoldDXY(dxy.Value)
+		if dxyVote > 0 {
+			bull = append(bull, note)
 			vote++
-		} else if vix.Value < 12 {
-			bear = append(bear, "VIX极低→无避险需求")
+		} else if dxyVote < 0 {
+			bear = append(bear, note)
 			vote--
 		}
 	}
 	return
+}
+
+func scoreGoldMacro(m map[string]model.Indicator) (vote int, bull, bear []string) {
+	if vix, ok := m["vix_level"]; ok && vix.IsAvailable() {
+		if vix.Value > 30 {
+			bull = append(bull, fmt.Sprintf("VIX恐慌(%.0f)→避险需求", vix.Value))
+			vote++
+		} else if vix.Value < 12 {
+			bear = append(bear, "VIX极低→避险需求不足")
+			vote--
+		}
+	}
+	return
+}
+
+func scoreGoldDXY(dxy float64) (int, string) {
+	if dxy >= 80 {
+		switch {
+		case dxy > 105:
+			return -1, fmt.Sprintf("DXY偏强(%.1f)压制黄金", dxy)
+		case dxy < 95:
+			return +1, fmt.Sprintf("DXY偏弱(%.1f)支撑黄金", dxy)
+		default:
+			return 0, ""
+		}
+	}
+	switch {
+	case dxy > 30:
+		return -1, fmt.Sprintf("UUP偏强(%.1f)压制黄金", dxy)
+	case dxy < 25:
+		return +1, fmt.Sprintf("UUP偏弱(%.1f)支撑黄金", dxy)
+	default:
+		return 0, ""
+	}
 }
 
 func init() {

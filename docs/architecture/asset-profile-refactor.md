@@ -195,15 +195,21 @@ Acceptance:
 
 ### Phase 3 - Reading Lens Refactor
 
+Status: partially implemented.
+
 - Replace BTC-shaped `BuildVerdict` reuse with profile-specific `ReadingLens`
-  verdict policies.
-- Split Gold from `BuildEquityPanel`; keep shared technical helper functions.
-- Make `IndicatorPanel` capable of carrying profile domain metadata, not only
-  fixed BTC-era domain names.
+  verdict policies. Gold now has a gold-specific verdict path instead of
+  extending the equity verdict.
+- Split semantic Gold reading from `BuildEquityPanel`; keep shared technical
+  helper functions.
+- `IndicatorPanel` now carries `profile_key`, `profile_version`, `asset_class`,
+  `skill_profile_uri`, and `domain_meta` as additive metadata while preserving
+  the stable domain maps for old JSON consumers.
 
 Acceptance:
 
-- Gold no longer depends on an equity panel builder for semantic domains.
+- Partial: Gold no longer depends on equity verdict semantics; it still shares
+  the technical panel helper.
 - QQQ/SPY and arbitrary US stocks do not expose BTC-only domain expectations.
 
 ### Phase 4 - Forecast Feature Normalization

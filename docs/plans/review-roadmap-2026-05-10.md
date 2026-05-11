@@ -41,19 +41,25 @@ Current state:
   weights, expected feature names, and profile metadata from the registry.
 - `Forecast` JSON now exposes `profile_key`, `profile_version`, `asset_class`,
   `feature_bundle`, and `skill_profile_uri`.
+- `IndicatorPanel` JSON now exposes profile metadata plus `domain_meta` for
+  asset-specific reading lenses.
+- Gold verdict no longer extends the equity verdict; VIX risk-off is interpreted
+  as a gold safe-haven driver rather than an equity-style bearish macro signal.
 
 Next steps:
 
 - Split raw feature extraction from profile-specific normalization.
-- Move ReadingLens / verdict policy into profile-owned contracts.
-- Stop Gold from depending on equity panel semantics for reading output.
+- Move the remaining QQQ/SPY/US-stock verdict policy into profile-owned
+  contracts.
+- Split Gold technical panel construction out of the equity helper if/when the
+  current shared helper starts carrying equity-only assumptions.
 
 Acceptance:
 
 - Done: Backtest output includes active profile name and profile version.
 - Partially done: adding a forecast profile no longer requires updating
-  CLI/MCP/backtest switch statements, but adding a new reading lens still
-  touches `engine`.
+  CLI/MCP/backtest switch statements. Adding a new reading lens has metadata
+  support, but verdict implementation still touches `engine`.
 
 ## P1 - Data Source Health And Output Trust
 

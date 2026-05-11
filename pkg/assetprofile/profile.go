@@ -26,6 +26,7 @@ type Profile struct {
 	Class            AssetClass
 	DisplayName      string
 	Version          string
+	ReadingDomains   []DomainSpec
 	Horizons         []int
 	Reliability      map[int]ReliabilityCell
 	ConformalScale   map[int]float64
@@ -33,6 +34,13 @@ type Profile struct {
 	FeatureBundle    string
 	ExpectedFeatures []string
 	SkillProfileURI  string
+}
+
+type DomainSpec struct {
+	Key     string
+	Title   string
+	Icon    string
+	Purpose string
 }
 
 type HorizonWeightBand struct {
@@ -48,6 +56,7 @@ var profiles = map[string]Profile{
 		Class:            ClassBTC,
 		DisplayName:      "Bitcoin",
 		Version:          version20260511,
+		ReadingDomains:   btcReadingDomains(),
 		Horizons:         []int{30, 90, 180},
 		FeatureBundle:    "btc_core",
 		ExpectedFeatures: btcExpectedFeatures(),
@@ -64,6 +73,7 @@ var profiles = map[string]Profile{
 		Class:            ClassEquityIndex,
 		DisplayName:      "Nasdaq-100 ETF",
 		Version:          version20260511,
+		ReadingDomains:   equityReadingDomains(),
 		Horizons:         []int{30, 63, 90, 180, 252},
 		FeatureBundle:    "equity_index",
 		ExpectedFeatures: equityExpectedFeatures(),
@@ -81,6 +91,7 @@ var profiles = map[string]Profile{
 		Class:            ClassEquityIndex,
 		DisplayName:      "S&P 500 ETF",
 		Version:          version20260511,
+		ReadingDomains:   equityReadingDomains(),
 		Horizons:         []int{30, 63, 90, 180, 252},
 		FeatureBundle:    "equity_index",
 		ExpectedFeatures: equityExpectedFeatures(),
@@ -98,6 +109,7 @@ var profiles = map[string]Profile{
 		Class:            ClassGold,
 		DisplayName:      "London Gold (XAU/USD)",
 		Version:          version20260511,
+		ReadingDomains:   goldReadingDomains(),
 		Horizons:         []int{30, 60, 90, 120},
 		FeatureBundle:    "gold",
 		ExpectedFeatures: goldExpectedFeatures(),
@@ -117,12 +129,52 @@ var profiles = map[string]Profile{
 		Class:            ClassUSStock,
 		DisplayName:      "US Stock",
 		Version:          version20260511,
+		ReadingDomains:   usStockReadingDomains(),
 		Horizons:         []int{30, 90, 180},
 		FeatureBundle:    "us_stock",
 		ExpectedFeatures: usStockExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/us_stock",
 		HorizonWeights:   defaultHorizonWeights(),
 	},
+}
+
+func btcReadingDomains() []DomainSpec {
+	return []DomainSpec{
+		{Key: "cycle", Title: "Cycle 周期定位", Icon: "🌊", Purpose: "halving cycle, long-cycle trend, miner-cycle context"},
+		{Key: "valuation", Title: "Valuation 估值", Icon: "💰", Purpose: "BTC-native valuation and on-chain valuation"},
+		{Key: "network", Title: "Network 网络", Icon: "⛏️", Purpose: "hashrate, difficulty, usage, and miner stress"},
+		{Key: "positioning", Title: "Positioning 杠杆 & 情绪", Icon: "📊", Purpose: "derivatives leverage, options skew, and sentiment"},
+		{Key: "macro", Title: "Macro 宏观", Icon: "🌍", Purpose: "rates, dollar, liquidity, and broad risk backdrop"},
+		{Key: "flow", Title: "Flow 资金流", Icon: "💸", Purpose: "ETF, stablecoin, exchange, and liquidity flow"},
+		{Key: "technical", Title: "Technical 技术指标", Icon: "📈", Purpose: "trend, momentum, volatility, and drawdown state"},
+		{Key: "cross_asset", Title: "CrossAsset 跨资产", Icon: "🔗", Purpose: "BTC versus gold, equities, dollar, and rates"},
+	}
+}
+
+func equityReadingDomains() []DomainSpec {
+	return []DomainSpec{
+		{Key: "valuation", Title: "Valuation 估值", Icon: "💰", Purpose: "CAPE and broad valuation context when historical series exist"},
+		{Key: "macro", Title: "Macro 利率/信用", Icon: "🌍", Purpose: "rates, dollar, credit, liquidity, and volatility backdrop"},
+		{Key: "positioning", Title: "Options/Sentiment 期权情绪", Icon: "📊", Purpose: "put/call, fear-greed, and crowding context"},
+		{Key: "technical", Title: "Technical 技术指标", Icon: "📈", Purpose: "trend, momentum, volatility, and drawdown state"},
+	}
+}
+
+func goldReadingDomains() []DomainSpec {
+	return []DomainSpec{
+		{Key: "valuation", Title: "RealYield/USD 黄金估值", Icon: "💰", Purpose: "real-yield proxy, dollar pressure, and safe-haven valuation"},
+		{Key: "macro", Title: "RiskOff/Macro 避险宏观", Icon: "🌍", Purpose: "VIX risk-off demand, dollar, and long-duration rate proxy"},
+		{Key: "technical", Title: "Technical 技术指标", Icon: "📈", Purpose: "gold trend, momentum, volatility, and drawdown state"},
+	}
+}
+
+func usStockReadingDomains() []DomainSpec {
+	return []DomainSpec{
+		{Key: "valuation", Title: "Valuation 估值", Icon: "💰", Purpose: "per-name valuation when historical or snapshot data exists"},
+		{Key: "macro", Title: "Macro 宏观", Icon: "🌍", Purpose: "rates, dollar, credit, and broad risk backdrop"},
+		{Key: "positioning", Title: "Flow/Sentiment 流向情绪", Icon: "📊", Purpose: "volume, options, short interest, and event-risk context when available"},
+		{Key: "technical", Title: "Technical 技术指标", Icon: "📈", Purpose: "single-name trend, momentum, volatility, and drawdown state"},
+	}
 }
 
 func genericTechnicalFeatures() []string {
@@ -231,6 +283,13 @@ func HorizonsFor(asset string) []int {
 	return append([]int(nil), profiles["btc"].Horizons...)
 }
 
+func ReadingDomainsFor(asset string) []DomainSpec {
+	if p, ok := For(asset); ok && len(p.ReadingDomains) > 0 {
+		return cloneDomainSpecs(p.ReadingDomains)
+	}
+	return cloneDomainSpecs(profiles["btc"].ReadingDomains)
+}
+
 func ReliabilityFor(asset string, days int) (ReliabilityCell, bool) {
 	if strings.TrimSpace(asset) == "" {
 		return ReliabilityCell{}, false
@@ -289,12 +348,20 @@ func normalizeKey(asset string) string {
 }
 
 func cloneProfile(p Profile) Profile {
+	p.ReadingDomains = cloneDomainSpecs(p.ReadingDomains)
 	p.Horizons = append([]int(nil), p.Horizons...)
 	p.Reliability = cloneReliability(p.Reliability)
 	p.ConformalScale = cloneFloatMap(p.ConformalScale)
 	p.HorizonWeights = cloneWeightBands(p.HorizonWeights)
 	p.ExpectedFeatures = append([]string(nil), p.ExpectedFeatures...)
 	return p
+}
+
+func cloneDomainSpecs(in []DomainSpec) []DomainSpec {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]DomainSpec(nil), in...)
 }
 
 func cloneReliability(in map[int]ReliabilityCell) map[int]ReliabilityCell {
