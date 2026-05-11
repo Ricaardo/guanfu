@@ -3,7 +3,7 @@
 // which are essentially coin flips.
 //
 // The numbers below come from TestBacktestBundles (pkg/engine) on the
-// post-refresh dataset (2026-05-09). They are the directional hit rate
+// post-refresh dataset (2026-05-11). They are the directional hit rate
 // over the n_tests sliding-window backtests at that horizon. We treat
 // dir_hit < 0.55 as "approaching random" — not a hard threshold but a
 // reasonable fence for "don't draw conclusions from this".
@@ -45,32 +45,32 @@ const minSamplesForClaim = 10
 // assetHorizonReliability tracks per-cell history. Untested horizons are
 // silently absent — we don't fabricate numbers we don't have.
 //
-// Source: TestBacktestBundles output 2026-05-09 (post data-refresh).
+// Source: TestBacktestBundles output 2026-05-11 (post data-refresh).
 var assetHorizonReliability = map[string]map[int]HorizonReliability{
 	"btc": {
-		30:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-09"},
-		90:  {DirHit: 0.652, NTests: 46, AsOf: "2026-05-09"},
-		180: {DirHit: 0.630, NTests: 46, AsOf: "2026-05-09"},
+		30:  {DirHit: 0.587, NTests: 46, AsOf: "2026-05-11"},
+		90:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-11"},
+		180: {DirHit: 0.587, NTests: 46, AsOf: "2026-05-11"},
 	},
 	"qqq": {
-		30:  {DirHit: 0.700, NTests: 20, AsOf: "2026-05-09"},
-		90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-09"},
-		180: {DirHit: 0.800, NTests: 20, AsOf: "2026-05-09"},
+		30:  {DirHit: 0.650, NTests: 20, AsOf: "2026-05-11"},
+		90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-11"},
+		180: {DirHit: 0.800, NTests: 20, AsOf: "2026-05-11"},
 	},
 	"spy": {
-		30:  {DirHit: 0.600, NTests: 20, AsOf: "2026-05-09"},
-		90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-09"},
-		180: {DirHit: 0.850, NTests: 20, AsOf: "2026-05-09"},
+		30:  {DirHit: 0.600, NTests: 20, AsOf: "2026-05-11"},
+		90:  {DirHit: 0.700, NTests: 20, AsOf: "2026-05-11"},
+		180: {DirHit: 0.850, NTests: 20, AsOf: "2026-05-11"},
 	},
 	"gold": {
-		30: {DirHit: 0.510, NTests: 51, AsOf: "2026-05-09"},
-		90: {DirHit: 0.549, NTests: 51, AsOf: "2026-05-09"},
+		30: {DirHit: 0.510, NTests: 51, AsOf: "2026-05-11"},
+		90: {DirHit: 0.549, NTests: 51, AsOf: "2026-05-11"},
 		// 180d is intentionally retained here after being dropped from
 		// assetHorizons["gold"] (forecast.go). Users who override via
 		// --forecast-horizons 180 can still query this cell and get the
 		// hard-block caveat; removing it would silently suppress the
 		// warning for explicit queries.
-		180: {DirHit: 0.490, NTests: 51, AsOf: "2026-05-09"},
+		180: {DirHit: 0.490, NTests: 51, AsOf: "2026-05-11"},
 	},
 }
 

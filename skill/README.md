@@ -1,4 +1,4 @@
-# btc-guanfu skill (v3)
+# btc-guanfu skill (v3.1)
 
 观复 — 多资产投资盘面 + 解读知识库的 Claude Code skill 包。
 
@@ -18,3 +18,5 @@ ln -s "$(pwd)/skill" ~/.claude/skills/btc-guanfu
 | `kb/` | 10 个因果推理文件（宏观传导 / 危机 playbook / 历史类比等）|
 
 推荐加载顺序：`guanfu://skill/tier1`（必载）→ `guanfu://skill/tier2`（决策时）→ `SKILL.md` 对应节（追问细节时）。
+
+当前数据源注意点：`stooq_putcall` 只是兼容旧 forecast bundle 的 key,默认来源为 CBOE 官方 no-key total put/call；Deribit DVOL/skew 也是 no-key；`cmc_market_context` 需要 `CMC_API_KEY` 且只作为 market reading context。

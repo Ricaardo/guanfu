@@ -43,7 +43,7 @@ func allRefreshSources() []client.Source {
 	srcs = append(srcs, client.DefillamaStablecoinSource{})
 	srcs = append(srcs, client.CMCMarketContextSource{})
 	srcs = append(srcs, client.DeribitOptionsSource{})
-	srcs = append(srcs, client.StooqPutCallSource{})
+	srcs = append(srcs, client.CBOEPutCallSource{})
 	srcs = append(srcs, client.CoinbaseBTCSource{})
 	srcs = append(srcs, client.StockKeysSource{})
 	return srcs

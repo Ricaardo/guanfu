@@ -28,7 +28,7 @@ tier: 1
 - `stale_warnings` — 非致命数据缺失 / 过期
 - **`source_health`** — 每个数据源的状态表:
   - `status` ∈ ok / partial / stale / missing / warning
-  - `as_of`、`fallback_used`、`note`、`warnings`
+  - `as_of`、`fallback_used`、`impact`、`note`、`warnings`
   - **读盘前必须先检查**,避免用 stale / fallback 做强结论
 
 ## 3. 可靠性标注(必读)
@@ -43,14 +43,14 @@ tier: 1
   - 只说 "该 horizon 在历史回测中方向命中率低于随机,不给数值预测" + 附 reliability_note
   - ⚠ **契约提示**:即使 `hard_blocked=true`,`median_return_pct` / `p10_return_pct` / `p90_return_pct` / `expected_price` 等字段**仍在 JSON 中保持原值**(保留给 claim ledger 做事后回归校准)。Claude / MCP 消费方**必须先判 `hard_blocked`**,再决定是否渲染数值,不能直接取 median 字段。
 
-### 当前 (asset, horizon) 可靠性表(截至 2026-05-09)
+### 当前 (asset, horizon) 可靠性表(截至 2026-05-11)
 
 | 资产 | 30d | 90d | 180d | 特殊 |
 |---|---|---|---|---|
-| BTC | 61% ✓ | 65% ✓ | 63% ✓ | — |
-| QQQ | 70% ✓ | 75% ✓ | **80%** ✓ | 也有 63d / 252d |
-| SPY | 60% ✓ | 75% ✓ | **85%** ✓ | 也有 63d / 252d |
-| Gold | 51% ⚠ | 55% ✓ | **49% ✗** | 180d hard-block,也有 60d / 120d |
+| BTC | 59% ✓ | 61% ✓ | 59% ✓ | — |
+| QQQ | 65% ✓ | 75% ✓ | **80%** ✓ | 也有 63d / 252d |
+| SPY | 60% ✓ | 70% ✓ | **85%** ✓ | 也有 63d / 252d |
+| Gold | 51% ⚠ | 55% ⚠ | **49% ✗** | 180d hard-block,也有 60d / 120d |
 ✓ = 可用 | ⚠ = 接近随机需附 caveat | ✗ = hard-block,不输出数值
 
 ## 4. 关键指标阈值(决策密度最高的 15 个)
@@ -71,6 +71,15 @@ tier: 1
 | funding_rate_pct (% /8h) | <-0.01 | -0.01~0.005 | >0.05 | >0.1 |
 | oi_to_mc | <0.015 | 0.015-0.025 | 0.025-0.035 | >0.04 |
 | fear_greed | <20 | 20-80 | — | >80 |
+
+### Equity Options(QQQ / SPY)
+
+| 指标 | Call chase / 自满 | 中性 | Hedging / 恐慌 |
+|---|---|---|---|
+| put_call_ratio | <0.7 | 0.7-1.2 | >1.2 |
+| put_call_252d_percentile | <10% | 10-90% | >90% |
+
+`put_call_ratio` 存储 key 仍叫 `stooq_putcall`,但默认来源是 CBOE official total put/call,无需 `STOOQ_APIKEY`。如果 `source_health.forecast_bundle_stooq_putcall` stale/missing,QQQ/SPY 期权情绪证据必须降级。
 
 ### Macro(BTC / Equity 通用)
 

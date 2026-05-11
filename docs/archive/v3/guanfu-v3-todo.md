@@ -98,7 +98,7 @@ P1 ▸ 功能 / 数据缺失         P3 ▸ 调研 / 扩展
 | F3 | **P1** | AkShare 融资余额 | HS300 拥挤度(可能推 dir_hit 过 50%) | — | `akshare_bridge.py` + `akshare_history.go` |
 | F4 | **P1** | **FRED `DGS3MO`(3m T-bill)** | **所有 forecast 基线对比必备** | `FRED_API_KEY` | `fred_history.go` |
 | F5 | **P2** | SPDR GLD holdings + WGC 央行购金 | Gold 2022+ regime 解释 | — | 新 Source |
-| F6 | **P2** | CBOE Put/Call + NAAIM | Equity sentiment | — | 新 Source |
+| F6 | **P2** | CBOE Put/Call + NAAIM | Equity sentiment | — | CBOE done; NAAIM still candidate |
 | F7 | **P2** | 事件日历(FRED FOMC / BLS CPI / BTC halving 固定表 / SEC ETF deadlines) | 为 `guanfu digest` + 告警服务 | — | `pkg/client/calendar.go`(新) |
 | F8 | **P3** | Coinbase premium(Coinglass 免费) | BTC 美国机构 vs 全球需求差 | 免费 key | 新 client |
 
@@ -114,6 +114,14 @@ F5 真正稀缺的是**央行季度购金净额**(World Gold Council 2022+ regim
 - SPDR `historical_mf_data.xml`(GLD 持仓,but not 央行):XML 格式偶尔异常
 
 **结论**:暂缓实现,不硬上会频繁 fail 的 source。Gold 2022+ regime 识别已被 G2 `regimeBucket` + 现有 DXY / real yield / COT 覆盖,边际收益不值得 endpoint 不稳定的维护成本。等 WGC 公开稳定 CSV 或 Stooq 补齐 central-bank-reserves symbol 历史覆盖再启动 F5。
+
+### F6 状态更新(2026-05-11,review pass)
+
+CBOE put/call 已落地为默认 no-key source,storage key 保持 `stooq_putcall` 兼容旧 forecast bundle。QQQ/SPY panel 与 feature bundle 已输出 `put_call_ratio`、`put_call_30d_change`、`put_call_252d_percentile`,并通过 `source_health.forecast_bundle_stooq_putcall` 暴露 stale/missing。
+
+剩余仅保留为候选:
+- NAAIM/AAII:只有找到稳定免费历史源并通过 ablation 才进入 forecast。
+- CBOE 2019-10-07 至最近窗口之间的完整 daily-page backfill:当前不是阻塞项,因为 recent 420d 已覆盖 252-observation percentile。
 
 ---
 
@@ -482,4 +490,3 @@ F7             ▸ 扩展 calendar 源
 |---|---|---|
 | v3.0 | 2026-05-09 | 首版。7 Track × 46 项 |
 | **v3.1** | **2026-05-09** | **投资者视角重构**。(1) 明确用户画像 Primary/Secondary/Tertiary;(2) 新增 Track L(投资者上下文层)与 K 并列骨头,含 portfolio.yaml / watch / alerts / digest / 多币种 / 成本感知;(3) 新增 Track M(MCP SKILL 分层)解决 context 占用;(4) 新增 Track N(诚实降级)独立成 track;(5) K 扩展为 Claim + Intent 双 ledger;(6) 行为护栏 J13 升 P0 必出;(7) 基线对比 H3/J14 升 P0;(8) HS300 forecast 硬门槛 G6/N1 升 P0;(9) H1 默认 brief;(10) G5 recency-weighted 应对 2024+ 新 regime;(11) F4 3m T-bill 升 P1 作为基线基础;(12) F7 事件日历支撑 digest/watch;(13) 回归预算扩 Intent drift / portfolio 无上下文路径稳定 / SKILL 分层规模 |
-

@@ -16,6 +16,9 @@
 |---|---|
 | `FRED_API_KEY` | 想要 DXY / real yield / TGA / RRP / 利差 / T-bill / Fed-ECB-BOJ-PBoC rates 等宏观数据。免费 <https://fred.stlouisfed.org> 注册。**缺失时 baseline 对比会 fallback 到 flat 4.5%,forecast 仍可跑** |
 | `COINMETRICS_API_KEY` | 想要 MVRV Z / NUPL 等付费端点。缺失 = 社区 tier,仅价格 + 少量链上 |
+| `CMC_API_KEY` | 想要 CoinMarketCap global metrics / BTC quote 独立市场上下文。缺失只影响 `cmc_market_context`,不影响核心价格或 forecast |
+
+默认 QQQ/SPY put/call 已改用 CBOE 官方免费无 key 数据源；本项目默认不需要 `STOOQ_APIKEY`。
 
 ---
 
@@ -59,13 +62,15 @@ guanfu status --frank               # 按可靠性分类 (asset, horizon)
 
 ```bash
 export FRED_API_KEY=your_key
-guanfu refresh                       # 28 个 source 串行拉
+export CMC_API_KEY=your_cmc_key       # 可选:市场观察层
+guanfu --timeout 600s refresh         # 28 个 source 串行拉
 ```
 
 - 数据落在 `~/.guanfu/prices/<asset>.json`
 - 失败的 source 不影响其他;看结束表格里 `fail` 状态
 - 后续 `refresh` 走增量,只拉 lastDate+1 → today,通常 < 30 秒
 - 可选:`--only=btc,fred_dxy` 指定源,`--skip=defillama_stablecoin_supply` 跳过
+- CBOE put/call 首次会抓官方历史 CSV + 最近 daily pages；网络慢时可单独跑 `guanfu --timeout 180s refresh --only=stooq_putcall`
 
 ```bash
 guanfu                               # 默认 brief 摘要(10 行)
@@ -112,6 +117,7 @@ export FUTU_ENABLED=1   # 可选,default on
       "command": "/Users/x/go/bin/guanfu-mcp",
       "env": {
         "FRED_API_KEY": "your_fred_key",
+        "CMC_API_KEY": "your_cmc_key",
         "GUANFU_HISTORY_DB": "/Users/x/.guanfu/history.db",
         "GUANFU_SKILL_PATH": "/Users/x/guanfu/skill/SKILL.md"
       }
@@ -271,7 +277,7 @@ crontab -e
 | 变量 | 默认 | 作用 |
 |---|---|---|
 | `FRED_API_KEY` | — | FRED 宏观数据 key |
-| `STOOQ_APIKEY` | — | Stooq CSV 下载 key；缺失时 `stooq_putcall` 在 refresh 中 skip，不阻断其他源 |
+| `CMC_API_KEY` | — | CoinMarketCap market context key |
 | `COINMETRICS_API_KEY` | — | CoinMetrics 付费端点 key |
 | `GUANFU_NO_HISTORY=1` | off | 禁用 history.db 写入 |
 | `GUANFU_HISTORY_DB` | `~/.guanfu/history.db` | SQLite 路径 |
@@ -294,6 +300,8 @@ crontab -e
 | 症状 | 可能原因 | 解决 |
 |---|---|---|
 | `guanfu refresh` 报 FRED 4xx | `FRED_API_KEY` 未设置 / 无效 | 检查 env;所有 fred_* 失败时其他源仍正常 |
+| `cmc_market_context` 为 config skip | `CMC_API_KEY` 未设置 | 配置 key 或接受 CMC 市场观察层缺失 |
+| `stooq_putcall` stale / no_new_data | CBOE 官方页面暂未更新、周末/假日或网络失败 | 跑 `guanfu --timeout 180s refresh --only=stooq_putcall`;默认不需要 Stooq key |
 | Futu 连不上 | OpenD 未启动 / 端口不对 | `export FUTU_ENABLED=0` 先回落 Yahoo |
 | `source_health` 有 `stale` / `fallback_used` | 某 source 多天未更新 | 跑 `guanfu refresh --only=<key>` 重拉 |
 | `guanfu calibrate` 说 no matured claims | ledger 为空或 claim 都未到期 | 每日自动跑 forecast 积累 30d 后再看 |

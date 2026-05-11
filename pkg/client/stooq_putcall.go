@@ -1,14 +1,9 @@
-// Stooq Put/Call ratio source (F6 per v3 roadmap).
+// Legacy Stooq Put/Call ratio source.
 //
-// Why Stooq and not CBOE directly: CBOE's official CSV endpoint has
-// moved multiple times (cboe.com/us/options/market_statistics → cdn.cboe.com/api/...)
-// without announcement, so any hardcoded URL breaks regularly. Stooq
-// mirrors CBOE's ^PC symbol and has kept the same CSV URL format for
-// years. Free, no key.
-//
-// Data: CBOE Total Put/Call ratio (includes equity + index options).
-// Semantics: high (>1.2) = hedging demand / fear; low (<0.7) = complacency.
-// Stored as `stooq_putcall` in PriceStore. Daily.
+// The default refresh path now uses CBOE official no-key data via
+// CBOEPutCallSource while keeping the same storage key (`stooq_putcall`) for
+// compatibility. This source remains as a manual fallback for users who have a
+// Stooq CSV key.
 
 package client
 
@@ -34,12 +29,13 @@ const (
 	stooqAPIKeyEnv  = "STOOQ_APIKEY"
 )
 
-// StooqPutCallSource fetches CBOE total Put/Call ratio daily history
-// from Stooq. Key: stooq_putcall.
+// StooqPutCallSource fetches CBOE total Put/Call ratio daily history from
+// Stooq. It is not part of the default refresh source list; prefer
+// CBOEPutCallSource for no-key official CBOE data.
 type StooqPutCallSource struct{}
 
 func (StooqPutCallSource) Key() string         { return "stooq_putcall" }
-func (StooqPutCallSource) DisplayName() string { return "stooq_putcall (CBOE total P/C via Stooq, F6)" }
+func (StooqPutCallSource) DisplayName() string { return "stooq_putcall (legacy Stooq fallback)" }
 
 // Refresh fetches the full Stooq CSV when store is empty; appends otherwise.
 // Stooq returns the full history in one call (~5000 rows), so the cost

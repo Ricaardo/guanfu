@@ -89,17 +89,26 @@ btc 180d walk-forward:
 | 多数年份都低 (<50%) | 全 regime 弱信号 | **hard-block** |
 | 前 N 年好、后 N 年差 | 结构性失效,特征老化 | 可能需 recency-weighted kNN (Track G5) 或删特征 |
 
-### 当前观察(2026-05-09 post-refresh,v6 baseline)
+### 当前观察(2026-05-11 post-refresh,CBOE put/call baseline)
 
 纯 (asset, horizon) 命中率表见 [`skill/tier1.md`](../skill/tier1.md) § 3。本表聚焦 walk-forward **诊断**：
 
 | 资产 | 全局 dir_hit | walk-forward 诊断 |
 |---|---|---|
-| BTC 90d | 65% | 各年均衡 55-80%,无 regime 偏斜 |
-| QQQ 180d | 80% | 高峰在 2021-2023 (~90%),2018 低至 50% 但样本少;整体稳 |
-| SPY 180d | 85% | 2018 例外,其余年份 ≥75%;SPY 比 QQQ 更低波动,walk-forward 更稳 |
-| Gold 90d | 55% | **强 regime 依赖** — 2017-2022 ≤50%,2023-2025 50-100%,央行购金 regime 改变了主导变量 |
+| BTC 90d | 61% | 2018/2022 走弱,2020/2024 强;仍高于随机但比 2026-05-09 表回落,已同步 reliability 表 |
+| QQQ 180d | 80% | 2023-2025 样本强,2021/2022 中性;put/call 特征覆盖后 feature coverage 100% |
+| SPY 180d | 85% | 2023-2025 强,2021/2022 中性;SPY 90d 从旧表 75% 回落到 70%,已同步 reliability 表 |
+| Gold 90d | 54.9% | **强 regime 依赖** — 2017-2022 多数年份 ≤50%,2023-2025 显著修复；低于 55% caveat 阈值 |
 | Gold 180d | 49% | 同上但更严重 → hard-block |
+
+`go run ./cmd/guanfu backtest all --plain` 的当前全资产汇总(口径与 `TestBacktestBundles` 不同,样本更多、用于运维巡检):
+
+| Asset | Days | Tests | Hit30d | Hit90d | Hit180d | PIT | CRPS | Coverage |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| spy | 2757 | 28 | 67.9% | 78.6% | 82.1% | 0.57 | 0.1297 | 100% |
+| qqq | 2757 | 28 | 60.7% | 85.7% | 78.6% | 0.56 | 0.1628 | 100% |
+| btc | 5777 | 62 | 59.7% | 66.1% | 71.0% | 0.45 | 0.5105 | 100% |
+| gold | 6447 | 69 | 52.2% | 62.3% | 62.3% | 0.50 | 0.1048 | 100% |
 
 ### 如何生成最新矩阵
 

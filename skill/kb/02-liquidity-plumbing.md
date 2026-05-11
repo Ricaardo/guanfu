@@ -124,7 +124,7 @@ ETF 赎回压力 → 份额折价 → AP 赎回份额 → BTC 被转移或处置
 
 guanfu BTC 面板直接输出 Deribit `dvol`、`dvol_60d_trend_pct` 和 `skew_25d_pct`。`skew_25d_pct = IV(25Δ put) - IV(25Δ call)`，正值表示 put 更贵、下行对冲需求强；负值表示 call 更贵、上行追价更强。若 `source_health.deribit_options` stale/missing，本轮结论必须标记为期权数据缺失。
 
-QQQ/SPY 面板可输出 `put_call_ratio`、`put_call_252d_percentile` 和 `put_call_30d_change`。这是 CBOE total put/call ratio via Stooq，衡量权益期权的防守/追涨结构；缺 `STOOQ_APIKEY` 时会降级为 missing。
+QQQ/SPY 面板可输出 `put_call_ratio`、`put_call_252d_percentile` 和 `put_call_30d_change`。这是 CBOE total put/call ratio，衡量权益期权的防守/追涨结构；CBOE 源不可用时会降级为 missing。
 
 期权信号和永续杠杆是**互补的**：
 - 永续 funding/OI = 当下交易者的拥挤度和方向偏好；

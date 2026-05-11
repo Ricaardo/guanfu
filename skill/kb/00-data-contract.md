@@ -53,6 +53,9 @@
 | ETF 流入、稳定币市值 | 2 个交易日（周末/假日除外） | 标记 stale，不得做边际资金主证据 |
 | 链上估值（mvrv / nupl） | 2 天 | 标记 stale，仅作背景 |
 | 跨资产价格（GLD / QQQ / SPY / UUP / VIXY / TLT 等 ETF） | 1 个交易日 | 标记 stale，仅作背景 |
+| CBOE put/call（`stooq_putcall` legacy key） | 5 个交易日 | QQQ/SPY 期权情绪和 forecast 特征降级 |
+| Deribit DVOL/skew | 2 天 | BTC 期权读盘跳过，不影响 BTC 价格或 forecast |
+| CMC market context | 1 天 | 市场观察层缺失，不影响核心价格或 forecast |
 | 月频宏观（M2、CPI、real yield、HY spread、yield curve） | 45 天 | 标记 stale；M2 因发布周期可放宽到 60 天 |
 | 减半距离、phase、SMA200W | 不会 stale | — |
 
@@ -84,6 +87,11 @@
 - `oil_proxy_usd`：Futu `US.USO` ETF proxy，不是 WTI 桶价。
 - `wti_crude_usd`：Yahoo `CL=F` fallback，可按 WTI 近月期货解释。
 - `btc_oil_ratio` 只有 source 为 `yahoo:CL=F` 时才能解释成“1 BTC = 多少桶 WTI”；source 为 `futu:US.USO` 时只能解释成“多少份 USO ETF”。
+
+### Legacy storage key
+
+- `stooq_putcall` 是兼容旧本地文件和 feature bundle 的存储 key；默认实现已改为 CBOE 官方 no-key 数据源。
+- 判断数据来源时优先读指标的 `source` 字段和 `source_health.note`,不要只看 key 名。
 
 ---
 

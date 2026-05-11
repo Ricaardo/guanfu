@@ -1,8 +1,10 @@
 # Guanfu Review Roadmap - 2026-05-10
 
-Status: implemented in this work pass. P3 candidate sources are wired with
-source-health gates; promotion weight should still be reviewed by ablation when
-fresh historical coverage is available.
+Status: implemented through 2026-05-11 review pass. P3 candidate sources are
+wired with source-health gates; CBOE put/call replaced the Stooq default path,
+Deribit/CMC context sources are documented, and reliability/backtest tables were
+refreshed. Promotion weight should still be reviewed by ablation when fresh
+historical coverage is available.
 
 This plan turns the latest project review into an implementation roadmap. The
 goal is to improve two product modes without reintroducing China A-share or Hong
@@ -40,6 +42,8 @@ Current state:
 - USD/CNY and global central-bank rates have been added to source health.
 - QQQ/SPY put/call and BTC Deribit options now expose source health through
   refreshed PriceStore keys or live BTC source health.
+- `stooq_putcall` is a legacy storage key only; default refresh now uses CBOE
+  official no-key data and no longer requires `STOOQ_APIKEY`.
 
 Acceptance:
 
@@ -57,7 +61,8 @@ Make refresh output distinguish:
 
 Known cases:
 
-- `stooq_putcall` currently skips when `STOOQ_APIKEY` is not set.
+- `stooq_putcall` is now populated from CBOE official no-key data; the storage
+  key keeps its legacy name for forecast compatibility.
 - `fred_pboc_interbank_rate` is stale and should be treated as macro background,
   not as a strong forecast input.
 - `deribit_options` is market-reading impact only; if skew/DVOL is unavailable,
@@ -155,18 +160,33 @@ Acceptance:
 
 Latest asset-specific backtest result:
 
-| Asset | Tests | Hit30d | Hit90d | Hit180d | PIT | CRPS |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| qqq | 28 | 64.3% | 85.7% | 78.6% | 0.56 | 0.1714 |
-| spy | 28 | 67.9% | 78.6% | 82.1% | 0.56 | 0.1242 |
-| btc | 62 | 64.5% | 69.3% | 69.3% | 0.45 | 0.5241 |
-| gold | 69 | 52.2% | 62.3% | 62.3% | 0.50 | 0.1048 |
+`go run ./cmd/guanfu backtest all --plain` on 2026-05-11:
+
+| Asset | Days | Tests | Hit30d | Hit90d | Hit180d | PIT | CRPS | Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| spy | 2757 | 28 | 67.9% | 78.6% | 82.1% | 0.57 | 0.1297 | 100% |
+| qqq | 2757 | 28 | 60.7% | 85.7% | 78.6% | 0.56 | 0.1628 | 100% |
+| btc | 5777 | 62 | 59.7% | 66.1% | 71.0% | 0.45 | 0.5105 | 100% |
+| gold | 6447 | 69 | 52.2% | 62.3% | 62.3% | 0.50 | 0.1048 | 100% |
+
+`go test ./pkg/engine -run TestBacktestBundles -v` on 2026-05-11 updated
+the static reliability table:
+
+| Asset | Tests | Hit30d | Hit90d | Hit180d |
+| --- | ---: | ---: | ---: | ---: |
+| btc | 46 | 58.7% | 60.9% | 58.7% |
+| qqq | 20 | 65.0% | 75.0% | 80.0% |
+| spy | 20 | 60.0% | 70.0% | 85.0% |
+| gold | 51 | 51.0% | 54.9% | 49.0% |
 
 Interpretation:
 
 - Directional signal is usable across the four current assets.
 - QQQ/SPY are slightly optimistic by PIT.
 - Gold calibration is currently best.
+- Equity feature coverage is now 100% after CBOE put/call refresh; Gold 180d
+  remains hard-blocked and Gold 90d needs a caveat because 54.9% is below the
+  55% reliability threshold.
 
 Next steps:
 
@@ -213,11 +233,20 @@ Rule:
 
 Candidate sources:
 
-- put/call replacement source or `STOOQ_APIKEY` configuration (implemented via
-  `stooq_putcall`; panel and forecast bundle now expose ratio, 30d change, and
-  252-observation percentile when data exists)
+- put/call replacement source (**done**, implemented via CBOE official no-key data under
+  the `stooq_putcall` legacy storage key; panel and forecast bundle now expose
+  ratio, 30d change, and 252-observation percentile when data exists)
 - historical PE/PB if a reliable source exists
 - CAPE ablation against current equity bundle
+
+Remaining TODO:
+
+- Optional: implement a cached full CBOE daily-page backfill for 2019-10-07 to
+  the recent-window boundary if full post-2019 history becomes necessary.
+- Run ablation on the three put/call features after enough stable CBOE coverage
+  is present; keep them only if hit rate, PIT, and CRPS do not regress.
+- Continue searching for reliable no-key PE/PB or NAAIM/AAII alternatives, but
+  do not add latest-only snapshots to forecast bundles.
 
 Rule:
 
@@ -294,3 +323,13 @@ The roadmap starts after these recent fixes:
 - `beb3e0a fix: harden refresh data sources`
 - `c446541 fix: surface macro source health`
 - `2ba5ba5 fix: use asset-specific backtest features`
+
+## 2026-05-11 Review Pass Validation
+
+- `go run ./cmd/guanfu --timeout 180s --json refresh --only=stooq_putcall`
+  refreshed CBOE put/call: 4307 rows, last_date 2026-05-08.
+- `go test ./pkg/engine -run TestBacktestBundles -v` refreshed reliability
+  numbers and confirmed QQQ/SPY include put/call features.
+- `go run ./cmd/guanfu backtest all --plain` passed for BTC/QQQ/SPY/Gold with
+  100% feature coverage.
+- Final gate for this pass: `go test ./...`, `go vet ./...`, `git diff --check`.

@@ -44,6 +44,7 @@ guanfu stock AAPL         # 任意美股(Yahoo 自动拉取 + kNN)
 guanfu import-stock MSFT 3650  # 手动导入美股全量历史
 guanfu refresh            # 统一刷新数据源(首次全量 / 后续增量)
 guanfu refresh --dry-run  # 列出将刷新的 source,不真正拉数据
+guanfu --timeout 180s refresh --only=stooq_putcall  # 单独刷新 CBOE put/call(legacy key,无 Stooq key)
 guanfu dca                # DCA 定投策略对比(Fixed/AHR/Mayer)
 guanfu allocate           # 全天候懒人组合偏离检测
 guanfu market             # 多资产一览 + 共识/分歧信号
@@ -125,6 +126,11 @@ guanfu status             # PriceStore 数据状态诊断
 
 完整源列表 + 增量协议 + 降级路径见 [`docs/DATA-SOURCES.md`](../docs/DATA-SOURCES.md)。
 
+关键源边界:
+- `stooq_putcall` 是 legacy storage key,默认来源为 CBOE official total put/call,无需 `STOOQ_APIKEY`;用于 QQQ/SPY put/call ratio、30d change、252-observation percentile。
+- `deribit_options` 写入 BTC `deribit_dvol`、`deribit_skew_25d_pct`、`deribit_skew_expiry_days`;skew 为 signed series,正值表示 put 更贵,负值表示 call 更贵。
+- `cmc_market_context` 需要 `CMC_API_KEY`,只进入 market_reading,不替代 BTC 核心价格历史,也不直接进入 forecast。
+
 ## kNN 预测引擎 + 可靠性标注
 
 Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。
@@ -188,15 +194,11 @@ ETF / mempool / 资金费率 / 宏观等没有公开历史 API 的指标，guanf
 
 `guanfu --forecast` 是 **historical analogue / kNN 情景推演**，不是确定性价格预测，也不是交易/仓位指令。
 
-v1 使用 BTC 全历史日线中可完整回放的特征：
-- 30/90/180d 动量
-- 90d drawdown
-- Mayer Multiple
-- 200wSMA 偏离
-- 30d 年化波动率
-- RSI 14
-- 压缩版 AHR999
-- halving cycle sin/cos
+当前实现按资产使用不同的可回放 feature bundle：
+- BTC:30/90/180d 动量、90d drawdown、Mayer、200wSMA 偏离、30d 年化波动率、RSI、压缩版 AHR999、halving cycle sin/cos。
+- QQQ/SPY:价格动量、drawdown、Mayer、波动率、RSI、CAPE、FRED rates/USD/credit/yield curve、VIXY、CBOE put/call ratio / 30d change / 252d percentile。
+- Gold:价格动量、drawdown、Mayer、波动率、RSI、real yield、breakeven、DXY、COT、VIXY。
+- 任意美股:价格技术特征 + 通用宏观背景,不含 per-name 基本面。
 
 输出：
 - 30/90/180d 前向收益分布（avg/median/p10/p90）
@@ -207,7 +209,7 @@ v1 使用 BTC 全历史日线中可完整回放的特征：
 解读原则：
 - 把 `forecast` 当作概率分布和反证生成器，不要把 median/expected price 当作目标价。
 - 若 coverage 或 confidence 低，只能用于提醒不确定性。
-- ETF/FRED/funding/mempool 等非价格源目前没有全历史训练样本；需要长期 panel archive 后才能进入下一版推演。
+- 只有能在 PriceStore 中历史回放的序列进入 forecast；ETF 实时流、funding、mempool 等 latest-only 指标只做读盘,除非先补齐历史并通过回测。
 
 ---
 
@@ -223,7 +225,7 @@ v1 使用 BTC 全历史日线中可完整回放的特征：
 
 盘面顶层还会返回：
 - **`stale_warnings`** 非致命数据缺失 / 过期提示。
-- **`source_health`** 数据源健康表：`source`、`status`（ok / partial / stale / missing / warning）、`as_of`、`fallback_used`、`note`、`warnings`。读盘前先检查这里，避免用断源或 fallback 数据做强结论。
+- **`source_health`** 数据源健康表：`source`、`status`（ok / partial / stale / missing / warning）、`as_of`、`fallback_used`、`impact`、`note`、`warnings`。读盘前先检查这里，避免用断源或 fallback 数据做强结论。
 
 ---
 
@@ -390,6 +392,15 @@ v1 使用 BTC 全历史日线中可完整回放的特征：
   - < 25 BTC 季 — 资金集中 BTC
 - **可信度**：中高。区块链中心实时计算，每日更新。
 - **联动**：与 ETH/BTC 比率 + BTC Dominance 交叉验证。山寨季 > 75 + ETH/BTC 上行 + BTC Dom 下降 = Alt 风险偏好回归。
+
+#### `put_call_ratio` / `put_call_252d_percentile` (QQQ / SPY)
+- **定义**：CBOE total put/call ratio。存储 key 仍叫 `stooq_putcall`,但默认源是 CBOE 官方无 key 数据。
+- **阈值**：
+  - ratio < 0.7 或 percentile < 10% → call chase / 自满,追涨拥挤风险上升
+  - ratio 0.7-1.2 → 正常区
+  - ratio > 1.2 或 percentile > 90% → hedging / 恐慌,若价格企稳可作反向修复观察
+- **联动**：不要单独用 put/call 下结论；至少和 VIXY、HY spread、RSI/MA 共同判断。
+- **缺失处理**：若 `source_health.forecast_bundle_stooq_putcall` stale/missing,QQQ/SPY 期权情绪与 forecast confidence 降级。
 
 ---
 

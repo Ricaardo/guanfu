@@ -134,7 +134,7 @@ func forecastBundleSources(asset string) []forecastBundleSource {
 			{"fred_hy_spread", 7, "Equity forecast credit-spread feature"},
 			{"fred_yield_curve", 7, "Equity forecast yield-curve feature"},
 			{"vixy", 5, "Equity forecast volatility feature"},
-			{"stooq_putcall", 5, "Equity forecast/options sentiment feature"},
+			{"stooq_putcall", 5, "Equity forecast/options sentiment feature (CBOE official; legacy storage key)"},
 		}
 	case "gold":
 		return []forecastBundleSource{
@@ -167,9 +167,9 @@ func addEquityPutCallPositioning(panel *model.IndicatorPanel, ps *store.PriceSto
 	panel.Positioning["put_call_ratio"] = model.Indicator{
 		Value:     roundN(latest.Close, 3),
 		Label:     putCallRatioLabel(latest.Close),
-		Source:    sourceOr(latest.Source, "stooq:^PC"),
+		Source:    sourceOr(latest.Source, "cboe:daily_market_statistics"),
 		UpdatedAt: latest.Date,
-		Note:      "CBOE total put/call ratio via Stooq. >1.2 = hedging/fear; <0.7 = complacency/call chase.",
+		Note:      "CBOE total put/call ratio. >1.2 = hedging/fear; <0.7 = complacency/call chase.",
 	}
 	if pct, ok := percentileRankLast(pts, 252); ok {
 		panel.Positioning["put_call_252d_percentile"] = model.Indicator{
@@ -177,7 +177,7 @@ func addEquityPutCallPositioning(panel *model.IndicatorPanel, ps *store.PriceSto
 			Label:     putCallPercentileLabel(pct),
 			Source:    "computed:stooq_putcall",
 			UpdatedAt: latest.Date,
-			Note:      "Latest put/call ratio percentile versus trailing 252 observations.",
+			Note:      "Latest CBOE put/call ratio percentile versus trailing 252 observations.",
 		}
 	}
 	if past, ok := pointAtLeastDaysBack(pts, latest.Date, 30); ok && past.Close > 0 {
