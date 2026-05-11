@@ -429,7 +429,7 @@ func runBTCPanel(jsonOut, pretty, verdict, verdictOnly, forecastOut, forecastOnl
 		opts.Horizons = horizons
 		opts.TopK = forecastTop
 		opts.Asset = "btc"
-		opts.Extractors = features.CoreExtractors()
+		opts.Extractors = features.ExtractorsForAsset("btc", &store.PriceStore{})
 		opts.RecencyWeighted = recencyWeighted
 		opts.RegimeGate = regimeGate
 		fc, err = forecast.Build(points, opts)
@@ -546,7 +546,8 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 	})
 	engine.EnrichGlobalInvestorMacro(panel, s)
 
-	horizons, err := resolveHorizonsArg(forecastHorizonsArg, strings.ToLower(ticker))
+	stockKey := client.StockKey(ticker)
+	horizons, err := resolveHorizonsArg(forecastHorizonsArg, stockKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "parse horizons: %v\n", err)
 		os.Exit(1)
@@ -554,7 +555,8 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 	opts := forecast.DefaultOptions()
 	opts.Horizons = horizons
 	opts.TopK = forecastTop
-	opts.Extractors = features.USStockExtractors(s)
+	opts.Asset = stockKey
+	opts.Extractors = features.ExtractorsForAsset(stockKey, s)
 
 	fc, err := forecast.Build(points, opts)
 	if err != nil {

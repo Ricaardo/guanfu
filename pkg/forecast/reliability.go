@@ -1,6 +1,8 @@
-// Per-asset, per-horizon reliability table — surfaced into forecast output
+// Per-asset, per-horizon reliability wrappers — surfaced into forecast output
 // so the consumer sees which horizons have been historically meaningful and
-// which are essentially coin flips.
+// which are essentially coin flips. The source table now lives in
+// pkg/assetprofile so reading, forecast, skill, and backtest contracts share
+// one policy source.
 //
 // The numbers below come from TestBacktestBundles (pkg/engine) on the
 // post-refresh dataset (2026-05-11). They are the directional hit rate
@@ -16,7 +18,8 @@ package forecast
 
 import (
 	"fmt"
-	"strings"
+
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 )
 
 // HorizonReliability is the static historical performance of a forecast
@@ -42,49 +45,15 @@ const hardBlockThreshold = 0.50
 // the dir_hit means something.
 const minSamplesForClaim = 10
 
-// assetHorizonReliability tracks per-cell history. Untested horizons are
-// silently absent — we don't fabricate numbers we don't have.
-//
-// Source: TestBacktestBundles output 2026-05-11 (post data-refresh).
-var assetHorizonReliability = map[string]map[int]HorizonReliability{
-	"btc": {
-		30:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-11"},
-		90:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-11"},
-		180: {DirHit: 0.630, NTests: 46, AsOf: "2026-05-11"},
-	},
-	"qqq": {
-		30:  {DirHit: 0.700, NTests: 20, AsOf: "2026-05-11"},
-		90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-11"},
-		180: {DirHit: 0.800, NTests: 20, AsOf: "2026-05-11"},
-	},
-	"spy": {
-		30:  {DirHit: 0.600, NTests: 20, AsOf: "2026-05-11"},
-		90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-11"},
-		180: {DirHit: 0.850, NTests: 20, AsOf: "2026-05-11"},
-	},
-	"gold": {
-		30: {DirHit: 0.451, NTests: 51, AsOf: "2026-05-11"},
-		90: {DirHit: 0.627, NTests: 51, AsOf: "2026-05-11"},
-		// 180d is intentionally retained here after being dropped from
-		// assetHorizons["gold"] (forecast.go). Users who override via
-		// --forecast-horizons 180 can still query this cell and get the
-		// reliability caveat; removing it would silently suppress the
-		// warning for explicit queries.
-		180: {DirHit: 0.529, NTests: 51, AsOf: "2026-05-11"},
-	},
-}
-
 // ReliabilityFor returns the recorded reliability cell for an
 // (asset, days) pair. ok=false when no data is recorded — treat as
 // "untested, no claim".
 func ReliabilityFor(asset string, days int) (HorizonReliability, bool) {
-	a := strings.ToLower(strings.TrimSpace(asset))
-	table, ok := assetHorizonReliability[a]
+	r, ok := assetprofile.ReliabilityFor(asset, days)
 	if !ok {
 		return HorizonReliability{}, false
 	}
-	r, ok := table[days]
-	return r, ok
+	return HorizonReliability{DirHit: r.DirHit, NTests: r.NTests, AsOf: r.AsOf}, true
 }
 
 // HorizonCaveat returns a non-empty caveat string when the (asset, days)

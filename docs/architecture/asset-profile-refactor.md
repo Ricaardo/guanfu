@@ -1,6 +1,6 @@
 # ADR: Asset Profile Architecture
 
-Status: proposed for staged migration
+Status: accepted; Phase 2 registry implemented, reading-lens refactor pending
 
 Date: 2026-05-11
 
@@ -11,16 +11,21 @@ already supports BTC, QQQ, SPY, Gold, and arbitrary US stock forecasts, but the
 asset-specific knowledge is spread across several places:
 
 - `pkg/engine/asset_*.go` chooses snapshot, panel, verdict, and forecast wiring.
-- `pkg/forecast/features/bundles.go` chooses feature bundles.
-- `pkg/forecast/forecast.go` owns default horizons and horizon weight rules.
-- `pkg/forecast/reliability.go` owns static reliability claims.
-- `cmd/guanfu/cli_backtest.go` repeats asset-to-feature mappings.
+- `pkg/assetprofile/profile.go` now owns profile identity, feature bundle keys,
+  expected feature names, default horizons, static reliability cells, conformal
+  calibration scale, and horizon-specific weight policy.
+- `pkg/forecast/features/bundles.go` resolves extractor bundles from profile
+  bundle keys.
+- `pkg/forecast/forecast.go` consumes profile policy and annotates forecast JSON
+  with profile metadata.
+- `cmd/guanfu`, `cmd/guanfu-mcp`, and backtest commands resolve horizons and
+  feature bundles through the profile registry.
 - `skill/SKILL.md` describes all assets, but remains BTC-first in structure.
 
-This creates a hidden coupling: non-BTC assets no longer use BTC-only AHR or
-halving features, but they still inherit BTC-era assumptions through shared
-forecast scaling, shared output schema, shared CLI/MCP contracts, and shared
-skill wording.
+Before the registry this created a hidden coupling: non-BTC assets no longer
+used BTC-only AHR or halving features, but they still inherited BTC-era
+assumptions through shared forecast scaling, shared output schema, shared
+CLI/MCP contracts, and shared skill wording.
 
 The problem is broader than forecasting. Market reading also needs asset-aware
 domain definitions, evidence rules, source health expectations, and downgrade
@@ -30,7 +35,10 @@ behavior.
 
 Introduce `AssetProfile` as the single source of asset knowledge. The forecast
 engine, panel builders, CLI, MCP, and skill should read asset-specific policy
-from profiles instead of maintaining parallel switch statements.
+from profiles instead of maintaining parallel switch statements. The first
+implementation is intentionally code-first in `pkg/assetprofile` so callers can
+share one typed registry before moving the remaining reading-lens contracts into
+data files or richer profile structs.
 
 The target layering is:
 
@@ -167,15 +175,23 @@ Skill consumers must load:
 
 ### Phase 2 - Profile Registry
 
-- Add `pkg/profile` or `pkg/assetprofile`.
-- Move default horizons, reliability cells, conformal calibration, and horizon
-  weights behind profile methods.
-- Keep existing `engine.Asset` implementations as orchestrators.
+Status: implemented in `pkg/assetprofile`.
+
+- Added `pkg/assetprofile`.
+- Moved default horizons, reliability cells, conformal calibration, horizon
+  weights, feature bundle keys, expected feature names, profile versions, and
+  skill-profile URIs behind profile lookups.
+- Kept existing `engine.Asset` implementations as orchestrators.
+- CLI, MCP, backtest, and asset `BuildForecast` now share the same profile
+  registry for horizons and extractor bundle selection.
 
 Acceptance:
 
-- CLI, MCP, backtest, and asset `BuildForecast` all read horizon and reliability
-  data from the same profile registry.
+- Done: CLI, MCP, backtest, and asset `BuildForecast` all read horizon and
+  reliability data from the same profile registry.
+- Done: `Forecast` output includes `profile_key`, `profile_version`,
+  `asset_class`, `feature_bundle`, and `skill_profile_uri` when `Options.Asset`
+  is set.
 
 ### Phase 3 - Reading Lens Refactor
 
@@ -193,7 +209,9 @@ Acceptance:
 ### Phase 4 - Forecast Feature Normalization
 
 - Change extractors to emit raw values.
-- Move normalization and weights to `ForecastProfile`.
+- Move feature normalization scales to `ForecastProfile`.
+- Horizon-specific weight policy is already in `pkg/assetprofile`; raw feature
+  normalizers still live in extractor implementations.
 - Add per-profile feature-scale tests.
 
 Acceptance:

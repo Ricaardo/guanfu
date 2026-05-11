@@ -2,6 +2,18 @@
 
 Every supported asset or asset class must define five contracts.
 
+Code registry: `pkg/assetprofile/profile.go`.
+
+The Go registry is currently authoritative for forecast-side policy:
+canonical key, asset class, display name, profile version, default horizons,
+feature bundle key, expected feature names for missing-feature diagnostics,
+static reliability rows, conformal calibration scale, horizon-specific weight
+boosts, and `skill_profile_uri`.
+
+The Markdown profile files remain authoritative for AI reading protocol and
+caveat language until ReadingLens / verdict policy is moved into code-backed
+profiles.
+
 ## 1. Data Contract
 
 - canonical asset key

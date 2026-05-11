@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/client"
 	"github.com/Ricaardo/guanfu/pkg/model"
 )
@@ -31,25 +32,13 @@ const (
 
 var defaultHorizons = []int{30, 90, 180}
 
-// assetHorizons holds per-asset default horizons (B5, revised 2026-05-11).
-//
-// QQQ/SPY add 63d (quarterly) and 252d (yearly) on top of {30,90,180}.
-// Gold uses {30,60,90,120} — the 180d horizon was removed after the
-// post-refresh backtests exposed weak regime-dependent history.
-// Other assets fall back to defaultHorizons.
-var assetHorizons = map[string][]int{
-	"qqq":  {30, 63, 90, 180, 252},
-	"spy":  {30, 63, 90, 180, 252},
-	"gold": {30, 60, 90, 120},
-}
-
 // HorizonsForAsset returns the asset-specific default horizons.
 // Falls back to {30,90,180} when no per-asset override is registered.
 // Callers should NOT route through DefaultOptions() when filling missing
 // horizons — that overwrites Extractors/TopK set elsewhere.
 func HorizonsForAsset(asset string) []int {
-	if h, ok := assetHorizons[strings.ToLower(strings.TrimSpace(asset))]; ok {
-		return append([]int(nil), h...)
+	if p, ok := assetprofile.For(asset); ok {
+		return append([]int(nil), p.Horizons...)
 	}
 	return append([]int(nil), defaultHorizons...)
 }
@@ -107,6 +96,11 @@ type Forecast struct {
 	CurrentPrice    float64           `json:"current_price"`
 	Method          string            `json:"method"`
 	MethodNote      string            `json:"method_note"`
+	ProfileKey      string            `json:"profile_key,omitempty"`
+	ProfileVersion  string            `json:"profile_version,omitempty"`
+	AssetClass      string            `json:"asset_class,omitempty"`
+	FeatureBundle   string            `json:"feature_bundle,omitempty"`
+	SkillProfileURI string            `json:"skill_profile_uri,omitempty"`
 	Coverage        Coverage          `json:"coverage"`
 	CurrentFeatures []FeatureValue    `json:"current_features"`
 	Horizons        []HorizonForecast `json:"horizons"`
@@ -412,12 +406,27 @@ func Build(points []Point, opts Options) (*Forecast, error) {
 
 	method := "historical_analogue_knn_v2"
 	methodNote := "Pluggable feature extractors; returns are empirical forward-return distributions."
+	var profileKey, profileVersion, assetClass, featureBundle, skillProfileURI string
+	if opts.Asset != "" {
+		if p, ok := assetprofile.For(opts.Asset); ok {
+			profileKey = p.Key
+			profileVersion = p.Version
+			assetClass = string(p.Class)
+			featureBundle = p.FeatureBundle
+			skillProfileURI = p.SkillProfileURI
+		}
+	}
 
 	return &Forecast{
-		Date:         points[currentIdx].Date,
-		CurrentPrice: points[currentIdx].Close,
-		Method:       method,
-		MethodNote:   methodNote,
+		Date:            points[currentIdx].Date,
+		CurrentPrice:    points[currentIdx].Close,
+		Method:          method,
+		MethodNote:      methodNote,
+		ProfileKey:      profileKey,
+		ProfileVersion:  profileVersion,
+		AssetClass:      assetClass,
+		FeatureBundle:   featureBundle,
+		SkillProfileURI: skillProfileURI,
 		Coverage: Coverage{
 			FeatureCount:      len(currentFeatures.values),
 			ExpectedFeatures:  expectedCount,
@@ -923,7 +932,7 @@ func buildHorizonForecasts(currentPrice float64, points []Point, selected []cand
 		candidatesForHorizon := allCandidates
 		currentForHorizon := currentFeatures
 		if !opts.DisableHorizonWeights {
-			currentForHorizon = horizonWeightedFeatureSet(currentFeatures, h)
+			currentForHorizon = horizonWeightedFeatureSet(currentFeatures, h, opts.Asset)
 			ranked := rankCandidatesForHorizon(currentFeatures, allCandidates, h, points, opts)
 			if len(ranked) > 0 {
 				picked := selectAnalogs(ranked, opts.TopK, opts.DiversifyWindowDays)
@@ -985,7 +994,7 @@ func rankCandidatesForHorizon(current featureSet, candidates []candidate, horizo
 	if len(candidates) == 0 {
 		return nil
 	}
-	currentWeighted := horizonWeightedFeatureSet(current, horizonDays)
+	currentWeighted := horizonWeightedFeatureSet(current, horizonDays, opts.Asset)
 	out := make([]candidate, 0, len(candidates))
 	today := time.Time{}
 	cutoff := time.Time{}
@@ -1003,7 +1012,7 @@ func rankCandidatesForHorizon(current featureSet, candidates []candidate, horizo
 	}
 	for _, c := range candidates {
 		cw := c
-		dist, matched, ok := distance(currentWeighted, horizonWeightedFeatureSet(c.features, horizonDays))
+		dist, matched, ok := distance(currentWeighted, horizonWeightedFeatureSet(c.features, horizonDays, opts.Asset))
 		if !ok {
 			continue
 		}
@@ -1027,48 +1036,21 @@ func rankCandidatesForHorizon(current featureSet, candidates []candidate, horizo
 	return out
 }
 
-func horizonWeightedFeatureSet(fs featureSet, horizonDays int) featureSet {
+func horizonWeightedFeatureSet(fs featureSet, horizonDays int, asset string) featureSet {
 	out := featureSet{
 		values: make([]FeatureValue, 0, len(fs.values)),
 		byName: make(map[string]FeatureValue, len(fs.byName)),
 	}
 	for _, fv := range fs.values {
-		fv.Weight *= horizonWeightMultiplier(fv.Name, horizonDays)
+		fv.Weight *= horizonWeightMultiplier(asset, fv.Name, horizonDays)
 		out.values = append(out.values, fv)
 		out.byName[fv.Name] = fv
 	}
 	return out
 }
 
-func horizonWeightMultiplier(name string, horizonDays int) float64 {
-	if horizonDays <= 45 {
-		switch name {
-		case "return_30d", "drawdown_90d", "realized_vol_30d", "rsi_14", "vixy_level", "put_call_30d_change":
-			return 1.25
-		case "return_180d", "cape", "ahr999_compressed", "sma_200w_dev", "yield_curve", "put_call_252d_percentile":
-			return 0.75
-		default:
-			return 1
-		}
-	}
-	if horizonDays <= 120 {
-		switch name {
-		case "return_90d", "drawdown_90d", "dgs10_30d", "dxy_30d", "hy_spread_30d", "put_call_30d_change":
-			return 1.15
-		case "return_30d":
-			return 0.90
-		default:
-			return 1
-		}
-	}
-	switch name {
-	case "return_180d", "mayer_multiple", "sma_200w_dev", "ahr999_compressed", "cape", "real_yield_10y", "gold_cot_net", "yield_curve", "put_call_252d_percentile":
-		return 1.25
-	case "return_30d", "rsi_14":
-		return 0.75
-	default:
-		return 1
-	}
+func horizonWeightMultiplier(asset, name string, horizonDays int) float64 {
+	return assetprofile.HorizonWeightMultiplier(asset, name, horizonDays)
 }
 
 func summarizeHorizon(currentPrice float64, days int, returns []float64) HorizonForecast {

@@ -97,6 +97,7 @@ func TestHorizonsForAsset(t *testing.T) {
 		{"QQQ", []int{30, 63, 90, 180, 252}},
 		{"spy", []int{30, 63, 90, 180, 252}},
 		{"gold", []int{30, 60, 90, 120}}, // 180d remains opt-in because history is regime-dependent
+		{"stock_aapl", []int{30, 90, 180}},
 		{"btc", []int{30, 90, 180}},
 		{"AAPL", []int{30, 90, 180}}, // arbitrary stock falls back to default
 		{"", []int{30, 90, 180}},
@@ -118,6 +119,19 @@ func TestHorizonsForAsset(t *testing.T) {
 	h[0] = 999
 	if HorizonsForAsset("qqq")[0] == 999 {
 		t.Fatal("HorizonsForAsset returned aliased slice; mutation leaked back to map")
+	}
+}
+
+func TestBuildAnnotatesProfileMetadataWhenAssetSet(t *testing.T) {
+	opts := testOpts()
+	opts.Asset = "qqq"
+	opts.Horizons = []int{30}
+	fc, err := Build(syntheticPoints(500), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.ProfileKey != "qqq" || fc.AssetClass != "equity_index" || fc.FeatureBundle == "" || fc.ProfileVersion == "" {
+		t.Fatalf("profile metadata not populated: %+v", fc)
 	}
 }
 

@@ -159,7 +159,7 @@ func (a *GoldAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*fo
 		opts.Horizons = forecast.HorizonsForAsset("gold")
 	}
 	opts.Asset = "gold"
-	opts.Extractors = features.GoldExtractors(a.store)
+	opts.Extractors = features.ExtractorsForAsset("gold", a.store)
 	return forecast.Build(points, opts)
 }
 

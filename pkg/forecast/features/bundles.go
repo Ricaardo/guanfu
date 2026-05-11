@@ -10,9 +10,33 @@
 package features
 
 import (
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/store"
 )
+
+func ExtractorsForAsset(asset string, s *store.PriceStore) []forecast.FeatureExtractor {
+	p, ok := assetprofile.For(asset)
+	if !ok {
+		return GenericTechnicalExtractors()
+	}
+	return ExtractorsForProfile(p, s)
+}
+
+func ExtractorsForProfile(p assetprofile.Profile, s *store.PriceStore) []forecast.FeatureExtractor {
+	switch p.FeatureBundle {
+	case "btc_core":
+		return CoreExtractors()
+	case "equity_index":
+		return EquityExtractors(s)
+	case "gold":
+		return GoldExtractors(s)
+	case "us_stock":
+		return USStockExtractors(s)
+	default:
+		return GenericTechnicalExtractors()
+	}
+}
 
 // EquityExtractors returns the bundle for QQQ/SPY (US equities):
 // generic technicals + valuation (CAPE) + rates (DGS10) + USD (DXY)

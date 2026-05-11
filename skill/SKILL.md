@@ -152,9 +152,9 @@ guanfu status             # PriceStore 数据状态诊断
 
 ## kNN 预测引擎 + 可靠性标注
 
-Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。下一阶段迁移目标是 `AssetProfile`/`ForecastProfile` 单一真源:特征原始值由 extractor 算,归一化尺度、权重、horizon、reliability、conformal calibration 由 profile 决定。
+Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。`pkg/assetprofile` 已是 forecast 侧单一真源:profile 决定资产类、默认 horizon、feature bundle、horizon 权重、reliability、conformal calibration scale 和 skill profile URI。下一阶段还要把 raw feature normalization scale 与 ReadingLens / verdict policy 完整迁入 profile。
 
-每个 `HorizonForecast` 附 `reliability_note` + `hard_blocked` 字段。三档规则、当前 (asset, horizon) 命中率表、`hard_blocked` 时的契约（数值字段保留但不渲染），全部见 [`tier1.md`](tier1.md) § 3 "可靠性标注"——**AI 读盘必载**。真源 `pkg/forecast/reliability.go`。
+每个 `Forecast` 顶层附 `profile_key` / `profile_version` / `asset_class` / `feature_bundle` / `skill_profile_uri`；每个 `HorizonForecast` 附 `reliability_note` + `hard_blocked` 字段。三档规则、当前 (asset, horizon) 命中率表、`hard_blocked` 时的契约（数值字段保留但不渲染），全部见 [`tier1.md`](tier1.md) § 3 "可靠性标注"——**AI 读盘必载**。profile 真源 `pkg/assetprofile/profile.go`，渲染规则在 `pkg/forecast/reliability.go`。
 
 ---
 
@@ -213,7 +213,7 @@ ETF / mempool / 资金费率 / 宏观等没有公开历史 API 的指标，guanf
 
 `guanfu --forecast` 是 **historical analogue / kNN 情景推演**，不是确定性价格预测，也不是交易/仓位指令。
 
-当前实现按资产使用不同的可回放 feature bundle：
+当前实现按 `pkg/assetprofile` 中的 profile 使用不同的可回放 feature bundle：
 - BTC:30/90/180d 动量、90d drawdown、Mayer、200wSMA 偏离、30d 年化波动率、RSI、压缩版 AHR999、halving cycle sin/cos。
 - QQQ/SPY:价格动量、drawdown、Mayer、波动率、RSI、CAPE、FRED rates/USD/credit/yield curve、VIXY、CBOE put/call ratio / 30d change / 252d percentile。
 - Gold:价格动量、drawdown、Mayer、波动率、RSI、real yield、breakeven、DXY、COT、VIXY。

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/forecast/backtest"
 	"github.com/Ricaardo/guanfu/pkg/store"
@@ -29,6 +30,9 @@ type BacktestReport struct {
 
 type AssetBacktestResult struct {
 	Asset              string   `json:"asset"`
+	Profile            string   `json:"profile,omitempty"`
+	ProfileVersion     string   `json:"profile_version,omitempty"`
+	AssetClass         string   `json:"asset_class,omitempty"`
 	FeatureBundle      string   `json:"feature_bundle"`
 	MissingFeatures    []string `json:"missing_features,omitempty"`
 	DataDays           int      `json:"data_days"`
@@ -116,6 +120,12 @@ func runBacktestAll(jsonOut, pretty, plain bool) {
 			MissingFeatures: diag.MissingFeatures,
 			DataDays:        len(points),
 			TestsRun:        r.TotalTests,
+		}
+		if p, ok := assetprofile.For(asset); ok {
+			abr.Profile = p.Key
+			abr.ProfileVersion = p.Version
+			abr.AssetClass = string(p.Class)
+			abr.FeatureBundle = p.FeatureBundle
 		}
 		if hm := r.ByHorizon[30]; hm != nil {
 			abr.DirHit30d = math.Round(hm.DirectionHitRate()*10000) / 100
@@ -324,8 +334,12 @@ func printBacktestReport(report BacktestReport, plain bool) {
 			a.Asset, a.DataDays, a.TestsRun,
 			a.DirHit30d, a.DirHit90d, a.DirHit180d,
 			a.AvgPIT, a.AvgCRPS, a.AvgFeatureCoverage)
-		fmt.Printf("         bundle: %s; missing: %s; conformal realized: 30d %.0f%% / 90d %.0f%% / 180d %.0f%%\n",
-			a.FeatureBundle, missingFeatureText(a.MissingFeatures), a.ConformalCov30d, a.ConformalCov90d, a.ConformalCov180d)
+		profile := a.Profile
+		if profile == "" {
+			profile = a.Asset
+		}
+		fmt.Printf("         profile: %s@%s (%s); bundle: %s; missing: %s; conformal realized: 30d %.0f%% / 90d %.0f%% / 180d %.0f%%\n",
+			profile, a.ProfileVersion, a.AssetClass, a.FeatureBundle, missingFeatureText(a.MissingFeatures), a.ConformalCov30d, a.ConformalCov90d, a.ConformalCov180d)
 	}
 	fmt.Println(strings.Repeat("-", 76))
 	fmt.Println()

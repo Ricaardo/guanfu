@@ -17,6 +17,10 @@ tier: 1
 
 读盘必须同时加载对应 `skill/profiles/*.md`:BTC 用 `btc.md`,QQQ/SPY 用 `equity_index.md`,Gold 用 `gold.md`,任意美股用 `us_stock.md`。不要把 BTC 的 halving/AHR/network 语义套到非 BTC 资产。
 
+Forecast JSON 会带 profile metadata:`profile_key`、`profile_version`、
+`asset_class`、`feature_bundle`、`skill_profile_uri`。这些字段来自
+`pkg/assetprofile/profile.go`;AI 消费方应优先按 `skill_profile_uri` 选择 profile。
+
 ## 2. 盘面字段结构
 
 每个指标 `Indicator`:
@@ -54,6 +58,9 @@ tier: 1
 | SPY | 60% ✓ | 75% ✓ | **85%** ✓ | 也有 63d / 252d |
 | Gold | **45% ✗** | 63% ✓ | 53% ⚠ | 30d hard-block；默认只用 30/60/90/120 时仍必须尊重 hard_block |
 ✓ = 可用 | ⚠ = 接近随机需附 caveat | ✗ = hard-block,不输出数值
+
+真源:`pkg/assetprofile/profile.go`。`pkg/forecast/reliability.go` 只负责把
+profile row 转成 `reliability_note` / `hard_blocked`。
 
 ## 4. 关键指标阈值(决策密度最高的 15 个)
 

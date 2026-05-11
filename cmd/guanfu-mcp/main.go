@@ -396,6 +396,8 @@ func handleToolCall(name string, args json.RawMessage) (string, *rpcError) {
 		opts := forecast.DefaultOptions()
 		if len(p.Horizons) > 0 {
 			opts.Horizons = p.Horizons
+		} else {
+			opts.Horizons = forecast.HorizonsForAsset(client.StockKey(p.Ticker))
 		}
 		if rpcErr := validateForecastHorizons(opts.Horizons); rpcErr != nil {
 			return "", rpcErr
@@ -745,7 +747,8 @@ func buildStockForecast(ticker string, days int, timeout time.Duration, opts for
 		points[i] = forecast.Point{Date: p.Date, Close: p.Close, Source: p.Source}
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Date < points[j].Date })
-	opts.Extractors = features.USStockExtractors(s)
+	opts.Asset = client.StockKey(ticker)
+	opts.Extractors = features.ExtractorsForAsset(opts.Asset, s)
 	return forecast.Build(points, opts)
 }
 
@@ -776,7 +779,7 @@ func buildForecast(asset string, timeout time.Duration, opts forecast.Options) (
 	if err != nil {
 		return nil, err
 	}
-	opts.Extractors = features.CoreExtractors()
+	opts.Extractors = features.ExtractorsForAsset("btc", &store.PriceStore{})
 	return forecast.Build(forecast.PointsFromBTCDaily(points), opts)
 }
 

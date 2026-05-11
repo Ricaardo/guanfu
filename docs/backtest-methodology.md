@@ -129,7 +129,7 @@ go test ./pkg/engine/ -run TestBacktestBundles -v
 
 ### 更新 reliability 表
 
-如果 walk-forward 数字变化超出回归预算(任一 horizon dir_hit 下降 ≥ 3pp),更新 `pkg/forecast/reliability.go` 的 `assetHorizonReliability` 表 + `AsOf` 字段。具体规则见 `docs/archive/v3/guanfu-v3-todo.md` 回归预算节。
+如果 walk-forward 数字变化超出回归预算(任一 horizon dir_hit 下降 ≥ 3pp),更新 `pkg/assetprofile/profile.go` 里的 profile reliability row + `AsOf` 字段。`pkg/forecast/reliability.go` 只负责把 profile row 渲染成 caveat / hard-block。具体规则见 `docs/archive/v3/guanfu-v3-todo.md` 回归预算节。
 
 ### 为什么不在 BuildForecast 里实时跑 walk-forward
 

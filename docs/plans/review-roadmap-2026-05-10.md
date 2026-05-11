@@ -1,11 +1,11 @@
 # Guanfu Review Roadmap - 2026-05-10
 
-Status: implemented through 2026-05-11 review pass, with a proposed
-AssetProfile architecture boundary added for the next migration. P4 candidate
-sources are wired with source-health gates; CBOE put/call replaced the Stooq
-default path, Deribit/CMC context sources are documented, and
-reliability/backtest tables were refreshed. Promotion weight should still be
-reviewed by ablation when fresh historical coverage is available.
+Status: implemented through 2026-05-11 review pass, with the first
+AssetProfile registry migration now landed. P4 candidate sources are wired with
+source-health gates; CBOE put/call replaced the Stooq default path,
+Deribit/CMC context sources are documented, and reliability/backtest tables were
+refreshed. Promotion weight should still be reviewed by ablation when fresh
+historical coverage is available.
 
 This plan turns the latest project review into an implementation roadmap. The
 goal is to improve two product modes without reintroducing China A-share or Hong
@@ -35,20 +35,25 @@ Current state:
 - ADR added: [`docs/architecture/asset-profile-refactor.md`](../architecture/asset-profile-refactor.md).
 - Skill profiles added for BTC, equity indices, Gold, and arbitrary US stocks.
 - New asset checklist added under `skill/contracts/adding_asset.md`.
+- `pkg/assetprofile` added as the forecast-side profile registry.
+- CLI, MCP, backtest, and `engine.Asset.BuildForecast` now resolve default
+  horizons, feature bundles, static reliability, conformal scale, horizon
+  weights, expected feature names, and profile metadata from the registry.
+- `Forecast` JSON now exposes `profile_key`, `profile_version`, `asset_class`,
+  `feature_bundle`, and `skill_profile_uri`.
 
 Next steps:
 
-- Add `pkg/assetprofile` registry.
-- Move default horizons, reliability rows, conformal scale, horizon weights, and
-  feature bundles behind profile methods.
-- Make CLI, MCP, and backtest read from the same profile registry.
-- Split raw feature extraction from profile-specific normalization and weight.
+- Split raw feature extraction from profile-specific normalization.
+- Move ReadingLens / verdict policy into profile-owned contracts.
+- Stop Gold from depending on equity panel semantics for reading output.
 
 Acceptance:
 
-- Adding a new core asset does not require editing unrelated BTC/QQQ/SPY/Gold
-  code paths.
-- Backtest output includes active profile name and profile version.
+- Done: Backtest output includes active profile name and profile version.
+- Partially done: adding a forecast profile no longer requires updating
+  CLI/MCP/backtest switch statements, but adding a new reading lens still
+  touches `engine`.
 
 ## P1 - Data Source Health And Output Trust
 
@@ -172,12 +177,14 @@ Current state:
 - `qqq` and `spy` use equity feature bundles.
 - `gold` uses gold feature bundles.
 - `btc` keeps BTC core cycle features.
+- `backtest all` now reports active profile, profile version, feature bundle,
+  missing features, feature coverage, and conformal realized coverage.
 
 Next steps:
 
-- Show feature bundle name in `backtest all`.
-- Show feature coverage per asset and horizon.
-- Show missing macro features that were dropped from the bundle.
+- Keep the profile fields stable in JSON output.
+- Add per-profile normalization scale tests after raw feature extraction is
+  split from normalization.
 
 Acceptance:
 

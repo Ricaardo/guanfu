@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/forecast/backtest"
 	"github.com/Ricaardo/guanfu/pkg/forecast/features"
@@ -211,29 +212,14 @@ func normalizeBacktestAsset(asset string) (string, bool) {
 }
 
 func backtestExtractorsForAsset(asset string, s *store.PriceStore) []forecast.FeatureExtractor {
-	switch asset {
-	case "btc":
-		return features.CoreExtractors()
-	case "qqq", "spy":
-		return features.EquityExtractors(s)
-	case "gold":
-		return features.GoldExtractors(s)
-	default:
-		return features.GenericTechnicalExtractors()
-	}
+	return features.ExtractorsForAsset(asset, s)
 }
 
 func backtestFeatureLabel(asset string) string {
-	switch asset {
-	case "btc":
-		return "BTC core price/cycle features"
-	case "qqq", "spy":
-		return "US equity technical + macro + put/call features"
-	case "gold":
-		return "gold technical + macro features"
-	default:
-		return "generic technical features"
+	if p, ok := assetprofile.For(asset); ok {
+		return fmt.Sprintf("%s profile bundle (%s)", p.Key, p.FeatureBundle)
 	}
+	return "generic technical features"
 }
 
 type featureDiagnostics struct {
@@ -281,24 +267,7 @@ func diagnoseFeatureBundle(asset string, points []forecast.Point, extractors []f
 }
 
 func expectedFeatureNamesForAsset(asset string) []string {
-	generic := []string{
-		"return_30d", "return_90d", "return_180d", "drawdown_90d",
-		"mayer_multiple", "realized_vol_30d", "rsi_14",
-	}
-	switch asset {
-	case "btc":
-		return append(append([]string{}, generic...),
-			"sma_200w_dev", "ahr999_compressed", "halving_cycle_sin", "halving_cycle_cos")
-	case "qqq", "spy":
-		return append(append([]string{}, generic...),
-			"cape", "dgs10_30d", "dxy_30d", "hy_spread_30d", "yield_curve", "vixy_level",
-			"put_call_ratio", "put_call_30d_change", "put_call_252d_percentile")
-	case "gold":
-		return append(append([]string{}, generic...),
-			"real_yield_10y", "breakeven_10y", "dxy_30d", "gold_cot_net", "vixy_level")
-	default:
-		return generic
-	}
+	return assetprofile.ExpectedFeaturesFor(asset)
 }
 
 func missingFeatureText(features []string) string {

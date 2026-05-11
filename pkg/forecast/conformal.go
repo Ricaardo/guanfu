@@ -43,6 +43,8 @@ package forecast
 import (
 	"math"
 	"sort"
+
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 )
 
 // defaultConformalAlpha is the 1-coverage target for conformal bounds.
@@ -132,24 +134,5 @@ func annotateHorizonConformalForAsset(h *HorizonForecast, returns []float64, cur
 }
 
 func conformalCalibrationScale(asset string, horizonDays int) float64 {
-	switch asset {
-	case "qqq":
-		switch horizonDays {
-		case 30, 63, 90, 180, 252:
-			return 1.80
-		}
-	case "spy":
-		switch horizonDays {
-		case 30, 63, 90:
-			return 1.60
-		case 180, 252:
-			return 1.90
-		}
-	case "gold":
-		switch horizonDays {
-		case 120, 180:
-			return 1.20
-		}
-	}
-	return 1
+	return assetprofile.ConformalScale(asset, horizonDays)
 }

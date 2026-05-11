@@ -148,7 +148,7 @@ tier1/2/3 是我设计的分层,但**没在真实 MCP 客户端里测过**。可
 
 | 项 | 频率 | 工作量 |
 |---|
-| `pkg/forecast/reliability.go` 更新 | 每 3 个月跑一次 `TestBacktestBundles`,数字变化 > 3pp 更新表 + AsOf | 1 小时 |
+| `pkg/assetprofile/profile.go` reliability row 更新 | 每 3 个月跑一次 `TestBacktestBundles`,数字变化 > 3pp 更新表 + AsOf；`pkg/forecast/reliability.go` 只保留渲染规则 | 1 小时 |
 | `pkg/calendar/calendar.go` FOMC 表 | 每年 1 月添加下一年 FOMC 日程(Fed 官方发布时) | 30 分钟 |
 | 数据源 endpoint 漂移(CBOE / CoinGecko / DefiLlama)| 通过 calibrate + source_health 监控;发现 stale/fail 率升高时修 | 按需 |
 
