@@ -221,19 +221,22 @@ func TestHandleRequestResourceReadUsesDeclaredMimeType(t *testing.T) {
 
 func TestResourceMimeTypeMatchesDeclaredResources(t *testing.T) {
 	cases := map[string]string{
-		"guanfu://knowledge/skill.md":   "text/markdown",
-		"guanfu://skill/tier1":          "text/markdown",
-		"guanfu://skill/tier2":          "text/markdown",
-		"guanfu://skill/tier3":          "text/markdown",
-		"guanfu://ledger/summary":       "application/json",
-		"guanfu://panel/latest":         "application/json",
-		"guanfu://verdict/latest":       "application/json",
-		"guanfu://forecast/latest":      "application/json",
-		"guanfu://panel/latest/btc":     "application/json",
-		"guanfu://panel/latest/qqq":     "application/json",
-		"guanfu://verdict/latest/spy":   "application/json",
-		"guanfu://forecast/latest/gold": "application/json",
-		"guanfu://unknown":              "text/plain",
+		"guanfu://knowledge/skill.md":            "text/markdown",
+		"guanfu://skill/tier1":                   "text/markdown",
+		"guanfu://skill/tier2":                   "text/markdown",
+		"guanfu://skill/tier3":                   "text/markdown",
+		"guanfu://skill/profiles/btc":            "text/markdown",
+		"guanfu://skill/profiles/gold":           "text/markdown",
+		"guanfu://skill/contracts/asset-profile": "text/markdown",
+		"guanfu://ledger/summary":                "application/json",
+		"guanfu://panel/latest":                  "application/json",
+		"guanfu://verdict/latest":                "application/json",
+		"guanfu://forecast/latest":               "application/json",
+		"guanfu://panel/latest/btc":              "application/json",
+		"guanfu://panel/latest/qqq":              "application/json",
+		"guanfu://verdict/latest/spy":            "application/json",
+		"guanfu://forecast/latest/gold":          "application/json",
+		"guanfu://unknown":                       "text/plain",
 	}
 	for uri, want := range cases {
 		if got := resourceMimeType(uri); got != want {
@@ -254,11 +257,11 @@ func TestHandleResourceReadLedgerSummary(t *testing.T) {
 	}
 }
 
-// M1/M2: tier URIs must be listed and return non-empty body from the
-// repo skill/ directory. Ensures deployments that expose MCP but forget
-// to set GUANFU_SKILL_DIR still get the in-repo tier files.
-func TestHandleResourceReadTiers(t *testing.T) {
-	// tierPath resolves relative to $GUANFU_SKILL_PATH's dir or "skill/";
+// M1/M2: skill markdown URIs must be listed and return non-empty body from
+// the repo skill/ directory. Ensures deployments that expose MCP but forget
+// to set GUANFU_SKILL_DIR still get the in-repo files.
+func TestHandleResourceReadSkillMarkdown(t *testing.T) {
+	// skillResourcePath resolves relative to $GUANFU_SKILL_PATH's dir or "skill/";
 	// tests run in cmd/guanfu-mcp/, so steer it to repo-root skill/ via env.
 	absSkill, err := filepath.Abs("../../skill/SKILL.md")
 	if err != nil {
@@ -268,8 +271,17 @@ func TestHandleResourceReadTiers(t *testing.T) {
 
 	listBytes := buildResourcesList()
 	listStr := string(listBytes)
-	for _, tier := range []string{"tier1", "tier2"} {
-		uri := "guanfu://skill/" + tier
+	for _, key := range []string{
+		"tier1",
+		"tier2",
+		"profiles/btc",
+		"profiles/equity_index",
+		"profiles/gold",
+		"profiles/us_stock",
+		"contracts/asset-profile",
+		"contracts/adding_asset",
+	} {
+		uri := "guanfu://skill/" + key
 		if !strings.Contains(listStr, uri) {
 			t.Errorf("resources/list must expose %s", uri)
 		}
@@ -289,9 +301,9 @@ func TestHandleResourceReadTiers(t *testing.T) {
 	if len(body) == 0 {
 		t.Error("tier3 body must be non-empty (alias to SKILL.md)")
 	}
-	// Unknown tier is a proper -32602.
+	// Unknown skill resource is a proper -32602.
 	if _, rpcErr := handleResourceRead("guanfu://skill/tier99"); rpcErr == nil {
-		t.Error("unknown tier must error")
+		t.Error("unknown skill resource must error")
 	}
 }
 

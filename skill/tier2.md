@@ -6,7 +6,7 @@ tier: 2
 
 # guanfu · Tier 2 — 决策框架 + 行为护栏
 
-> 前置:已读 `tier1.md`。本文档聚焦**怎么把 tier1 的原始数据翻译成结构化建议**,以及如何给建议时不造成负担。
+> 前置:已读 `tier1.md` + 对应 `profiles/*.md`。本文档的 8 域工作流是 BTC lens；QQQ/SPY、Gold、任意美股必须先按 profile 的 Reading Lens 替换 domain 和证据规则,再套用输出纪律与行为护栏。
 
 ## 1. 读盘工作流(9 步,按决策影响顺序)
 

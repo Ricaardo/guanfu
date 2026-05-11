@@ -15,6 +15,8 @@ tier: 1
 - **Gold**:同 QQQ/SPY 但 Valuation 侧重实际利率 / DXY / COT
 - **任意美股**(`stock TICKER`):Technical + Macro(无 CAPE,无 per-name 基本面)
 
+读盘必须同时加载对应 `skill/profiles/*.md`:BTC 用 `btc.md`,QQQ/SPY 用 `equity_index.md`,Gold 用 `gold.md`,任意美股用 `us_stock.md`。不要把 BTC 的 halving/AHR/network 语义套到非 BTC 资产。
+
 ## 2. 盘面字段结构
 
 每个指标 `Indicator`:

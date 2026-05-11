@@ -28,7 +28,20 @@ optional_tools:
 | `guanfu://skill/tier3`(同本文件) | 指标定义细节 / 因果机制 / 历史类比 | 用户追问原理 / 历史时读 |
 | `guanfu://knowledge/skill.md`(本文件) | 完整版,含所有节 | 向后兼容别名,新客户端优先用 tier1/2/3 |
 
-**推荐加载序列**:tier1(必载)→ tier2(决策时)→ 本文件特定章节(追问细节时)→ `kb/XX-*.md`(深度因果 / 类比 / 危机)
+**推荐加载序列**:tier1(必载)→ 对应 asset profile → tier2(决策时)→ 本文件特定章节(追问细节时)→ `kb/XX-*.md`(深度因果 / 类比 / 危机)
+
+### Asset Profile 路由
+
+Guanfu 的长期架构是 profile-first:BTC、权益指数、黄金、任意美股各自有不同读盘域、forecast 特征尺度、可靠性和 caveat。不要把 BTC 的 cycle/network/halving/AHR 语义套到其他资产。
+
+| 用户问题 | 必载 profile | 说明 |
+|---|---|---|
+| BTC / 比特币 | `profiles/btc.md` | 8 域 crypto-cycle lens |
+| QQQ / SPY / 美股指数 ETF | `profiles/equity_index.md` | 权益指数 lens:估值、利率、信用、期权、技术 |
+| 黄金 / Gold / XAU | `profiles/gold.md` | 实际利率、美元、通胀、COT、避险 |
+| 任意美股 ticker,如 AAPL/MSFT/NVDA | `profiles/us_stock.md` | 单一个股 lens,默认更保守,强调事件风险 |
+
+新增资产必须先满足 `contracts/asset-profile.md` 和 `contracts/adding_asset.md`。架构决策见 [`docs/architecture/asset-profile-refactor.md`](../docs/architecture/asset-profile-refactor.md)。
 
 ## CLI 命令
 
@@ -83,6 +96,12 @@ guanfu status             # PriceStore 数据状态诊断
 | `guanfu://skill/tier2` | 决策框架 + 行为护栏(做判断时读) |
 | `guanfu://skill/tier3`(当前同下) | 深度细节(追问原理时读) |
 | `guanfu://knowledge/skill.md` | 完整版 SKILL.md(向后兼容,新客户端优先 tier) |
+| `guanfu://skill/profiles/btc` | BTC 资产画像与读盘契约 |
+| `guanfu://skill/profiles/equity_index` | QQQ/SPY 权益指数契约 |
+| `guanfu://skill/profiles/gold` | 黄金契约 |
+| `guanfu://skill/profiles/us_stock` | 任意美股契约 |
+| `guanfu://skill/contracts/asset-profile` | 新资产必须满足的 profile 合同 |
+| `guanfu://skill/contracts/adding_asset` | 新增资产 checklist |
 | `guanfu://panel/latest` | BTC 盘面(deprecated alias,= `/latest/btc`) |
 | `guanfu://panel/latest/{btc,qqq,spy,gold}` | 每资产盘面 |
 | `guanfu://verdict/latest/{asset}` | 每资产 verdict |
@@ -133,7 +152,7 @@ guanfu status             # PriceStore 数据状态诊断
 
 ## kNN 预测引擎 + 可靠性标注
 
-Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。
+Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。下一阶段迁移目标是 `AssetProfile`/`ForecastProfile` 单一真源:特征原始值由 extractor 算,归一化尺度、权重、horizon、reliability、conformal calibration 由 profile 决定。
 
 每个 `HorizonForecast` 附 `reliability_note` + `hard_blocked` 字段。三档规则、当前 (asset, horizon) 命中率表、`hard_blocked` 时的契约（数值字段保留但不渲染），全部见 [`tier1.md`](tier1.md) § 3 "可靠性标注"——**AI 读盘必载**。真源 `pkg/forecast/reliability.go`。
 

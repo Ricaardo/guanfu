@@ -7,7 +7,7 @@ guanfu 的命令行工具分 5 个入口,按角色分为:
 | 目录 | 用途 | 调用方式 |
 |---|---|---|
 | `guanfu/` | 主 CLI + MCP 可调的多资产盘面 | `guanfu [btc\|qqq\|spy\|gold\|stock TICKER] [--verdict\|--forecast\|--full]`;子命令 `refresh` / `market` / `dca` / `allocate` / `intent` / `watch` / `digest` / `calibrate` / `backtest` / `backtest all --ablate-putcall` / `status --frank` |
-| `guanfu-mcp/` | MCP stdio server(Claude Desktop / Cursor / Claude Code) | 配置 `mcpServers.guanfu.command = /path/to/guanfu-mcp`,资源 `guanfu://panel/latest/{btc,qqq,spy,gold}` `guanfu://skill/tier1` 等 |
+| `guanfu-mcp/` | MCP stdio server(Claude Desktop / Cursor / Claude Code) | 配置 `mcpServers.guanfu.command = /path/to/guanfu-mcp`,资源 `guanfu://panel/latest/{btc,qqq,spy,gold}` `guanfu://skill/tier1` `guanfu://skill/profiles/btc` 等 |
 
 ## 辅助工具(二进制级,但更偏运维/复盘)
 

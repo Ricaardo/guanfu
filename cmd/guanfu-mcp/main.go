@@ -13,10 +13,12 @@
 // 旧的 get_btc_* 名字向后兼容保留 (alias 同 handler)；新代码用 get_*。
 //
 // 提供的 Resources:
-//   guanfu://knowledge/skill.md — SKILL.md 知识库
-//   guanfu://panel/latest       — 缓存的最新盘面
-//   guanfu://verdict/latest     — 缓存盘面的结构化读盘
-//   guanfu://forecast/latest    — 缓存盘面的走势推演
+//   guanfu://knowledge/skill.md        — SKILL.md 知识库
+//   guanfu://skill/tier1               — 必载数据契约
+//   guanfu://skill/profiles/{profile}  — 资产 profile 读盘契约
+//   guanfu://panel/latest/{asset}      — 缓存的最新盘面
+//   guanfu://verdict/latest/{asset}    — 缓存盘面的结构化读盘
+//   guanfu://forecast/latest/{asset}   — 缓存盘面的走势推演
 //
 // 部署: 在 claude_desktop_config.json 中添加:
 //
@@ -521,6 +523,36 @@ func buildResourcesList() json.RawMessage {
 		MIMEType:    "text/markdown",
 		Description: "深度参考:指标定义 / 因果机制 / 历史类比。用户追问原理 / 历史时按需读",
 	}, {
+		URI:         "guanfu://skill/profiles/btc",
+		Name:        "Asset Profile — BTC",
+		MIMEType:    "text/markdown",
+		Description: "BTC 资产画像:8 域 crypto-cycle lens、forecast/source/skill 规则",
+	}, {
+		URI:         "guanfu://skill/profiles/equity_index",
+		Name:        "Asset Profile — Equity Index",
+		MIMEType:    "text/markdown",
+		Description: "QQQ/SPY 权益指数画像:估值、利率、信用、期权、技术",
+	}, {
+		URI:         "guanfu://skill/profiles/gold",
+		Name:        "Asset Profile — Gold",
+		MIMEType:    "text/markdown",
+		Description: "黄金画像:实际利率、美元、通胀、COT、避险、技术",
+	}, {
+		URI:         "guanfu://skill/profiles/us_stock",
+		Name:        "Asset Profile — US Stock",
+		MIMEType:    "text/markdown",
+		Description: "任意美股画像:单一个股读盘、事件风险、保守 forecast 规则",
+	}, {
+		URI:         "guanfu://skill/contracts/asset-profile",
+		Name:        "Contract — Asset Profile",
+		MIMEType:    "text/markdown",
+		Description: "新增资产必须满足的数据/读盘/forecast/skill/validation 合同",
+	}, {
+		URI:         "guanfu://skill/contracts/adding_asset",
+		Name:        "Contract — Adding Asset",
+		MIMEType:    "text/markdown",
+		Description: "新增核心资产或资产类的 checklist 与硬规则",
+	}, {
 		URI:         "guanfu://ledger/summary",
 		Name:        "Claim + Intent ledger summary (K9)",
 		MIMEType:    "application/json",
@@ -562,8 +594,8 @@ func handleResourceRead(uri string) (string, *rpcError) {
 	if uri == "guanfu://ledger/summary" {
 		return readLedgerSummary()
 	}
-	if tier, ok := strings.CutPrefix(uri, "guanfu://skill/"); ok {
-		p, err := tierPath(tier)
+	if key, ok := strings.CutPrefix(uri, "guanfu://skill/"); ok {
+		p, err := skillResourcePath(key)
 		if err != nil {
 			return "", &rpcError{Code: -32602, Message: err.Error()}
 		}
@@ -572,12 +604,12 @@ func handleResourceRead(uri string) (string, *rpcError) {
 			// tier3 falls back to SKILL.md until the explicit tier3.md is
 			// written out; behave like an alias so consumers that read
 			// tier3 don't error.
-			if tier == "tier3" {
+			if key == "tier3" {
 				if skillData, sErr := os.ReadFile(skillPath()); sErr == nil {
 					return string(skillData), nil
 				}
 			}
-			return "", &rpcError{Code: -32603, Message: "tier " + tier + " not found: " + err.Error()}
+			return "", &rpcError{Code: -32603, Message: "skill resource " + key + " not found: " + err.Error()}
 		}
 		return string(data), nil
 	}
@@ -966,27 +998,32 @@ func skillPath() string {
 	return "skill/SKILL.md"
 }
 
-// tierPath resolves a tier key ("tier1" / "tier2" / "tier3") to its file
-// path. Resolution order:
-//  1. $GUANFU_SKILL_DIR/{tier}.md (if env set)
+// skillResourcePath resolves guanfu://skill/* resource keys to files.
+// Resolution order:
+//  1. $GUANFU_SKILL_DIR/{key}.md (if env set)
 //  2. sibling of $GUANFU_SKILL_PATH (common deployment: SKILL/tier live together)
-//  3. "skill/{tier}.md" (repo-relative default)
-func tierPath(tier string) (string, error) {
-	switch tier {
+//  3. "skill/{key}.md" (repo-relative default)
+func skillResourcePath(key string) (string, error) {
+	if strings.Contains(key, "..") || strings.HasPrefix(key, "/") || strings.HasSuffix(key, "/") {
+		return "", fmt.Errorf("invalid skill resource %q", key)
+	}
+	switch key {
 	case "tier1", "tier2", "tier3":
+	case "profiles/btc", "profiles/equity_index", "profiles/gold", "profiles/us_stock":
+	case "contracts/asset-profile", "contracts/adding_asset":
 	default:
-		return "", fmt.Errorf("unknown tier %q (want tier1/tier2/tier3)", tier)
+		return "", fmt.Errorf("unknown skill resource %q", key)
 	}
 	if d := os.Getenv("GUANFU_SKILL_DIR"); d != "" {
-		return d + "/" + tier + ".md", nil
+		return d + "/" + key + ".md", nil
 	}
 	// Use skillPath's directory if GUANFU_SKILL_PATH is set so tier files sit
 	// next to the main SKILL.md deployment.
 	sp := skillPath()
 	if i := strings.LastIndex(sp, "/"); i >= 0 {
-		return sp[:i+1] + tier + ".md", nil
+		return sp[:i+1] + key + ".md", nil
 	}
-	return "skill/" + tier + ".md", nil
+	return "skill/" + key + ".md", nil
 }
 
 // ─── RPC helpers ──────────────────────────────────────

@@ -139,9 +139,40 @@ MarketSnapshot  (BTC cache)   — serialized to cache/market_cache.json
 
 ---
 
+## 4. Asset Profile 边界(I7)
+
+Guanfu 起源是 BTC 盘面,但现在覆盖 BTC / QQQ / SPY / Gold / 任意美股。未来维护必须避免把 BTC 的 cycle/network/halving/AHR 语义扩散到其他资产。
+
+架构决策见 [`docs/architecture/asset-profile-refactor.md`](architecture/asset-profile-refactor.md)。
+
+### 单一真源目标
+
+每个资产或资产类必须最终由 `AssetProfile` 提供:
+
+- 读盘 domains 与 verdict policy
+- forecast feature bundle
+- feature normalization / weight / horizon boost
+- default horizons / TopK / calibration
+- reliability rows 和 hard-block 规则
+- skill profile 与 caveat 语言
+
+### 禁止模式
+
+- 在 CLI / MCP / backtest 中新增平行的 `switch asset` 映射,却不更新 profile。
+- 把 BTC-only 指标(AHR999、halving、hash ribbons、miner cost)接入非 BTC。
+- 把任意美股当成 QQQ/SPY 指数 ETF 处理,忽略 earnings/event risk。
+- 用 latest-only source 进入 forecast,除非先有历史序列和 ablation。
+
+### 迁移原则
+
+短期允许现有 `engine.Asset` 继续编排 snapshot/panel/verdict/forecast,但它应该逐步委托给 profile。每做一次迁移,必须让 CLI、MCP、backtest 共同读取同一 profile 配置,避免三份 mapping 漂移。
+
+---
+
 ## 变更记录
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v1 | 2026-05-09 | 首版,覆盖 I3 weight 归一化 / I4 BTC ad-hoc 源 / I5 schema 演化 3 个隐式约定 |
 | v2 | 2026-05-09 | I6 追加:`pkg/engine/calculator.go` 有 ~500 行 v1 死代码待清理(`Calculate()` 方法 + `ScoreResult` 类型 + 11 个仅它用的 calc helper,全部 v1 NewsEngine Discord/Feishu 推送遗留)。零外部引用,不阻塞运行。下一轮维护时单独 commit 清理 |
+| v3 | 2026-05-11 | I7 追加:多资产系统进入 AssetProfile 架构迁移,将读盘 lens / forecast profile / skill profile 从 BTC-first 通用层拆出 |

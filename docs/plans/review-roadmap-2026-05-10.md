@@ -1,10 +1,11 @@
 # Guanfu Review Roadmap - 2026-05-10
 
-Status: implemented through 2026-05-11 review pass. P3 candidate sources are
-wired with source-health gates; CBOE put/call replaced the Stooq default path,
-Deribit/CMC context sources are documented, and reliability/backtest tables were
-refreshed. Promotion weight should still be reviewed by ablation when fresh
-historical coverage is available.
+Status: implemented through 2026-05-11 review pass, with a proposed
+AssetProfile architecture boundary added for the next migration. P4 candidate
+sources are wired with source-health gates; CBOE put/call replaced the Stooq
+default path, Deribit/CMC context sources are documented, and
+reliability/backtest tables were refreshed. Promotion weight should still be
+reviewed by ablation when fresh historical coverage is available.
 
 This plan turns the latest project review into an implementation roadmap. The
 goal is to improve two product modes without reintroducing China A-share or Hong
@@ -22,12 +23,38 @@ Kong stock logic:
 3. Keep HS300, A-share, and Hong Kong stock asset logic out of Guanfu.
 4. Every new source must expose source health and a clear stale/missing state.
 5. Every model change must be validated by asset-specific backtests.
+6. New assets must enter through an AssetProfile/ReadingLens/ForecastProfile
+   contract, not by copying BTC or QQQ/SPY logic.
 
-## P0 - Data Source Health And Output Trust
+## P0 - Multi-Asset Architecture Boundary
+
+Priority: highest for further expansion.
+
+Current state:
+
+- ADR added: [`docs/architecture/asset-profile-refactor.md`](../architecture/asset-profile-refactor.md).
+- Skill profiles added for BTC, equity indices, Gold, and arbitrary US stocks.
+- New asset checklist added under `skill/contracts/adding_asset.md`.
+
+Next steps:
+
+- Add `pkg/assetprofile` registry.
+- Move default horizons, reliability rows, conformal scale, horizon weights, and
+  feature bundles behind profile methods.
+- Make CLI, MCP, and backtest read from the same profile registry.
+- Split raw feature extraction from profile-specific normalization and weight.
+
+Acceptance:
+
+- Adding a new core asset does not require editing unrelated BTC/QQQ/SPY/Gold
+  code paths.
+- Backtest output includes active profile name and profile version.
+
+## P1 - Data Source Health And Output Trust
 
 Priority: highest.
 
-### P0.1 Complete Source Health Coverage
+### P1.1 Complete Source Health Coverage
 
 Extend top-level output so each asset view clearly shows:
 
@@ -51,7 +78,7 @@ Acceptance:
   and `guanfu gold --forecast` expose enough source-health context for users to
   judge forecast reliability without separately reading the refresh table.
 
-### P0.2 Split Refresh Skip Semantics
+### P1.2 Split Refresh Skip Semantics
 
 Make refresh output distinguish:
 
@@ -73,7 +100,7 @@ Acceptance:
 - `guanfu refresh` makes actionability obvious: ignore, configure, replace, or
   investigate.
 
-### P0.3 Update Data Source Documentation
+### P1.3 Update Data Source Documentation
 
 Update `docs/DATA-SOURCES.md` with:
 
@@ -88,12 +115,12 @@ Acceptance:
 - A new operator can understand which sources are required for core behavior and
   which are optional context.
 
-## P1 - Market Reading Enhancements
+## P2 - Market Reading Enhancements
 
 These changes can ship before model changes because they are dashboard/context
 outputs, not forecast signals.
 
-### P1.1 Add CNY Investor Lens
+### P2.1 Add CNY Investor Lens
 
 Add CNY-aware context for USD-denominated assets:
 
@@ -108,7 +135,7 @@ Acceptance:
 - CNY-based users can see whether their realized local-currency experience is
   driven by asset return, FX return, or both.
 
-### P1.2 Global Central Bank Panel
+### P2.2 Global Central Bank Panel
 
 Keep the current US/EU/JP/CN macro context:
 
@@ -124,7 +151,7 @@ Acceptance:
 - The dashboard explains dollar strength, rate spread, and liquidity backdrop
   without turning them into standalone buy/sell signals.
 
-### P1.3 Explicit Non-Goals
+### P2.3 Explicit Non-Goals
 
 Do not implement:
 
@@ -133,11 +160,11 @@ Do not implement:
 - Hong Kong stock asset logic
 - China macro forecasting as a Guanfu core asset pipeline
 
-## P2 - Forecast Evaluation And Calibration
+## P3 - Forecast Evaluation And Calibration
 
 Priority: high. This is the core forecasting quality track.
 
-### P2.1 Keep Backtests Asset-Specific
+### P3.1 Keep Backtests Asset-Specific
 
 Current state:
 
@@ -156,7 +183,7 @@ Acceptance:
 
 - Backtest reports make it clear which features were actually used.
 
-### P2.2 Calibrate Before Adding Features
+### P3.2 Calibrate Before Adding Features
 
 Latest asset-specific backtest result:
 
@@ -201,7 +228,7 @@ Acceptance:
 
 - PIT should move toward `0.45-0.55` without materially worsening CRPS.
 
-### P2.3 Backtest Guardrails
+### P3.3 Backtest Guardrails
 
 Required validation for any data-source or feature change:
 
@@ -214,11 +241,11 @@ Acceptance:
 
 - No feature or source enters the forecast path without repeatable validation.
 
-## P3 - New Data Sources
+## P4 - New Data Sources
 
-Add sources only after P0/P2 are stable.
+Add sources only after P0/P3 are stable.
 
-### P3.1 BTC
+### P4.1 BTC
 
 Candidate sources:
 
@@ -232,7 +259,7 @@ Rule:
 
 - On-chain features must be historical series, not latest-only dashboard values.
 
-### P3.2 QQQ / SPY
+### P4.2 QQQ / SPY
 
 Candidate sources:
 
@@ -258,7 +285,7 @@ Rule:
 
 - Do not use latest-only valuation snapshots as forecast features.
 
-### P3.3 Gold
+### P4.3 Gold
 
 Candidate sources/features:
 
@@ -271,7 +298,7 @@ Rule:
 - Prefer rate-of-change features over level-only macro features when the level is
   regime-dependent.
 
-### P3.4 Global Macro
+### P4.4 Global Macro
 
 Current status:
 
@@ -282,7 +309,7 @@ Promotion rule:
 - They can become forecast features only after ablation shows improvement in
   hit rate, PIT, and CRPS.
 
-## P4 - Product Output Separation
+## P5 - Product Output Separation
 
 Separate user-facing output into two modes.
 
@@ -314,11 +341,12 @@ Should emphasize:
 
 ## Execution Order
 
-1. P0: source-health coverage, refresh status semantics, data-source docs.
-2. P2: backtest report transparency and calibration.
-3. P1: CNY investor lens and central-bank dashboard polish.
-4. P3: new data sources, each gated by ablation.
-5. P4: output separation once the underlying data and forecast paths are stable.
+1. P0: AssetProfile architecture boundary and profile registry.
+2. P1: source-health coverage, refresh status semantics, data-source docs.
+3. P3: backtest report transparency and calibration.
+4. P2: CNY investor lens and central-bank dashboard polish.
+5. P4: new data sources, each gated by ablation.
+6. P5: output separation once the underlying data and forecast paths are stable.
 
 ## Current Commit Baseline
 
