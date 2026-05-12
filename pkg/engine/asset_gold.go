@@ -163,7 +163,7 @@ func BuildGoldVerdict(panel *model.IndicatorPanel) *Verdict {
 func scoreGoldDomain(panel *model.IndicatorPanel, domain string) (vote int, bull, bear []string, coverage float64) {
 	switch domain {
 	case "technical":
-		vote, bull, bear = scoreEquityTechnical(panel.Technical)
+		vote, bull, bear = scoreEquityTechnicalForAsset(panel.Technical, "gold")
 		coverage = coverageScore(panel.Technical)
 	case "macro":
 		vote, bull, bear = scoreGoldMacro(panel.Macro)
@@ -279,11 +279,12 @@ func goldVIXLabel(vix float64) string {
 }
 
 func scoreGoldValuation(v map[string]model.Indicator) (vote int, bull, bear []string) {
+	rules := assetprofile.ScoringRulesFor("gold", "valuation")
 	if ryp, ok := v["real_yield_proxy"]; ok && ryp.IsAvailable() {
-		if ryp.Value > 100 {
+		if applyRule(rules, "real_yield_proxy", ryp.Value) > 0 {
 			bull = append(bull, "实际利率下行")
 			vote++
-		} else if ryp.Value < 85 {
+		} else if applyRule(rules, "real_yield_proxy", ryp.Value) < 0 {
 			bear = append(bear, "实际利率偏高")
 			vote--
 		}
@@ -302,11 +303,12 @@ func scoreGoldValuation(v map[string]model.Indicator) (vote int, bull, bear []st
 }
 
 func scoreGoldMacro(m map[string]model.Indicator) (vote int, bull, bear []string) {
+	rules := assetprofile.ScoringRulesFor("gold", "macro")
 	if vix, ok := m["vix_level"]; ok && vix.IsAvailable() {
-		if vix.Value > 30 {
+		if applyRule(rules, "vix_level", vix.Value) > 0 {
 			bull = append(bull, fmt.Sprintf("VIX恐慌(%.0f)→避险需求", vix.Value))
 			vote++
-		} else if vix.Value < 12 {
+		} else if applyRule(rules, "vix_level", vix.Value) < 0 {
 			bear = append(bear, "VIX极低→避险需求不足")
 			vote--
 		}

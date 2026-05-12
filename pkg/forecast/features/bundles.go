@@ -6,6 +6,8 @@
 //   - Asset-specific macro extractors are constructed against PriceStore.
 //   - If a macro source is missing, the extractor is silently dropped.
 //   - BTC keeps its dedicated CoreExtractors() (halving/AHR are BTC-only).
+//   - Non-BTC assets inject per-profile normalization scales so that equity
+//     and gold returns are not compressed by BTC's extreme-volatility defaults.
 
 package features
 
@@ -28,11 +30,11 @@ func ExtractorsForProfile(p assetprofile.Profile, s *store.PriceStore) []forecas
 	case "btc_core":
 		return CoreExtractors()
 	case "equity_index":
-		return EquityExtractors(s)
+		return EquityExtractorsWithScales(s, PutCallAll, p.FeatureScales)
 	case "gold":
-		return GoldExtractors(s)
+		return GoldExtractorsWithScales(s, p.FeatureScales)
 	case "us_stock":
-		return USStockExtractors(s)
+		return USStockExtractorsWithScales(s, p.FeatureScales)
 	default:
 		return GenericTechnicalExtractors()
 	}
@@ -46,7 +48,11 @@ func EquityExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
 }
 
 func EquityExtractorsWithPutCallMode(s *store.PriceStore, putCallMode PutCallFeatureMode) []forecast.FeatureExtractor {
-	exts := GenericTechnicalExtractors()
+	return EquityExtractorsWithScales(s, putCallMode, nil)
+}
+
+func EquityExtractorsWithScales(s *store.PriceStore, putCallMode PutCallFeatureMode, scales map[string]float64) []forecast.FeatureExtractor {
+	exts := GenericTechnicalExtractorsWithScales(scales)
 	for _, ex := range []forecast.FeatureExtractor{
 		CAPEExtractor(s),
 		DGS10Extractor(s),
@@ -67,7 +73,11 @@ func EquityExtractorsWithPutCallMode(s *store.PriceStore, putCallMode PutCallFea
 // generic technicals + real yield (DFII10) + breakeven inflation
 // + USD (DXY) + COT positioning + VIX (risk-off hedge).
 func GoldExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
-	exts := GenericTechnicalExtractors()
+	return GoldExtractorsWithScales(s, nil)
+}
+
+func GoldExtractorsWithScales(s *store.PriceStore, scales map[string]float64) []forecast.FeatureExtractor {
+	exts := GenericTechnicalExtractorsWithScales(scales)
 	for _, ex := range []forecast.FeatureExtractor{
 		RealYield10YExtractor(s),
 		BreakevenExtractor(s),
@@ -90,7 +100,11 @@ func GoldExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
 // Bundle: generic technicals + DGS10 (rates) + DXY (USD)
 // + HY spread (credit) + 10Y-2Y curve + VIX (risk-off).
 func USStockExtractors(s *store.PriceStore) []forecast.FeatureExtractor {
-	exts := GenericTechnicalExtractors()
+	return USStockExtractorsWithScales(s, nil)
+}
+
+func USStockExtractorsWithScales(s *store.PriceStore, scales map[string]float64) []forecast.FeatureExtractor {
+	exts := GenericTechnicalExtractorsWithScales(scales)
 	for _, ex := range []forecast.FeatureExtractor{
 		DGS10Extractor(s),
 		DXYExtractor(s),

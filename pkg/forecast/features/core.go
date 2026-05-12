@@ -41,14 +41,89 @@ func CoreExtractors() []forecast.FeatureExtractor {
 // (AHR999 fair-price, halving cycle, 200-week SMA — designed for BTC's
 // 13-year secular trend).
 func GenericTechnicalExtractors() []forecast.FeatureExtractor {
+	return GenericTechnicalExtractorsWithScales(nil)
+}
+
+// GenericTechnicalExtractorsWithScales is the scale-aware variant.
+// scales maps feature name → normalization divisor; nil or missing keys
+// fall back to BTC defaults (0.30/0.60/1.00/0.40 for returns/drawdown).
+func GenericTechnicalExtractorsWithScales(scales map[string]float64) []forecast.FeatureExtractor {
+	scaleOf := func(name string, btcDefault float64) float64 {
+		if scales == nil {
+			return btcDefault
+		}
+		if v, ok := scales[name]; ok && v > 0 {
+			return v
+		}
+		return btcDefault
+	}
+
+	ret30Scale := scaleOf("return_30d", 0.30)
+	ret90Scale := scaleOf("return_90d", 0.60)
+	ret180Scale := scaleOf("return_180d", 1.00)
+	dd90Scale := scaleOf("drawdown_90d", 0.40)
+	volScale := scaleOf("realized_vol_30d", 0.50)
+
+	return30d := func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		r, ok := returnOver(points, i, 30)
+		if !ok {
+			return nil, false
+		}
+		return []forecast.FeatureValue{{
+			Name: "return_30d", Value: round4(r * 100), Normalized: round4(clip(r/ret30Scale, 3)), Weight: 1.10,
+		}}, true
+	}
+	return90d := func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		r, ok := returnOver(points, i, 90)
+		if !ok {
+			return nil, false
+		}
+		return []forecast.FeatureValue{{
+			Name: "return_90d", Value: round4(r * 100), Normalized: round4(clip(r/ret90Scale, 3)), Weight: 1.00,
+		}}, true
+	}
+	return180d := func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		r, ok := returnOver(points, i, 180)
+		if !ok {
+			return nil, false
+		}
+		return []forecast.FeatureValue{{
+			Name: "return_180d", Value: round4(r * 100), Normalized: round4(clip(r/ret180Scale, 3)), Weight: 0.80,
+		}}, true
+	}
+	drawdown90d := func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		dd, ok := drawdown(points, i, 90)
+		if !ok {
+			return nil, false
+		}
+		return []forecast.FeatureValue{{
+			Name: "drawdown_90d", Value: round4(dd * 100), Normalized: round4(clip(dd/dd90Scale, 3)), Weight: 1.10,
+		}}, true
+	}
+	realizedVol30d := func(points []forecast.Point, i int) ([]forecast.FeatureValue, bool) {
+		vol, ok := realizedVol(points, i, 30)
+		if !ok {
+			return nil, false
+		}
+		// For BTC: center 0.60, scale 0.50. For equity: center ~0.15, scale 0.15.
+		// We approximate by using volScale as both center and range.
+		center := volScale * 1.2 // rough center (BTC: 0.60, equity: 0.18, gold: 0.12)
+		if scales == nil {
+			center = 0.60 // preserve exact BTC legacy behavior
+		}
+		return []forecast.FeatureValue{{
+			Name: "realized_vol_30d", Value: round4(vol * 100), Normalized: round4(clip((vol-center)/volScale, 3)), Weight: 0.70,
+		}}, true
+	}
+
 	return []forecast.FeatureExtractor{
-		Return30d,
-		Return90d,
-		Return180d,
-		Drawdown90d,
-		MayerMultiple, // price / 200d SMA — generic trend extension proxy
-		RealizedVol30d,
-		RSI14,
+		return30d,
+		return90d,
+		return180d,
+		drawdown90d,
+		MayerMultiple, // price/200d SMA — scale is asset-agnostic (ratio, not return)
+		realizedVol30d,
+		RSI14, // (rsi-50)/25 — scale is asset-agnostic
 	}
 }
 

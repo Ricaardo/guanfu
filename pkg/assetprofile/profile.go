@@ -35,6 +35,23 @@ type Profile struct {
 	FeatureBundle    string
 	ExpectedFeatures []string
 	SkillProfileURI  string
+	// FeatureScales maps feature name → normalization divisor.
+	// Extractor clips raw/divisor to [-3, 3]. Absent keys fall back to
+	// the BTC defaults baked into core.go.
+	FeatureScales map[string]float64
+	// ScoringRules maps domain → indicator key → thresholds for verdict scoring.
+	// Engine scoring functions use these instead of hardcoded magic numbers.
+	// Absent entries fall back to the engine's built-in defaults.
+	ScoringRules map[string]map[string]IndicatorRule
+}
+
+// IndicatorRule defines bull/bear thresholds for a single indicator in a domain.
+// A nil pointer means "no threshold in this direction".
+type IndicatorRule struct {
+	BullBelow *float64 // value < threshold → bull signal
+	BullAbove *float64 // value > threshold → bull signal
+	BearBelow *float64 // value < threshold → bear signal
+	BearAbove *float64 // value > threshold → bear signal
 }
 
 type DomainSpec struct {
@@ -83,6 +100,15 @@ var profiles = map[string]Profile{
 			180: {DirHit: 0.630, NTests: 46, AsOf: "2026-05-11"},
 		},
 		HorizonWeights: defaultHorizonWeights(),
+		// BTC scales are the defaults baked into core.go; listed here for
+		// documentation and to allow explicit override if needed.
+		FeatureScales: map[string]float64{
+			"return_30d":       0.30,
+			"return_90d":       0.60,
+			"return_180d":      1.00,
+			"drawdown_90d":     0.40,
+			"realized_vol_30d": 0.50, // offset 0.60 handled in extractor
+		},
 	},
 	"qqq": {
 		Key:              "qqq",
@@ -102,6 +128,9 @@ var profiles = map[string]Profile{
 		},
 		ConformalScale: map[int]float64{30: 1.80, 63: 1.80, 90: 1.80, 180: 1.80, 252: 1.80},
 		HorizonWeights: defaultHorizonWeights(),
+		// Equity indices have ~3-5× lower volatility than BTC.
+		FeatureScales: equityFeatureScales(),
+		ScoringRules:  equityScoringRules(),
 	},
 	"spy": {
 		Key:              "spy",
@@ -121,6 +150,8 @@ var profiles = map[string]Profile{
 		},
 		ConformalScale: map[int]float64{30: 1.60, 63: 1.60, 90: 1.60, 180: 1.90, 252: 1.90},
 		HorizonWeights: defaultHorizonWeights(),
+		FeatureScales:  equityFeatureScales(),
+		ScoringRules:   equityScoringRules(),
 	},
 	"gold": {
 		Key:              "gold",
@@ -142,6 +173,9 @@ var profiles = map[string]Profile{
 		},
 		ConformalScale: map[int]float64{120: 1.20, 180: 1.20},
 		HorizonWeights: defaultHorizonWeights(),
+		// Gold vol is ~15-20% annualized; lower than equity, much lower than BTC.
+		FeatureScales: goldFeatureScales(),
+		ScoringRules:  goldScoringRules(),
 	},
 	"us_stock": {
 		Key:              "us_stock",
@@ -155,6 +189,10 @@ var profiles = map[string]Profile{
 		ExpectedFeatures: usStockExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/us_stock",
 		HorizonWeights:   defaultHorizonWeights(),
+		// Single stocks can vary widely; use equity-index scales as a
+		// conservative default (avoids BTC's extreme vol assumptions).
+		FeatureScales: equityFeatureScales(),
+		ScoringRules:  equityScoringRules(),
 	},
 }
 
@@ -265,6 +303,70 @@ func genericTechnicalFeatures() []string {
 	return []string{
 		"return_30d", "return_90d", "return_180d", "drawdown_90d",
 		"mayer_multiple", "realized_vol_30d", "rsi_14",
+	}
+}
+
+// equityFeatureScales returns normalization divisors for equity-index assets.
+// Equity indices have ~3-5× lower volatility than BTC, so the same raw return
+// would be clipped to near-zero with BTC scales.
+func equityFeatureScales() map[string]float64 {
+	return map[string]float64{
+		"return_30d":       0.08, // SPY/QQQ typical 30d range ±8%
+		"return_90d":       0.15, // typical 90d range ±15%
+		"return_180d":      0.25, // typical 180d range ±25%
+		"drawdown_90d":     0.20, // typical 90d drawdown ±20%
+		"realized_vol_30d": 0.15, // equity vol center ~15%, range ±15%
+	}
+}
+
+// goldFeatureScales returns normalization divisors for gold.
+// Gold annualized vol ~15-20%; lower than equity, much lower than BTC.
+func goldFeatureScales() map[string]float64 {
+	return map[string]float64{
+		"return_30d":       0.06, // gold typical 30d range ±6%
+		"return_90d":       0.12, // typical 90d range ±12%
+		"return_180d":      0.20, // typical 180d range ±20%
+		"drawdown_90d":     0.15, // typical 90d drawdown ±15%
+		"realized_vol_30d": 0.10, // gold vol center ~12%, range ±10%
+	}
+}
+
+// equityScoringRules returns indicator thresholds for equity-index verdict scoring.
+// These replace the hardcoded magic numbers in engine/equity_panel.go scoreXxx functions.
+func equityScoringRules() map[string]map[string]IndicatorRule {
+	return map[string]map[string]IndicatorRule{
+		"technical": {
+			"rsi_14":       {BullBelow: ptr(30), BearAbove: ptr(70)},
+			"sma_200_dev":  {BullAbove: ptr(10), BearBelow: ptr(-10)},
+			"momentum_90d": {BullAbove: ptr(10), BearBelow: ptr(-10)},
+		},
+		"macro": {
+			"vix_level": {BullBelow: ptr(15), BearAbove: ptr(30)},
+		},
+		"positioning": {
+			"fear_greed":     {BullBelow: ptr(25), BearAbove: ptr(75)},
+			"put_call_ratio": {BullAbove: ptr(1.2), BearBelow: ptr(0.7)},
+		},
+	}
+}
+
+// goldScoringRules returns indicator thresholds for gold verdict scoring.
+func goldScoringRules() map[string]map[string]IndicatorRule {
+	return map[string]map[string]IndicatorRule{
+		"technical": {
+			// Gold technical uses same RSI thresholds as equity
+			"rsi_14":       {BullBelow: ptr(30), BearAbove: ptr(70)},
+			"sma_200_dev":  {BullAbove: ptr(10), BearBelow: ptr(-10)},
+			"momentum_90d": {BullAbove: ptr(8), BearBelow: ptr(-8)},
+		},
+		"macro": {
+			// VIX: high VIX = risk-off = gold bullish (opposite of equity)
+			"vix_level": {BullAbove: ptr(30), BearBelow: ptr(12)},
+		},
+		"valuation": {
+			// real_yield_proxy: TLT price proxy; >100 = real yields falling = gold bullish
+			"real_yield_proxy": {BullAbove: ptr(100), BearBelow: ptr(85)},
+		},
 	}
 }
 
@@ -431,6 +533,30 @@ func HorizonWeightMultiplier(asset, feature string, days int) float64 {
 	return 1
 }
 
+// FeatureScaleFor returns the normalization divisor for a feature in the given
+// asset's profile. Returns 0 when no override is registered (caller should use
+// its own default). BTC callers can pass 0 as a sentinel to keep legacy behavior.
+func FeatureScaleFor(asset, feature string) float64 {
+	p, ok := For(asset)
+	if !ok {
+		return 0
+	}
+	return p.FeatureScales[feature]
+}
+
+// ScoringRulesFor returns the indicator scoring rules for a domain in the given
+// asset's profile. Returns nil when no rules are registered for that domain.
+func ScoringRulesFor(asset, domain string) map[string]IndicatorRule {
+	p, ok := For(asset)
+	if !ok {
+		return nil
+	}
+	return p.ScoringRules[domain]
+}
+
+// ptr is a convenience helper for creating *float64 threshold values.
+func ptr(v float64) *float64 { return &v }
+
 func normalizeKey(asset string) string {
 	key := strings.ToLower(strings.TrimSpace(asset))
 	if key == "" {
@@ -447,6 +573,8 @@ func cloneProfile(p Profile) Profile {
 	p.ConformalScale = cloneFloatMap(p.ConformalScale)
 	p.HorizonWeights = cloneWeightBands(p.HorizonWeights)
 	p.ExpectedFeatures = append([]string(nil), p.ExpectedFeatures...)
+	p.FeatureScales = cloneStringFloatMap(p.FeatureScales)
+	p.ScoringRules = cloneScoringRules(p.ScoringRules)
 	return p
 }
 
@@ -480,6 +608,32 @@ func cloneFloatMap(in map[int]float64) map[int]float64 {
 	out := make(map[int]float64, len(in))
 	for k, v := range in {
 		out[k] = v
+	}
+	return out
+}
+
+func cloneStringFloatMap(in map[string]float64) map[string]float64 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneScoringRules(in map[string]map[string]IndicatorRule) map[string]map[string]IndicatorRule {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]IndicatorRule, len(in))
+	for domain, rules := range in {
+		domainCopy := make(map[string]IndicatorRule, len(rules))
+		for k, r := range rules {
+			domainCopy[k] = r // IndicatorRule contains only *float64 pointers; shallow copy is safe (immutable after init)
+		}
+		out[domain] = domainCopy
 	}
 	return out
 }

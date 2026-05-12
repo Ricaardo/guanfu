@@ -510,15 +510,22 @@ func marketVerdictPolicy(panel *model.IndicatorPanel) assetprofile.VerdictPolicy
 }
 
 func scoreProfiledMarketDomain(panel *model.IndicatorPanel, domain string) (vote int, bull, bear []string, coverage float64) {
+	asset := panel.Asset
+	if asset == "" {
+		asset = panel.ProfileKey
+	}
+	if asset == "" {
+		asset = "qqq" // default equity policy when asset is unknown
+	}
 	switch domain {
 	case "technical":
-		vote, bull, bear = scoreEquityTechnical(panel.Technical)
+		vote, bull, bear = scoreEquityTechnicalForAsset(panel.Technical, asset)
 		coverage = coverageScore(panel.Technical)
 	case "macro":
-		vote, bull, bear = scoreEquityMacro(panel.Macro)
+		vote, bull, bear = scoreEquityMacroForAsset(panel.Macro, asset)
 		coverage = coverageScore(panel.Macro)
 	case "positioning":
-		vote, bull, bear = scoreEquityPositioning(panel.Positioning)
+		vote, bull, bear = scoreEquityPositioningForAsset(panel.Positioning, asset)
 		coverage = coverageScore(panel.Positioning)
 	default:
 		coverage = 0
@@ -555,29 +562,34 @@ func applyVerdictPolicy(v *Verdict, policy assetprofile.VerdictPolicy) {
 }
 
 func scoreEquityTechnical(tech map[string]model.Indicator) (vote int, bull, bear []string) {
+	return scoreEquityTechnicalForAsset(tech, "qqq")
+}
+
+func scoreEquityTechnicalForAsset(tech map[string]model.Indicator, asset string) (vote int, bull, bear []string) {
+	rules := assetprofile.ScoringRulesFor(asset, "technical")
 	if rsi, ok := tech["rsi_14"]; ok && rsi.IsAvailable() {
-		if rsi.Value < 30 {
+		if applyRule(rules, "rsi_14", rsi.Value) > 0 {
 			bull = append(bull, fmt.Sprintf("RSI超卖(%.0f)", rsi.Value))
 			vote++
-		} else if rsi.Value > 70 {
+		} else if applyRule(rules, "rsi_14", rsi.Value) < 0 {
 			bear = append(bear, fmt.Sprintf("RSI超买(%.0f)", rsi.Value))
 			vote--
 		}
 	}
 	if smaDev, ok := tech["sma_200_dev"]; ok && smaDev.IsAvailable() {
-		if smaDev.Value > 10 {
+		if applyRule(rules, "sma_200_dev", smaDev.Value) > 0 {
 			bull = append(bull, "价格高于200SMA 10%+")
 			vote++
-		} else if smaDev.Value < -10 {
+		} else if applyRule(rules, "sma_200_dev", smaDev.Value) < 0 {
 			bear = append(bear, "价格低于200SMA 10%+")
 			vote--
 		}
 	}
 	if mom, ok := tech["momentum_90d"]; ok && mom.IsAvailable() {
-		if mom.Value > 10 {
+		if applyRule(rules, "momentum_90d", mom.Value) > 0 {
 			bull = append(bull, fmt.Sprintf("90d动量强(+%.1f%%)", mom.Value))
 			vote++
-		} else if mom.Value < -10 {
+		} else if applyRule(rules, "momentum_90d", mom.Value) < 0 {
 			bear = append(bear, fmt.Sprintf("90d动量弱(%.1f%%)", mom.Value))
 			vote--
 		}
@@ -586,38 +598,71 @@ func scoreEquityTechnical(tech map[string]model.Indicator) (vote int, bull, bear
 }
 
 func scoreEquityMacro(macro map[string]model.Indicator) (vote int, bull, bear []string) {
+	return scoreEquityMacroForAsset(macro, "qqq")
+}
+
+func scoreEquityMacroForAsset(macro map[string]model.Indicator, asset string) (vote int, bull, bear []string) {
+	rules := assetprofile.ScoringRulesFor(asset, "macro")
 	if vix, ok := macro["vix_level"]; ok && vix.IsAvailable() {
-		if vix.Value > 30 {
-			bear = append(bear, fmt.Sprintf("VIX恐慌(%.0f)", vix.Value))
-			vote--
-		} else if vix.Value < 15 {
+		if applyRule(rules, "vix_level", vix.Value) > 0 {
 			bull = append(bull, fmt.Sprintf("VIX低波动(%.0f)", vix.Value))
 			vote++
+		} else if applyRule(rules, "vix_level", vix.Value) < 0 {
+			bear = append(bear, fmt.Sprintf("VIX恐慌(%.0f)", vix.Value))
+			vote--
 		}
 	}
 	return
 }
 
 func scoreEquityPositioning(pos map[string]model.Indicator) (vote int, bull, bear []string) {
+	return scoreEquityPositioningForAsset(pos, "qqq")
+}
+
+func scoreEquityPositioningForAsset(pos map[string]model.Indicator, asset string) (vote int, bull, bear []string) {
+	rules := assetprofile.ScoringRulesFor(asset, "positioning")
 	if fg, ok := pos["fear_greed"]; ok && fg.IsAvailable() {
-		if fg.Value < 25 {
+		if applyRule(rules, "fear_greed", fg.Value) > 0 {
 			bull = append(bull, fmt.Sprintf("极度恐惧(%.0f)", fg.Value))
 			vote++
-		} else if fg.Value > 75 {
+		} else if applyRule(rules, "fear_greed", fg.Value) < 0 {
 			bear = append(bear, fmt.Sprintf("极度贪婪(%.0f)", fg.Value))
 			vote--
 		}
 	}
 	if pc, ok := pos["put_call_ratio"]; ok && pc.IsAvailable() {
-		if pc.Value > 1.2 {
+		if applyRule(rules, "put_call_ratio", pc.Value) > 0 {
 			bull = append(bull, fmt.Sprintf("Put/Call恐惧(%.2f)", pc.Value))
 			vote++
-		} else if pc.Value < 0.7 {
+		} else if applyRule(rules, "put_call_ratio", pc.Value) < 0 {
 			bear = append(bear, fmt.Sprintf("Put/Call追涨(%.2f)", pc.Value))
 			vote--
 		}
 	}
 	return
+}
+
+// applyRule evaluates an IndicatorRule against a value.
+// Returns +1 (bull), -1 (bear), or 0 (neutral/no rule).
+// When rules map is nil or the key is absent, falls back to 0 (no signal).
+func applyRule(rules map[string]assetprofile.IndicatorRule, key string, value float64) int {
+	if rules == nil {
+		return 0
+	}
+	r, ok := rules[key]
+	if !ok {
+		return 0
+	}
+	bull := (r.BullBelow != nil && value < *r.BullBelow) || (r.BullAbove != nil && value > *r.BullAbove)
+	bear := (r.BearBelow != nil && value < *r.BearBelow) || (r.BearAbove != nil && value > *r.BearAbove)
+	switch {
+	case bull && !bear:
+		return +1
+	case bear && !bull:
+		return -1
+	default:
+		return 0
+	}
 }
 
 func coverageScore(m map[string]model.Indicator) float64 {
