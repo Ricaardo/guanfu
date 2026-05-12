@@ -149,28 +149,28 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 		}
 	}
 
-	// ─── 3. Momentum Domain ───
+	// ─── 3. Momentum — moved into Technical so verdict scoring sees it ───
 	mom30d := calcReturn(history, 30)
 	mom90d := calcReturn(history, 90)
 	mom180d := calcReturn(history, 180)
 	drawdown := calcMaxDrawdown(history, 200, price)
 
-	panel.Cycle["momentum_30d"] = model.Indicator{
+	panel.Technical["momentum_30d"] = model.Indicator{
 		Value:  math.Round(mom30d*100) / 100,
 		Label:  momentumLabel(mom30d),
 		Source: "price_store",
 	}
-	panel.Cycle["momentum_90d"] = model.Indicator{
+	panel.Technical["momentum_90d"] = model.Indicator{
 		Value:  math.Round(mom90d*100) / 100,
 		Label:  momentumLabel(mom90d),
 		Source: "price_store",
 	}
-	panel.Cycle["momentum_180d"] = model.Indicator{
+	panel.Technical["momentum_180d"] = model.Indicator{
 		Value:  math.Round(mom180d*100) / 100,
 		Label:  momentumLabel(mom180d),
 		Source: "price_store",
 	}
-	panel.Cycle["drawdown_200d"] = model.Indicator{
+	panel.Technical["drawdown_200d"] = model.Indicator{
 		Value:  math.Round(drawdown*100) / 100,
 		Label:  drawdownLabel(drawdown),
 		Source: "price_store",
@@ -227,81 +227,15 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 	return panel
 }
 
-// BuildEquityVerdictEnhanced builds a structured verdict with evidence chains.
+// BuildEquityVerdictEnhanced builds a structured verdict for the enhanced
+// equity dashboard. Delegates to BuildProfiledMarketVerdict so that domain
+// order, thresholds, regime labels, and stance language all come from the
+// asset profile rather than being hardcoded here.
 func BuildEquityVerdictEnhanced(panel *model.IndicatorPanel, asset string) *Verdict {
-	v := &Verdict{
-		Date:            panel.Date,
-		Domains:         make([]DomainVote, 0),
-		Reasons:         make([]string, 0),
-		CounterEvidence: make([]string, 0),
-		KillCriteria:    make([]string, 0),
+	if panel.Asset == "" {
+		panel.Asset = asset
 	}
-
-	// Score each domain
-	domains := []struct {
-		name string
-		data map[string]model.Indicator
-	}{
-		{"valuation", panel.Valuation},
-		{"technical", panel.Technical},
-		{"momentum", panel.Cycle},
-		{"macro", panel.Macro},
-		{"sentiment", panel.Positioning},
-		{"flow", panel.Flow},
-	}
-
-	netScore := 0
-	for _, d := range domains {
-		vote, bulls, bears := scoreEquityDomainEnhanced(d.name, d.data)
-		netScore += vote
-		v.Domains = append(v.Domains, DomainVote{
-			Domain:  d.name,
-			Vote:    vote,
-			Bullish: bulls,
-			Bearish: bears,
-		})
-		v.Reasons = append(v.Reasons, bulls...)
-		v.CounterEvidence = append(v.CounterEvidence, bears...)
-	}
-
-	v.NetDirection = netScore
-	v.Coverage = calcCoverage(domains)
-
-	// Regime classification
-	switch {
-	case netScore >= 3:
-		v.Regime = "积累区"
-		v.Stance = "多维度信号偏多：估值合理+技术转强+宏观配合"
-		v.TopProximity = 0.2
-		v.BottomProximity = 0.1
-	case netScore <= -3:
-		v.Regime = "谨慎区"
-		v.Stance = "多维度信号偏空：估值偏高或技术破位+宏观逆风"
-		v.TopProximity = 0.6
-		v.BottomProximity = 0.3
-	case netScore > 0:
-		v.Regime = "中性偏多"
-		v.Stance = "部分信号偏多，但缺乏一致确认"
-		v.TopProximity = 0.4
-		v.BottomProximity = 0.3
-	default:
-		v.Regime = "中性偏空"
-		v.Stance = "部分信号偏空，等待明确方向"
-		v.TopProximity = 0.5
-		v.BottomProximity = 0.4
-	}
-
-	v.Confidence = confidenceFromCoverage(v.Coverage)
-
-	// Kill criteria
-	if rsi, ok := panel.Technical["rsi_14"]; ok && rsi.Value > 75 {
-		v.KillCriteria = append(v.KillCriteria, "RSI超买>75，积累区信号可能为假突破")
-	}
-	if vix, ok := panel.Macro["vix_level"]; ok && vix.Value > 30 {
-		v.KillCriteria = append(v.KillCriteria, "VIX>30恐慌环境，技术信号可信度下降")
-	}
-
-	return v
+	return BuildProfiledMarketVerdict(panel)
 }
 
 // ─── Indicator computation helpers ───
@@ -580,96 +514,6 @@ func volumeLabel(volProxy float64) string {
 	return "缩量"
 }
 
-// ─── Domain scoring ───
-
-func scoreEquityDomainEnhanced(name string, data map[string]model.Indicator) (vote int, bulls, bears []string) {
-	switch name {
-	case "valuation":
-		if smaDev, ok := data["sma_200_dev"]; ok && smaDev.IsAvailable() {
-			if smaDev.Value < -10 {
-				bulls = append(bulls, "价格低于200SMA 10%+ (估值偏低)")
-				vote++
-			} else if smaDev.Value > 15 {
-				bears = append(bears, "价格高于200SMA 15%+ (估值偏高)")
-				vote--
-			}
-		}
-		if pe, ok := data["pe"]; ok && pe.IsAvailable() && pe.Value > 30 {
-			bears = append(bears, fmt.Sprintf("PE=%.0f 偏高", pe.Value))
-			vote--
-		}
-	case "technical":
-		if rsi, ok := data["rsi_14"]; ok && rsi.IsAvailable() {
-			if rsi.Value < 30 {
-				bulls = append(bulls, "RSI超卖")
-				vote++
-			} else if rsi.Value > 70 {
-				bears = append(bears, "RSI超买")
-				vote--
-			}
-		}
-		if div, ok := data["rsi_divergence"]; ok && div.Label != "" {
-			if div.Label[:4] == "bull" {
-				bulls = append(bulls, "RSI底背离")
-				vote++
-			} else if div.Label[:4] == "bear" {
-				bears = append(bears, "RSI顶背离")
-				vote--
-			}
-		}
-		if vol, ok := data["volatility_30d"]; ok && vol.IsAvailable() && vol.Value > 30 {
-			bears = append(bears, "高波动环境")
-			vote--
-		}
-	case "momentum":
-		if mom, ok := data["momentum_90d"]; ok && mom.IsAvailable() {
-			if mom.Value > 15 {
-				bulls = append(bulls, "90d动量强劲")
-				vote++
-			} else if mom.Value < -15 {
-				bears = append(bears, "90d动量疲弱")
-				vote--
-			}
-		}
-		if dd, ok := data["drawdown_200d"]; ok && dd.IsAvailable() {
-			if dd.Value < -15 {
-				bulls = append(bulls, "深度回撤→反弹概率上升")
-				vote++
-			}
-		}
-	case "macro":
-		if vix, ok := data["vix_level"]; ok && vix.IsAvailable() {
-			if vix.Value > 30 {
-				bears = append(bears, "VIX恐慌→风险偏好下降")
-				vote--
-			} else if vix.Value < 15 {
-				bulls = append(bulls, "VIX低位→风险偏好良好")
-				vote++
-			}
-		}
-	case "sentiment":
-		if fg, ok := data["fear_greed"]; ok && fg.IsAvailable() {
-			if fg.Value < 25 {
-				bulls = append(bulls, "极度恐惧→逆向看多")
-				vote++
-			} else if fg.Value > 75 {
-				bears = append(bears, "极度贪婪→逆向看空")
-				vote--
-			}
-		}
-		if pc, ok := data["put_call_ratio"]; ok && pc.IsAvailable() {
-			if pc.Value > 1.2 {
-				bulls = append(bulls, "Put/Call高位→对冲恐惧")
-				vote++
-			} else if pc.Value < 0.7 {
-				bears = append(bears, "Put/Call低位→追涨拥挤")
-				vote--
-			}
-		}
-	}
-	return
-}
-
 func calcTopProximity(panel *model.IndicatorPanel) float64 {
 	score := 0.0
 	count := 0
@@ -726,33 +570,4 @@ func calcBottomProximity(panel *model.IndicatorPanel) float64 {
 		return 0
 	}
 	return math.Min(1, score/float64(count))
-}
-
-func calcCoverage(domains []struct {
-	name string
-	data map[string]model.Indicator
-}) float64 {
-	total := 0
-	available := 0
-	for _, d := range domains {
-		for _, ind := range d.data {
-			total++
-			if ind.IsAvailable() {
-				available++
-			}
-		}
-	}
-	if total == 0 {
-		return 0
-	}
-	return float64(available) / float64(total)
-}
-
-func confidenceFromCoverage(cov float64) string {
-	if cov > 0.7 {
-		return "高"
-	} else if cov > 0.4 {
-		return "中"
-	}
-	return "低"
 }

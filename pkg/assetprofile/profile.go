@@ -80,14 +80,14 @@ type HorizonWeightBand struct {
 	Multiplier map[string]float64
 }
 
-const version20260511 = "2026-05-11"
+const version20260512 = "2026-05-12"
 
 var profiles = map[string]Profile{
 	"btc": {
 		Key:              "btc",
 		Class:            ClassBTC,
 		DisplayName:      "Bitcoin",
-		Version:          version20260511,
+		Version:          version20260512,
 		ReadingDomains:   btcReadingDomains(),
 		VerdictPolicy:    btcVerdictPolicy(),
 		Horizons:         []int{30, 90, 180},
@@ -95,9 +95,9 @@ var profiles = map[string]Profile{
 		ExpectedFeatures: btcExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/btc",
 		Reliability: map[int]ReliabilityCell{
-			30:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-11"},
-			90:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-11"},
-			180: {DirHit: 0.630, NTests: 46, AsOf: "2026-05-11"},
+			30:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-12"},
+			90:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-12"},
+			180: {DirHit: 0.630, NTests: 46, AsOf: "2026-05-12"},
 		},
 		HorizonWeights: defaultHorizonWeights(),
 		// BTC scales are the defaults baked into core.go; listed here for
@@ -114,7 +114,7 @@ var profiles = map[string]Profile{
 		Key:              "qqq",
 		Class:            ClassEquityIndex,
 		DisplayName:      "Nasdaq-100 ETF",
-		Version:          version20260511,
+		Version:          version20260512,
 		ReadingDomains:   equityReadingDomains(),
 		VerdictPolicy:    equityVerdictPolicy(),
 		Horizons:         []int{30, 63, 90, 180, 252},
@@ -122,9 +122,9 @@ var profiles = map[string]Profile{
 		ExpectedFeatures: equityExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/equity_index",
 		Reliability: map[int]ReliabilityCell{
-			30:  {DirHit: 0.700, NTests: 20, AsOf: "2026-05-11"},
-			90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-11"},
-			180: {DirHit: 0.800, NTests: 20, AsOf: "2026-05-11"},
+			30:  {DirHit: 0.643, NTests: 28, AsOf: "2026-05-12"},
+			90:  {DirHit: 0.857, NTests: 28, AsOf: "2026-05-12"},
+			180: {DirHit: 0.786, NTests: 28, AsOf: "2026-05-12"},
 		},
 		ConformalScale: map[int]float64{30: 1.80, 63: 1.80, 90: 1.80, 180: 1.80, 252: 1.80},
 		HorizonWeights: defaultHorizonWeights(),
@@ -136,7 +136,7 @@ var profiles = map[string]Profile{
 		Key:              "spy",
 		Class:            ClassEquityIndex,
 		DisplayName:      "S&P 500 ETF",
-		Version:          version20260511,
+		Version:          version20260512,
 		ReadingDomains:   equityReadingDomains(),
 		VerdictPolicy:    equityVerdictPolicy(),
 		Horizons:         []int{30, 63, 90, 180, 252},
@@ -144,9 +144,9 @@ var profiles = map[string]Profile{
 		ExpectedFeatures: equityExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/equity_index",
 		Reliability: map[int]ReliabilityCell{
-			30:  {DirHit: 0.600, NTests: 20, AsOf: "2026-05-11"},
-			90:  {DirHit: 0.750, NTests: 20, AsOf: "2026-05-11"},
-			180: {DirHit: 0.850, NTests: 20, AsOf: "2026-05-11"},
+			30:  {DirHit: 0.679, NTests: 28, AsOf: "2026-05-12"},
+			90:  {DirHit: 0.786, NTests: 28, AsOf: "2026-05-12"},
+			180: {DirHit: 0.821, NTests: 28, AsOf: "2026-05-12"},
 		},
 		ConformalScale: map[int]float64{30: 1.60, 63: 1.60, 90: 1.60, 180: 1.90, 252: 1.90},
 		HorizonWeights: defaultHorizonWeights(),
@@ -157,7 +157,7 @@ var profiles = map[string]Profile{
 		Key:              "gold",
 		Class:            ClassGold,
 		DisplayName:      "London Gold (XAU/USD)",
-		Version:          version20260511,
+		Version:          version20260512,
 		ReadingDomains:   goldReadingDomains(),
 		VerdictPolicy:    goldVerdictPolicy(),
 		Horizons:         []int{30, 60, 90, 120},
@@ -165,11 +165,10 @@ var profiles = map[string]Profile{
 		ExpectedFeatures: goldExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/gold",
 		Reliability: map[int]ReliabilityCell{
-			30: {DirHit: 0.451, NTests: 51, AsOf: "2026-05-11"},
-			90: {DirHit: 0.627, NTests: 51, AsOf: "2026-05-11"},
-			// 180d is retained for explicit opt-in queries even though it is
-			// absent from the default Gold horizon set.
-			180: {DirHit: 0.529, NTests: 51, AsOf: "2026-05-11"},
+			30: {DirHit: 0.580, NTests: 69, AsOf: "2026-05-12"},
+			90: {DirHit: 0.667, NTests: 69, AsOf: "2026-05-12"},
+			// 180d retained for explicit opt-in queries even though absent from default Gold horizon set.
+			180: {DirHit: 0.652, NTests: 69, AsOf: "2026-05-12"},
 		},
 		ConformalScale: map[int]float64{120: 1.20, 180: 1.20},
 		HorizonWeights: defaultHorizonWeights(),
@@ -181,7 +180,7 @@ var profiles = map[string]Profile{
 		Key:              "us_stock",
 		Class:            ClassUSStock,
 		DisplayName:      "US Stock",
-		Version:          version20260511,
+		Version:          version20260512,
 		ReadingDomains:   usStockReadingDomains(),
 		VerdictPolicy:    usStockVerdictPolicy(),
 		Horizons:         []int{30, 90, 180},
@@ -336,9 +335,11 @@ func goldFeatureScales() map[string]float64 {
 func equityScoringRules() map[string]map[string]IndicatorRule {
 	return map[string]map[string]IndicatorRule{
 		"technical": {
-			"rsi_14":       {BullBelow: ptr(30), BearAbove: ptr(70)},
-			"sma_200_dev":  {BullAbove: ptr(10), BearBelow: ptr(-10)},
-			"momentum_90d": {BullAbove: ptr(10), BearBelow: ptr(-10)},
+			"rsi_14":         {BullBelow: ptr(30), BearAbove: ptr(70)},
+			"sma_200_dev":    {BullAbove: ptr(10), BearBelow: ptr(-10)},
+			"momentum_90d":   {BullAbove: ptr(10), BearBelow: ptr(-10)},
+			"drawdown_200d":  {BullBelow: ptr(-15)}, // deep drawdown → mean-reversion bull
+			"volatility_30d": {BearAbove: ptr(30)},  // high vol → bear
 		},
 		"macro": {
 			"vix_level": {BullBelow: ptr(15), BearAbove: ptr(30)},
@@ -346,6 +347,11 @@ func equityScoringRules() map[string]map[string]IndicatorRule {
 		"positioning": {
 			"fear_greed":     {BullBelow: ptr(25), BearAbove: ptr(75)},
 			"put_call_ratio": {BullAbove: ptr(1.2), BearBelow: ptr(0.7)},
+		},
+		"valuation": {
+			// sma_200_dev in valuation domain (dashboard path): low = cheap, high = expensive
+			"sma_200_dev": {BullBelow: ptr(-10.0), BearAbove: ptr(15.0)},
+			"pe":          {BearAbove: ptr(30.0)},
 		},
 	}
 }

@@ -277,29 +277,6 @@ type IndicatorPanel struct {
 	SourceHealth  []SourceHealth `json:"source_health,omitempty"`  // 数据源健康 / fallback 状态
 }
 
-// ScoreResult v1 评分结果（DEPRECATED）
-//
-// CoinMan v2 改用 IndicatorPanel 输出纯指标盘面，由 Claude/skill 文档完成解读。
-// 此类型仅为 NewsEngine 的 Discord/Feishu 推送保留向后兼容；迁移完成后删除。
-//
-// 已废弃字段：TotalScore（设计性稀释 = 误导）、State（基于稀释总分）、
-//
-//	Action/Rationale/Conviction/Dispersion（v1.5 决策矩阵尝试，阈值拍脑袋）。
-type ScoreResult struct {
-	Date       string          `json:"date"`
-	TotalScore decimal.Decimal `json:"score,omitempty"`       // deprecated, always 0
-	State      string          `json:"state,omitempty"`       // deprecated, always "n/a"
-	SignalDesc string          `json:"signal_desc,omitempty"` // deprecated
-
-	// 子分仍保留（NewsEngine 推送会用），但不再做加权聚合
-	TrendScore     decimal.Decimal `json:"trend_score"`
-	ReversalScore  decimal.Decimal `json:"reversal_score"`
-	ValuationScore decimal.Decimal `json:"valuation_score"`
-	StructureScore decimal.Decimal `json:"structure_score"`
-
-	Details map[string]decimal.Decimal `json:"details,omitempty"`
-}
-
 // Config 系统配置
 type Config struct {
 	Weights    Weights    `mapstructure:"weights"`

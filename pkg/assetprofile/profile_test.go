@@ -25,8 +25,13 @@ func TestForStockUsesUSStockProfile(t *testing.T) {
 
 func TestReliabilityAndCalibration(t *testing.T) {
 	r, ok := ReliabilityFor("gold", 30)
-	if !ok || r.DirHit >= 0.50 {
-		t.Fatalf("gold/30 reliability = %+v ok=%v, want hard-block row", r, ok)
+	if !ok {
+		t.Fatalf("gold/30 reliability missing")
+	}
+	// Gold 30d is now above 50% (58%) after scale fix — no longer a hard-block row.
+	// Verify the cell exists and has a reasonable value.
+	if r.DirHit < 0.50 || r.DirHit > 0.80 {
+		t.Fatalf("gold/30 reliability = %+v, expected 0.50-0.80 range", r)
 	}
 	if got := ConformalScale("qqq", 90); got != 1.80 {
 		t.Fatalf("qqq/90 conformal scale = %.2f, want 1.80", got)

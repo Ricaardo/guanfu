@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/model"
 	"github.com/Ricaardo/guanfu/pkg/store"
 )
@@ -125,8 +126,12 @@ type forecastBundleSource struct {
 }
 
 func forecastBundleSources(asset string) []forecastBundleSource {
-	switch strings.ToLower(strings.TrimSpace(asset)) {
-	case "qqq", "spy":
+	p, ok := assetprofile.For(asset)
+	if !ok {
+		return nil
+	}
+	switch p.FeatureBundle {
+	case "equity_index":
 		return []forecastBundleSource{
 			{"spx_cape", 45, "Equity forecast valuation feature"},
 			{"fred_dgs10", 7, "Equity forecast rates feature"},
