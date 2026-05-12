@@ -309,13 +309,13 @@ func PutCallRatioExtractorWithMode(s *store.PriceStore, mode PutCallFeatureMode)
 		out := []forecast.FeatureValue{{
 			Name: "put_call_ratio", Value: math.Round(now*1000) / 1000,
 			Normalized: math.Round(clipE((now-0.95)/0.35, 3)*1000) / 1000,
-			Weight:     0.30, Note: "CBOE total put/call ratio",
+			Weight:     0.15, Note: "CBOE total put/call ratio (conservative weight: short history)",
 		}}
 		if mode >= PutCallRatioAndChange {
 			out = append(out, forecast.FeatureValue{
 				Name: "put_call_30d_change", Value: math.Round(change*1000) / 1000,
 				Normalized: math.Round(clipE(change/0.25, 3)*1000) / 1000,
-				Weight:     0.20, Note: "CBOE total put/call 30d change",
+				Weight:     0.10, Note: "CBOE total put/call 30d change",
 			})
 		}
 		if mode >= PutCallAll {
@@ -326,7 +326,7 @@ func PutCallRatioExtractorWithMode(s *store.PriceStore, mode PutCallFeatureMode)
 			out = append(out, forecast.FeatureValue{
 				Name: "put_call_252d_percentile", Value: math.Round(pct*1000) / 10,
 				Normalized: math.Round(clipE((pct-0.5)/0.25, 3)*1000) / 1000,
-				Weight:     0.25, Note: "CBOE total put/call trailing 252-observation percentile",
+				Weight:     0.12, Note: "CBOE total put/call trailing 252-observation percentile",
 			})
 		}
 		return out, true

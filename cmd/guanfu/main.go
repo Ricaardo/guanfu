@@ -184,6 +184,7 @@ func main() {
 	verdictOnly := flag.Bool("verdict-only", false, "仅输出 verdict（隐藏指标盘）")
 	forecastOut := flag.Bool("forecast", false, "输出 BTC 历史相似盘面走势推演")
 	forecastOnly := flag.Bool("forecast-only", false, "仅输出 forecast（隐藏指标盘）")
+	readingOnly := flag.Bool("reading", false, "仅输出市场读盘（panel + verdict，不跑 forecast）")
 	forecastHorizons := flag.String("forecast-horizons", "auto", "走势推演周期，逗号分隔天数，如 30,90,180；'auto' 用资产专属默认（QQQ/SPY 30/63/90/180/252，Gold 30/60/90/120，其余 30/90/180）")
 	forecastTop := flag.Int("forecast-top", 21, "走势推演使用的历史相似样本数")
 	forecastPath := flag.Bool("forecast-path", false, "输出历史相似盘面路径推演 (ASCII fan chart)")
@@ -257,14 +258,14 @@ func main() {
 	// Route subcommands
 	switch subcmd {
 	case "qqq", "spy", "gold":
-		runEquityAsset(subcmd, *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji, *full, *domainFilter, *recencyWeighted, *regimeGate)
+		runEquityAsset(subcmd, *jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut && !*readingOnly, *forecastOnly && !*readingOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji, *full, *domainFilter, *recencyWeighted, *regimeGate)
 		return
 	case "stock":
 		ticker := "AAPL"
 		if len(trailing) > 1 && !strings.HasPrefix(trailing[1], "-") {
 			ticker = strings.ToUpper(trailing[1])
 		}
-		readStock(ticker, *jsonOut, *pretty, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
+		readStock(ticker, *jsonOut, *pretty, *forecastOut && !*readingOnly, *forecastOnly && !*readingOnly, *forecastHorizons, *forecastTop, *timeout, *plain || *noEmoji)
 		return
 	case "import-stock":
 		if len(trailing) < 2 || strings.HasPrefix(trailing[1], "-") {
@@ -362,7 +363,7 @@ func main() {
 		return
 	}
 
-	runBTCPanel(*jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut, *forecastOnly, *forecastHorizons, *forecastTop, *timeout, *halfLife, *historyDB, *domainFilter, *plain || *noEmoji, *forecastPath, *full, *recencyWeighted, *regimeGate)
+	runBTCPanel(*jsonOut, *pretty, *verdict, *verdictOnly, *forecastOut && !*readingOnly, *forecastOnly && !*readingOnly, *forecastHorizons, *forecastTop, *timeout, *halfLife, *historyDB, *domainFilter, *plain || *noEmoji, *forecastPath, *full, *recencyWeighted, *regimeGate)
 }
 
 // runBTCPanel is the BTC panel flow. Default human output is --brief (10 lines);

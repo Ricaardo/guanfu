@@ -95,9 +95,9 @@ var profiles = map[string]Profile{
 		ExpectedFeatures: btcExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/btc",
 		Reliability: map[int]ReliabilityCell{
-			30:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-12"},
-			90:  {DirHit: 0.609, NTests: 46, AsOf: "2026-05-12"},
-			180: {DirHit: 0.630, NTests: 46, AsOf: "2026-05-12"},
+			30:  {DirHit: 0.645, NTests: 62, AsOf: "2026-05-12"},
+			90:  {DirHit: 0.645, NTests: 62, AsOf: "2026-05-12"},
+			180: {DirHit: 0.693, NTests: 62, AsOf: "2026-05-12"},
 		},
 		HorizonWeights: defaultHorizonWeights(),
 		// BTC scales are the defaults baked into core.go; listed here for
@@ -165,10 +165,10 @@ var profiles = map[string]Profile{
 		ExpectedFeatures: goldExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/gold",
 		Reliability: map[int]ReliabilityCell{
-			30: {DirHit: 0.580, NTests: 69, AsOf: "2026-05-12"},
+			30: {DirHit: 0.609, NTests: 69, AsOf: "2026-05-12"},
 			90: {DirHit: 0.667, NTests: 69, AsOf: "2026-05-12"},
 			// 180d retained for explicit opt-in queries even though absent from default Gold horizon set.
-			180: {DirHit: 0.652, NTests: 69, AsOf: "2026-05-12"},
+			180: {DirHit: 0.623, NTests: 69, AsOf: "2026-05-12"},
 		},
 		ConformalScale: map[int]float64{120: 1.20, 180: 1.20},
 		HorizonWeights: defaultHorizonWeights(),
@@ -389,7 +389,7 @@ func equityExpectedFeatures() []string {
 
 func goldExpectedFeatures() []string {
 	return append(genericTechnicalFeatures(),
-		"real_yield_10y", "breakeven_10y", "dxy_30d", "gold_cot_net", "vixy_level")
+		"real_yield_10y", "breakeven_10y", "dxy_30d", "dgs10_30d", "gold_cot_net", "vixy_level")
 }
 
 func usStockExpectedFeatures() []string {

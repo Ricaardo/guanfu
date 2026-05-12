@@ -108,7 +108,17 @@ func runBacktestAll(jsonOut, pretty, plain bool) {
 
 		extractors := backtestExtractorsForAsset(asset, s)
 		diag := diagnoseFeatureBundle(asset, points, extractors)
-		opts := forecast.Options{Horizons: horizons, TopK: 21, StepDays: 7, Extractors: extractors, MinFeatures: 6, Asset: asset}
+		// BTC: recency weighting + regime gate to reduce bear-era analog pull.
+		// QQQ/SPY: 42-day step for more test points (28→~40).
+		stepDays := 7
+		opts := forecast.Options{Horizons: horizons, TopK: 21, StepDays: stepDays, Extractors: extractors, MinFeatures: 6, Asset: asset}
+		if asset == "btc" {
+			opts.RecencyWeighted = true
+			opts.RegimeGate = true
+		}
+		if asset == "qqq" || asset == "spy" {
+			opts.StepDays = 42
+		}
 		r, err := backtest.RunWithOptions(points, len(points)/3, 60, opts)
 		if err != nil {
 			continue

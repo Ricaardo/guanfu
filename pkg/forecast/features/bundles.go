@@ -81,7 +81,8 @@ func GoldExtractorsWithScales(s *store.PriceStore, scales map[string]float64) []
 	for _, ex := range []forecast.FeatureExtractor{
 		RealYield10YExtractor(s),
 		BreakevenExtractor(s),
-		DXYExtractor(s),
+		DXYExtractor(s),       // USD 30d trend: DXY falling = gold bullish
+		DGS10Extractor(s),     // 10Y rate 30d change: rising rates = gold headwind
 		GoldCOTExtractor(s),
 		VIXExtractor(s),
 	} {

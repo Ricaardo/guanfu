@@ -105,6 +105,11 @@ func (a *BTCAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*for
 	}
 	opts.Asset = "btc"
 	opts.Extractors = features.ExtractorsForAsset("btc", &store.PriceStore{})
+	// G5: recent analogs (last 5y) get 1.25× effective weight to reduce
+	// the pull of 2018-2022 bear-market analogs on current-cycle forecasts.
+	// G2: regime gate penalizes cross-regime analogs by 1.2× distance.
+	opts.RecencyWeighted = true
+	opts.RegimeGate = true
 	return forecast.Build(points, opts)
 }
 

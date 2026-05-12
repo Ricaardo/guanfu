@@ -80,7 +80,14 @@ func runAssetBacktest(t *testing.T, name, loadKey string, minHistory int, bundle
 		}
 	}
 
-	result, err := backtest.Run(points, startIdx, 60, extractors, horizons)
+	// Use 42-day step for equity assets to get more test points (28→~40).
+	// BTC and gold keep 60-day step (long history, sufficient samples).
+	stepDays := 60
+	if name == "qqq" || name == "spy" {
+		stepDays = 42
+	}
+
+	result, err := backtest.Run(points, startIdx, stepDays, extractors, horizons)
 	if err != nil {
 		t.Logf("%-6s ERROR: %v", name, err)
 		return
