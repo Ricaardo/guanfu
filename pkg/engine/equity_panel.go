@@ -1,12 +1,13 @@
-// equity_panel.go — shared panel builder for equity ETFs (QQQ, SPY).
+// equity_panel.go — shared market panel helpers plus the QQQ/SPY equity wrapper.
 //
-// Domains (4, expanding to 5 when valuation is activated in Phase 3):
+// Shared domains:
 //   - technical: RSI(14), MACD, SMA(50), SMA(200), BB_width, volatility_30d
 //   - macro: vix_level, dxy_trend, tlt_trend (10Y proxy)
 //   - sentiment: fear_greed (when available)
-//   - valuation: pe, pb (Phase 3, requires Futu snapshot)
+//   - valuation: pe, pb when an equity caller supplies valuation snapshots
 //
-// The builder is asset-agnostic — QQQ and SPY share the same indicator computation.
+// BuildMarketPanel is asset-neutral. BuildEquityPanel remains a compatibility
+// wrapper for QQQ/SPY callers so equity semantics stay explicit at the call site.
 
 package engine
 
@@ -18,8 +19,9 @@ import (
 	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
-// EquityPanelInput is the data needed to build an equity indicator panel.
-type EquityPanelInput struct {
+// MarketPanelInput is the data needed to build a shared technical/macro panel.
+// The caller owns asset-specific semantics and any extra valuation domains.
+type MarketPanelInput struct {
 	Asset     string
 	Date      string
 	Price     float64
@@ -42,8 +44,18 @@ type EquityPanelInput struct {
 	PB float64
 }
 
+// EquityPanelInput is retained for source compatibility with existing QQQ/SPY
+// code. New non-equity assets should use MarketPanelInput directly.
+type EquityPanelInput = MarketPanelInput
+
 // BuildEquityPanel computes technical + macro indicators for an equity ETF.
 func BuildEquityPanel(in *EquityPanelInput) *model.IndicatorPanel {
+	return BuildMarketPanel(in)
+}
+
+// BuildMarketPanel computes shared technical + macro indicators without
+// assigning equity-specific reading semantics.
+func BuildMarketPanel(in *MarketPanelInput) *model.IndicatorPanel {
 	date := in.Date
 	if date == "" {
 		date = time.Now().UTC().Format("2006-01-02")

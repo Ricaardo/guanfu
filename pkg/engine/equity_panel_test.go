@@ -99,6 +99,32 @@ func TestBuildEquityPanel_InsufficientHistory(t *testing.T) {
 	}
 }
 
+func TestBuildMarketPanelForStockUsesStockProfile(t *testing.T) {
+	history := generatePriceHistory(250, 200, 0.3)
+	panel := BuildMarketPanel(&MarketPanelInput{
+		Asset:        "stock_aapl",
+		Date:         "2026-05-12",
+		Price:        history[0],
+		PriceHistory: history,
+		VIX:          18,
+		DXY:          102,
+		TLT:          90,
+	})
+
+	if panel.Asset != "stock_aapl" {
+		t.Fatalf("asset = %q, want stock_aapl", panel.Asset)
+	}
+	if panel.ProfileKey != "us_stock" || panel.AssetClass != "us_stock" {
+		t.Fatalf("expected us_stock profile metadata, got profile=%q class=%q", panel.ProfileKey, panel.AssetClass)
+	}
+	if panel.Snapshot.QQQPrice != 0 || panel.Snapshot.SPYPrice != 0 || panel.Snapshot.GoldPrice != 0 {
+		t.Fatalf("stock panel should not populate ETF/gold snapshot price fields: %+v", panel.Snapshot)
+	}
+	if !domainMetaHas(panel.DomainMeta, "technical") || !domainMetaHas(panel.DomainMeta, "macro") {
+		t.Fatalf("stock domain_meta missing expected domains: %+v", panel.DomainMeta)
+	}
+}
+
 func TestBuildEquityVerdict_Bullish(t *testing.T) {
 	// Create a strongly bullish panel
 	history := generatePriceHistory(250, 400, 1.0) // strong uptrend
@@ -204,6 +230,15 @@ func TestComputeVol30d(t *testing.T) {
 func containsString(values []string, needle string) bool {
 	for _, v := range values {
 		if strings.Contains(v, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func domainMetaHas(values []model.PanelDomainMeta, key string) bool {
+	for _, v := range values {
+		if v.Key == key {
 			return true
 		}
 	}

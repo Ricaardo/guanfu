@@ -22,7 +22,8 @@ Domains:
 | `cross_asset` | Gold versus BTC, equities, dollar, and rates |
 
 Gold must not be treated as an equity ETF. Shared technical calculations are
-allowed, but the reading lens and verdict rules are gold-specific.
+allowed through `BuildMarketPanel`, but the reading lens and verdict rules are
+gold-specific.
 
 Current JSON compatibility note: until `IndicatorPanel` supports fully dynamic
 domain maps, the code maps Gold reading evidence into `valuation`, `macro`, and

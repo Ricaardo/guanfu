@@ -186,8 +186,9 @@ CLI、MCP、`engine.Asset.BuildForecast` 和 backtest 都必须通过
 短期允许现有 `engine.Asset` 继续编排 snapshot/panel/verdict/forecast,但它应该逐步委托给 profile。每做一次迁移,必须让 CLI、MCP、backtest 共同读取同一 profile 配置,避免三份 mapping 漂移。
 
 下一步边界:ReadingLens / verdict policy 还没有完全迁出 `engine`。Gold verdict
-已经从 equity verdict 拆出,但 Gold technical panel 仍复用 equity helper；QQQ/SPY
-和任意美股的 verdict policy 仍在 `engine` 内。
+已经从 equity verdict 拆出；Gold 和任意美股已改走中性的 `BuildMarketPanel`,
+QQQ/SPY 保留 `BuildEquityPanel` wrapper。QQQ/SPY 和任意美股的 verdict policy
+仍在 `engine` 内。
 
 ---
 
@@ -200,3 +201,4 @@ CLI、MCP、`engine.Asset.BuildForecast` 和 backtest 都必须通过
 | v3 | 2026-05-11 | I7 追加:多资产系统进入 AssetProfile 架构迁移,将读盘 lens / forecast profile / skill profile 从 BTC-first 通用层拆出 |
 | v4 | 2026-05-11 | I7 更新:`pkg/assetprofile` 落地为 forecast 侧单一真源,CLI/MCP/backtest/engine 共用 profile registry |
 | v5 | 2026-05-11 | I7 更新:`IndicatorPanel` 增加 profile/domain metadata；Gold verdict 从 equity verdict 语义中拆出 |
+| v6 | 2026-05-12 | I7 更新:新增中性 `BuildMarketPanel`; Gold/任意美股不再调用 equity panel 入口 |

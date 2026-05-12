@@ -46,8 +46,8 @@ func (a *GoldAsset) FetchSnapshot(ctx context.Context) (*AssetSnapshot, error) {
 	uup, uupOK := a.store.Latest("uup")
 	tlt, _ := a.store.Latest("tlt")
 
-	// A3: fall back to FRED trade-weighted USD when UUP ETF data is missing —
-	// keeps the existing "uup" key so BuildEquityPanel's dxy_proxy path still fires.
+	// A3: fall back to FRED trade-weighted USD when UUP ETF data is missing.
+	// Keep the existing "uup" key so the shared market panel's dxy_proxy path fires.
 	var dxy float64
 	if uupOK {
 		dxy = uup.Close
@@ -82,8 +82,8 @@ func (a *GoldAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error)
 		return nil, fmt.Errorf("gold: insufficient price history (%d days)", len(as.PriceHistory))
 	}
 
-	// Reuse equity panel builder for technical indicators
-	in := &EquityPanelInput{
+	// Use the neutral market panel builder for shared technical/macro indicators.
+	in := &MarketPanelInput{
 		Asset:        "gold",
 		Date:         as.Date,
 		Price:        as.Price,
@@ -96,7 +96,7 @@ func (a *GoldAsset) BuildPanel(as *AssetSnapshot) (*model.IndicatorPanel, error)
 		in.TLT = as.CrossAssetPrices["tlt"]
 	}
 
-	panel := BuildEquityPanel(in)
+	panel := BuildMarketPanel(in)
 
 	// ── Gold valuation domain ──
 	panel.Valuation = buildGoldValuation(as, panel.Macro["tlt_proxy"])

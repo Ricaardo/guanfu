@@ -200,16 +200,17 @@ Status: partially implemented.
 - Replace BTC-shaped `BuildVerdict` reuse with profile-specific `ReadingLens`
   verdict policies. Gold now has a gold-specific verdict path instead of
   extending the equity verdict.
-- Split semantic Gold reading from `BuildEquityPanel`; keep shared technical
-  helper functions.
+- Split semantic Gold reading from `BuildEquityPanel`; Gold and arbitrary US
+  stocks now call the neutral `BuildMarketPanel`, while QQQ/SPY keep the
+  `BuildEquityPanel` wrapper.
 - `IndicatorPanel` now carries `profile_key`, `profile_version`, `asset_class`,
   `skill_profile_uri`, and `domain_meta` as additive metadata while preserving
   the stable domain maps for old JSON consumers.
 
 Acceptance:
 
-- Partial: Gold no longer depends on equity verdict semantics; it still shares
-  the technical panel helper.
+- Partial: Gold no longer depends on equity verdict semantics or the equity
+  panel entrypoint; it still shares neutral technical/macro helper functions.
 - QQQ/SPY and arbitrary US stocks do not expose BTC-only domain expectations.
 
 ### Phase 4 - Forecast Feature Normalization

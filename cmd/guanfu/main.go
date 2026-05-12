@@ -501,8 +501,8 @@ func hasArg(args []string, names ...string) bool {
 // readStock reads an arbitrary US stock by ticker (D3 + A6).
 //
 // Auto-fetches via Yahoo (D1) when PriceStore has no cached data
-// or the cache is stale (>30h). Builds the equity panel via
-// BuildEquityPanel (A6: technical/macro indicators) and runs the
+// or the cache is stale (>30h). Builds a neutral market panel via
+// BuildMarketPanel (A6: technical/macro indicators) and runs the
 // kNN forecast with USStockExtractors (D2).
 func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, forecastHorizonsArg string, forecastTop int, timeout time.Duration, plain bool) {
 	s := &store.PriceStore{}
@@ -530,23 +530,21 @@ func readStock(ticker string, jsonOut, pretty, forecastOut, forecastOnly bool, f
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Date < points[j].Date })
 
-	// PriceHistory for BuildEquityPanel (newest-first, []float64).
+	// PriceHistory for BuildMarketPanel (newest-first, []float64).
 	history := make([]float64, len(points))
 	for i := range points {
 		history[i] = points[len(points)-1-i].Close
 	}
 	latest := points[len(points)-1]
 
-	panel := engine.BuildEquityPanel(&engine.EquityPanelInput{
-		Asset:        strings.ToLower(ticker),
+	stockKey := client.StockKey(ticker)
+	panel := engine.BuildMarketPanel(&engine.MarketPanelInput{
+		Asset:        stockKey,
 		Date:         latest.Date,
 		Price:        latest.Close,
 		PriceAsOf:    latest.Date,
 		PriceHistory: history,
 	})
-	stockKey := client.StockKey(ticker)
-	panel.Asset = stockKey
-	engine.AnnotatePanelProfile(panel, stockKey)
 	engine.EnrichGlobalInvestorMacro(panel, s)
 
 	horizons, err := resolveHorizonsArg(forecastHorizonsArg, stockKey)

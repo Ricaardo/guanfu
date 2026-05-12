@@ -45,14 +45,17 @@ Current state:
   asset-specific reading lenses.
 - Gold verdict no longer extends the equity verdict; VIX risk-off is interpreted
   as a gold safe-haven driver rather than an equity-style bearish macro signal.
+- Gold and arbitrary US stocks now build shared technical/macro indicators via
+  neutral `BuildMarketPanel`; QQQ/SPY retain the explicit `BuildEquityPanel`
+  wrapper.
 
 Next steps:
 
 - Split raw feature extraction from profile-specific normalization.
 - Move the remaining QQQ/SPY/US-stock verdict policy into profile-owned
   contracts.
-- Split Gold technical panel construction out of the equity helper if/when the
-  current shared helper starts carrying equity-only assumptions.
+- Keep `BuildMarketPanel` free of asset-class semantics; add asset-specific
+  wrappers instead of routing new assets through `BuildEquityPanel`.
 
 Acceptance:
 
