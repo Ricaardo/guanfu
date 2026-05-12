@@ -2003,7 +2003,6 @@ func yieldCurveLabel(bps float64) string {
 }
 
 // 防止 mathutil 没用到的编译警告
-var _ = mathutil.CalculateMA
 
 // ── 3D Score 辅助标签 ──
 

@@ -55,11 +55,13 @@ Current state:
 
 Next steps:
 
-- Split raw feature extraction from profile-specific normalization.
-- Move individual indicator scoring rules out of `engine` and into
-  profile-owned reading contracts.
-- Keep `BuildMarketPanel` free of asset-class semantics; add asset-specific
-  wrappers instead of routing new assets through `BuildEquityPanel`.
+- Done: Split raw feature extraction from profile-specific normalization
+  (`FeatureScales` per profile, `GenericTechnicalExtractorsWithScales`).
+- Done: Move individual indicator scoring rules out of `engine` into
+  profile-owned `ScoringRules` contracts.
+- Done: `BuildMarketPanel` is free of asset-class semantics; asset-specific
+  wrappers exist for QQQ/SPY (`BuildEquityPanel`) and Gold (`BuildMarketPanel`
+  + gold valuation domain).
 
 Acceptance:
 

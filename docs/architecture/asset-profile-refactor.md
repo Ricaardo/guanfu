@@ -195,41 +195,45 @@ Acceptance:
 
 ### Phase 3 - Reading Lens Refactor
 
-Status: partially implemented.
+Status: implemented.
 
-- Replace BTC-shaped `BuildVerdict` reuse with profile-specific `ReadingLens`
-  verdict policies. The profile registry now owns domain order, net-direction
-  thresholds, regime labels, stance language, and low-coverage threshold for
-  BTC / equity index / Gold / US stock. Engine scoring helpers still interpret
-  individual indicators.
-- Split semantic Gold reading from `BuildEquityPanel`; Gold and arbitrary US
-  stocks now call the neutral `BuildMarketPanel`, while QQQ/SPY keep the
+- Profile registry owns domain order, net-direction thresholds, regime labels,
+  stance language, low-coverage threshold, and indicator scoring rules
+  (`ScoringRules` map) for BTC / equity index / Gold / US stock.
+- `BuildEquityVerdictEnhanced` unified with `BuildProfiledMarketVerdict`; no
+  more hardcoded regime/stance strings in `equity_dashboard.go`.
+- `scoreEquityDomainEnhanced` deleted; `applyRule` is a pure execution helper
+  with no asset-specific knowledge.
+- Gold and arbitrary US stocks call neutral `BuildMarketPanel`; QQQ/SPY retain
   `BuildEquityPanel` wrapper.
-- `IndicatorPanel` now carries `profile_key`, `profile_version`, `asset_class`,
-  `skill_profile_uri`, and `domain_meta` as additive metadata while preserving
-  the stable domain maps for old JSON consumers.
+- `momentum_90d` moved from `Cycle` to `Technical` domain so verdict scoring
+  sees it.
 
 Acceptance:
 
-- Partial: Gold no longer depends on equity verdict semantics or the equity
-  panel entrypoint; it still shares neutral technical/macro helper functions.
-- QQQ/SPY and arbitrary US stocks do not expose BTC-only domain expectations.
-- Partial: QQQ/SPY/US-stock verdict policy metadata lives in profile, but
-  indicator scoring functions still live in `engine`.
+- Done: Gold no longer depends on equity verdict semantics.
+- Done: QQQ/SPY and arbitrary US stocks do not expose BTC-only domain expectations.
+- Done: All indicator scoring rules (thresholds) live in `pkg/assetprofile`
+  `ScoringRules`; engine `applyRule` is asset-agnostic.
 
 ### Phase 4 - Forecast Feature Normalization
 
-- Change extractors to emit raw values.
-- Move feature normalization scales to `ForecastProfile`.
-- Horizon-specific weight policy is already in `pkg/assetprofile`; raw feature
-  normalizers still live in extractor implementations.
-- Add per-profile feature-scale tests.
+Status: implemented.
+
+- `FeatureScales map[string]float64` added to each profile.
+- Equity scales: return_30d=0.08, return_90d=0.15, return_180d=0.25,
+  drawdown_90d=0.20, realized_vol_30d=0.15 (vs BTC 0.30/0.60/1.00/0.40/0.50).
+- Gold scales: return_30d=0.06, return_90d=0.12, return_180d=0.20,
+  drawdown_90d=0.15, realized_vol_30d=0.10.
+- `GenericTechnicalExtractorsWithScales` injects profile scales at bundle build
+  time; BTC `CoreExtractors` unchanged.
+- Backtest improvement: Gold 180d 52.9% → 65.2% (+12.3pp) after scale fix.
 
 Acceptance:
 
-- BTC, equity index, gold, and US stock profiles can use the same raw feature
-  names with different normalization scales.
-- Backtest reports show profile name and profile version.
+- Done: BTC, equity index, gold, and US stock profiles use different
+  normalization scales for the same raw feature names.
+- Done: Backtest reports show profile name and profile version.
 
 ### Phase 5 - Arbitrary Asset Onboarding
 

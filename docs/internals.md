@@ -168,11 +168,11 @@ CLI、MCP、`engine.Asset.BuildForecast` 和 backtest 都必须通过
 
 每个资产或资产类必须最终继续由 `AssetProfile` 提供:
 
-- 读盘 domains（metadata 已落地）与 verdict policy（外层 policy 已落地,指标 scoring 待迁移）
+- 读盘 domains（metadata 已落地）与 verdict policy（外层 policy 已落地，指标 scoring rules 已迁到 profile `ScoringRules` 字段）
 - forecast feature bundle（已落地）
-- feature normalization / weight / horizon boost
+- feature normalization / weight / horizon boost（`FeatureScales` 已落地，equity/gold scale 已从 BTC 默认值分离）
 - default horizons / TopK / calibration（horizon + conformal scale 已落地）
-- reliability rows 和 hard-block 规则（reliability rows 已落地）
+- reliability rows 和 hard-block 规则（reliability rows 已落地，2026-05-12 更新）
 - skill profile 与 caveat 语言
 
 ### 禁止模式
@@ -186,10 +186,11 @@ CLI、MCP、`engine.Asset.BuildForecast` 和 backtest 都必须通过
 
 短期允许现有 `engine.Asset` 继续编排 snapshot/panel/verdict/forecast,但它应该逐步委托给 profile。每做一次迁移,必须让 CLI、MCP、backtest 共同读取同一 profile 配置,避免三份 mapping 漂移。
 
-下一步边界:ReadingLens 还没有完全迁出 `engine`。Gold verdict 已经从 equity
-verdict 拆出；Gold 和任意美股已改走中性的 `BuildMarketPanel`,QQQ/SPY 保留
-`BuildEquityPanel` wrapper。QQQ/SPY/Gold/任意美股的 verdict 外层 policy 已在
-profile,但 indicator scoring helper 仍在 `engine` 内。
+下一步边界：ReadingLens 已完全迁出 `engine` 的策略层。Gold verdict 已从 equity
+verdict 拆出；Gold 和任意美股已改走中性的 `BuildMarketPanel`，QQQ/SPY 保留
+`BuildEquityPanel` wrapper。QQQ/SPY/Gold/任意美股的 verdict 外层 policy 和
+indicator scoring rules 均已在 profile（`VerdictPolicy` + `ScoringRules`）。
+engine 内的 `applyRule` 是纯执行函数，不含资产特定知识。
 
 ---
 
@@ -204,3 +205,4 @@ profile,但 indicator scoring helper 仍在 `engine` 内。
 | v5 | 2026-05-11 | I7 更新:`IndicatorPanel` 增加 profile/domain metadata；Gold verdict 从 equity verdict 语义中拆出 |
 | v6 | 2026-05-12 | I7 更新:新增中性 `BuildMarketPanel`; Gold/任意美股不再调用 equity panel 入口 |
 | v7 | 2026-05-12 | I7 更新:profile 增加 verdict policy metadata；market/gold verdict 使用 profile policy |
+| v8 | 2026-05-12 | I6 完成:calculator.go v1 死代码（574行）+ ScoreResult 类型已删除；I7 完成:FeatureScales + ScoringRules 落地，indicator scoring rules 全部迁到 profile；forecastBundleSources 改为读 profile.FeatureBundle；BuildEquityVerdictEnhanced 统一走 BuildProfiledMarketVerdict；momentum_90d 域归属修复 |
