@@ -111,5 +111,6 @@ func (a *SPYAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*for
 	}
 	opts.Asset = "spy"
 	opts.Extractors = features.ExtractorsForAsset("spy", a.store)
+	opts.RegimeGate = true
 	return forecast.Build(points, opts)
 }

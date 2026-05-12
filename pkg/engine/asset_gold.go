@@ -194,6 +194,9 @@ func (a *GoldAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*fo
 	}
 	opts.Asset = "gold"
 	opts.Extractors = features.ExtractorsForAsset("gold", a.store)
+	// RegimeGate hurts gold: gold frequently transitions between regimes
+	// (risk-off/risk-on/inflation), so penalizing cross-regime analogs
+	// removes useful historical parallels.
 	return forecast.Build(points, opts)
 }
 

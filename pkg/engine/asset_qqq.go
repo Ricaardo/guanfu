@@ -127,6 +127,7 @@ func (a *QQAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*fore
 	}
 	opts.Asset = "qqq"
 	opts.Extractors = features.ExtractorsForAsset("qqq", a.store)
+	opts.RegimeGate = true
 	return forecast.Build(points, opts)
 }
 

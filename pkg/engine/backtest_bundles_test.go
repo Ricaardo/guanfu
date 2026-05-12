@@ -87,7 +87,26 @@ func runAssetBacktest(t *testing.T, name, loadKey string, minHistory int, bundle
 		stepDays = 42
 	}
 
-	result, err := backtest.Run(points, startIdx, stepDays, extractors, horizons)
+	// Asset-specific forecast options:
+	// - BTC: recency weighting (recent 5y analogs ×1.25) + regime gate
+	// - equity/gold: regime gate to avoid cross-regime analog contamination
+	opts := forecast.Options{
+		Horizons:    horizons,
+		TopK:        21,
+		StepDays:    7,
+		Extractors:  extractors,
+		MinFeatures: 6,
+	}
+	switch name {
+	case "btc":
+		opts.RecencyWeighted = true
+		opts.RegimeGate = true
+	case "qqq", "spy":
+		opts.RegimeGate = true
+		// gold: no regime gate (transitions regimes frequently; gate hurts)
+	}
+
+	result, err := backtest.RunWithOptions(points, startIdx, stepDays, opts)
 	if err != nil {
 		t.Logf("%-6s ERROR: %v", name, err)
 		return
@@ -96,10 +115,10 @@ func runAssetBacktest(t *testing.T, name, loadKey string, minHistory int, bundle
 	t.Logf("\n  %s  (%s)  %d tests, %d extractors",
 		name, points[startIdx].Date[:7], result.TotalTests, len(extractors))
 
-	opts := forecast.DefaultOptions()
-	opts.Extractors = extractors
+	diagOpts := forecast.DefaultOptions()
+	diagOpts.Extractors = extractors
 	history := points[:startIdx+1]
-	fc, err := forecast.Build(history, opts)
+	fc, err := forecast.Build(history, diagOpts)
 	if err == nil {
 		fNames := make([]string, len(fc.CurrentFeatures))
 		for i, f := range fc.CurrentFeatures {
