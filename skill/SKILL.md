@@ -152,7 +152,7 @@ guanfu status             # PriceStore 数据状态诊断
 
 ## kNN 预测引擎 + 可靠性标注
 
-Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。`pkg/assetprofile` 已是 forecast 侧单一真源:profile 决定资产类、默认 horizon、feature bundle、horizon 权重、reliability、conformal calibration scale、reading domain metadata 和 skill profile URI。下一阶段还要把 raw feature normalization scale 与剩余 verdict policy 完整迁入 profile。
+Pluggable feature extractors（per-asset bundle：Core / Equity / Gold / USStock），Mahalanobis 距离，状态匹配，动态 TopK。`pkg/assetprofile` 已是 profile 侧单一真源:profile 决定资产类、默认 horizon、feature bundle、horizon 权重、reliability、conformal calibration scale、reading domain metadata、verdict 外层 policy 和 skill profile URI。下一阶段还要把 raw feature normalization scale 与 indicator-level scoring 规则迁入 profile-backed contracts。
 
 每个 `Forecast` 顶层附 `profile_key` / `profile_version` / `asset_class` / `feature_bundle` / `skill_profile_uri`；每个 `HorizonForecast` 附 `reliability_note` + `hard_blocked` 字段。三档规则、当前 (asset, horizon) 命中率表、`hard_blocked` 时的契约（数值字段保留但不渲染），全部见 [`tier1.md`](tier1.md) § 3 "可靠性标注"——**AI 读盘必载**。profile 真源 `pkg/assetprofile/profile.go`，渲染规则在 `pkg/forecast/reliability.go`。
 

@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/forecast"
 	"github.com/Ricaardo/guanfu/pkg/forecast/features"
 	"github.com/Ricaardo/guanfu/pkg/model"
@@ -110,75 +111,70 @@ func (a *GoldAsset) BuildVerdict(panel *model.IndicatorPanel) *Verdict {
 }
 
 func BuildGoldVerdict(panel *model.IndicatorPanel) *Verdict {
+	policy, ok := assetprofile.VerdictPolicyFor("gold")
+	if !ok {
+		policy = assetprofile.VerdictPolicy{
+			DomainOrder:          []string{"technical", "macro", "valuation"},
+			BullThreshold:        3,
+			BearThreshold:        -3,
+			BullRegime:           "偏强积累区",
+			NeutralRegime:        "中性",
+			BearRegime:           "偏弱谨慎区",
+			BullStance:           "实际利率/美元/技术面合力偏多",
+			NeutralStance:        "黄金驱动不一致，等待实际利率/美元/风险偏好确认",
+			BearStance:           "美元或实际利率压力偏强，黄金信号偏弱",
+			LowCoverageThreshold: 0.5,
+		}
+	}
 	v := &Verdict{
 		Date:            panel.Date,
 		Confidence:      "中",
-		Domains:         make([]DomainVote, 0, 3),
+		Domains:         make([]DomainVote, 0, len(policy.DomainOrder)),
 		Reasons:         make([]string, 0),
 		CounterEvidence: make([]string, 0),
 		KillCriteria:    make([]string, 0),
 	}
 
-	techVote, techBull, techBear := scoreEquityTechnical(panel.Technical)
-	v.Domains = append(v.Domains, DomainVote{
-		Domain:   "technical",
-		Vote:     techVote,
-		Bullish:  techBull,
-		Bearish:  techBear,
-		Coverage: coverageScore(panel.Technical),
-	})
-
-	macroVote, macroBull, macroBear := scoreGoldMacro(panel.Macro)
-	v.Domains = append(v.Domains, DomainVote{
-		Domain:   "macro",
-		Vote:     macroVote,
-		Bullish:  macroBull,
-		Bearish:  macroBear,
-		Coverage: coverageScore(panel.Macro),
-	})
-
-	valVote, valBull, valBear := scoreGoldValuation(panel.Valuation)
-	v.Domains = append(v.Domains, DomainVote{
-		Domain:   "valuation",
-		Vote:     valVote,
-		Bullish:  valBull,
-		Bearish:  valBear,
-		Coverage: coverageScore(panel.Valuation),
-	})
-
-	v.NetDirection = techVote + macroVote + valVote
-
-	// Recompute coverage
 	totalCoverage := 0.0
-	for _, d := range v.Domains {
-		totalCoverage += d.Coverage
+	for _, domain := range policy.DomainOrder {
+		vote, bull, bear, coverage := scoreGoldDomain(panel, domain)
+		v.NetDirection += vote
+		totalCoverage += coverage
+		v.Domains = append(v.Domains, DomainVote{
+			Domain:   domain,
+			Vote:     vote,
+			Bullish:  bull,
+			Bearish:  bear,
+			Coverage: coverage,
+		})
 	}
 	if len(v.Domains) > 0 {
 		v.Coverage = totalCoverage / float64(len(v.Domains))
 	}
 
-	// Gold-specific stance
-	switch {
-	case v.NetDirection >= 3:
-		v.Regime = "偏强积累区"
-		v.Stance = "实际利率/美元/技术面合力偏多"
-	case v.NetDirection <= -3:
-		v.Regime = "偏弱谨慎区"
-		v.Stance = "美元或实际利率压力偏强，黄金信号偏弱"
-	default:
-		v.Regime = "中性"
-		v.Stance = "黄金驱动不一致，等待实际利率/美元/风险偏好确认"
-	}
-
+	applyVerdictPolicy(v, policy)
 	v.Reasons, v.CounterEvidence = pickEvidenceFromVotes(v.Domains, v.NetDirection)
-	if v.Coverage < 0.5 {
-		v.Confidence = "低"
-		v.Stance += " (低覆盖)"
-	}
 	v.TopProximity = topProximityFromPanel(panel)
 	v.BottomProximity = bottomProximityFromPanel(panel)
 
 	return v
+}
+
+func scoreGoldDomain(panel *model.IndicatorPanel, domain string) (vote int, bull, bear []string, coverage float64) {
+	switch domain {
+	case "technical":
+		vote, bull, bear = scoreEquityTechnical(panel.Technical)
+		coverage = coverageScore(panel.Technical)
+	case "macro":
+		vote, bull, bear = scoreGoldMacro(panel.Macro)
+		coverage = coverageScore(panel.Macro)
+	case "valuation":
+		vote, bull, bear = scoreGoldValuation(panel.Valuation)
+		coverage = coverageScore(panel.Valuation)
+	default:
+		coverage = 0
+	}
+	return vote, bull, bear, coverage
 }
 
 func (a *GoldAsset) BuildForecast(as *AssetSnapshot, opts forecast.Options) (*forecast.Forecast, error) {

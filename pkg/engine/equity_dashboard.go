@@ -223,6 +223,7 @@ func BuildEquityDashboard(in *EquityDashboardInput) *model.IndicatorPanel {
 		fmt.Sprintf("top_proximity=%.0f%% bottom_proximity=%.0f%%",
 			calcTopProximity(panel)*100, calcBottomProximity(panel)*100))
 
+	AnnotatePanelProfile(panel, in.Asset)
 	return panel
 }
 

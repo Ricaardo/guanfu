@@ -16,6 +16,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
@@ -434,99 +435,123 @@ func peLabel(pe float64) string {
 
 // BuildEquityVerdict produces a simple multi-domain verdict for equity ETFs.
 func BuildEquityVerdict(panel *model.IndicatorPanel) *Verdict {
+	return BuildProfiledMarketVerdict(panel)
+}
+
+// BuildProfiledMarketVerdict scores shared market-panel domains using the
+// active asset profile's verdict policy. Feature interpretation still lives in
+// engine scoring helpers; domain order, thresholds, and stance language live in
+// pkg/assetprofile.
+func BuildProfiledMarketVerdict(panel *model.IndicatorPanel) *Verdict {
+	policy := marketVerdictPolicy(panel)
 	v := &Verdict{
 		Date:            panel.Date,
 		Confidence:      "中",
-		Domains:         make([]DomainVote, 0),
+		Domains:         make([]DomainVote, 0, len(policy.DomainOrder)),
 		Reasons:         make([]string, 0),
 		CounterEvidence: make([]string, 0),
 		KillCriteria:    make([]string, 0),
 	}
 
-	// Technical domain
-	techVote, techBull, techBear := scoreEquityTechnical(panel.Technical)
-	v.Domains = append(v.Domains, DomainVote{
-		Domain:   "technical",
-		Vote:     techVote,
-		Bullish:  techBull,
-		Bearish:  techBear,
-		Coverage: coverageScore(panel.Technical),
-	})
-
-	// Macro domain
-	macroVote, macroBull, macroBear := scoreEquityMacro(panel.Macro)
-	v.Domains = append(v.Domains, DomainVote{
-		Domain:   "macro",
-		Vote:     macroVote,
-		Bullish:  macroBull,
-		Bearish:  macroBear,
-		Coverage: coverageScore(panel.Macro),
-	})
-
-	// Positioning / options sentiment domain
-	posVote, posBull, posBear := scoreEquityPositioning(panel.Positioning)
-	v.Domains = append(v.Domains, DomainVote{
-		Domain:   "positioning",
-		Vote:     posVote,
-		Bullish:  posBull,
-		Bearish:  posBear,
-		Coverage: coverageScore(panel.Positioning),
-	})
-
-	// Aggregate
-	v.NetDirection = techVote + macroVote + posVote
 	totalCoverage := 0.0
-	domainCount := 0
-	for _, d := range v.Domains {
-		totalCoverage += d.Coverage
-		domainCount++
+	for _, domain := range policy.DomainOrder {
+		vote, bull, bear, coverage := scoreProfiledMarketDomain(panel, domain)
+		v.NetDirection += vote
+		totalCoverage += coverage
+		v.Domains = append(v.Domains, DomainVote{
+			Domain:   domain,
+			Vote:     vote,
+			Bullish:  bull,
+			Bearish:  bear,
+			Coverage: coverage,
+		})
 	}
-	if domainCount > 0 {
-		v.Coverage = totalCoverage / float64(domainCount)
-	}
-
-	// Regime + stance
-	switch {
-	case v.NetDirection >= 3:
-		v.Regime = "趋势偏强"
-		v.Stance = "技术面偏多，宏观配合"
-	case v.NetDirection <= -3:
-		v.Regime = "趋势偏弱"
-		v.Stance = "技术面偏空，需关注宏观转折"
-	default:
-		v.Regime = "震荡/不确定"
-		v.Stance = "方向不明确，需等待信号确认"
+	if len(v.Domains) > 0 {
+		v.Coverage = totalCoverage / float64(len(v.Domains))
 	}
 
-	// Collect reasons
-	if len(techBull) > 0 {
-		v.Reasons = append(v.Reasons, techBull[0])
-	}
-	if len(macroBull) > 0 {
-		v.Reasons = append(v.Reasons, macroBull[0])
-	}
-	if len(techBear) > 0 {
-		v.CounterEvidence = append(v.CounterEvidence, techBear[0])
-	}
-	if len(macroBear) > 0 {
-		v.CounterEvidence = append(v.CounterEvidence, macroBear[0])
-	}
-	if len(posBull) > 0 {
-		v.Reasons = append(v.Reasons, posBull[0])
-	}
-	if len(posBear) > 0 {
-		v.CounterEvidence = append(v.CounterEvidence, posBear[0])
-	}
-
-	if v.Coverage < 0.5 {
-		v.Confidence = "低"
-		v.Stance += " (低覆盖)"
-	}
-
+	applyVerdictPolicy(v, policy)
+	v.Reasons, v.CounterEvidence = pickEvidenceFromVotes(v.Domains, v.NetDirection)
 	v.TopProximity = topProximityFromPanel(panel)
 	v.BottomProximity = bottomProximityFromPanel(panel)
 
 	return v
+}
+
+func marketVerdictPolicy(panel *model.IndicatorPanel) assetprofile.VerdictPolicy {
+	asset := ""
+	if panel != nil {
+		asset = panel.Asset
+		if asset == "" {
+			asset = panel.ProfileKey
+		}
+	}
+	if asset != "" {
+		if policy, ok := assetprofile.VerdictPolicyFor(asset); ok && len(policy.DomainOrder) > 0 {
+			return policy
+		}
+	}
+	policy, _ := assetprofile.VerdictPolicyFor("qqq")
+	if len(policy.DomainOrder) > 0 {
+		return policy
+	}
+	return assetprofile.VerdictPolicy{
+		DomainOrder:          []string{"technical", "macro", "positioning"},
+		BullThreshold:        3,
+		BearThreshold:        -3,
+		BullRegime:           "趋势偏强",
+		NeutralRegime:        "震荡/不确定",
+		BearRegime:           "趋势偏弱",
+		BullStance:           "技术面偏多，宏观配合",
+		NeutralStance:        "方向不明确，需等待信号确认",
+		BearStance:           "技术面偏空，需关注宏观转折",
+		LowCoverageThreshold: 0.5,
+	}
+}
+
+func scoreProfiledMarketDomain(panel *model.IndicatorPanel, domain string) (vote int, bull, bear []string, coverage float64) {
+	switch domain {
+	case "technical":
+		vote, bull, bear = scoreEquityTechnical(panel.Technical)
+		coverage = coverageScore(panel.Technical)
+	case "macro":
+		vote, bull, bear = scoreEquityMacro(panel.Macro)
+		coverage = coverageScore(panel.Macro)
+	case "positioning":
+		vote, bull, bear = scoreEquityPositioning(panel.Positioning)
+		coverage = coverageScore(panel.Positioning)
+	default:
+		coverage = 0
+	}
+	return vote, bull, bear, coverage
+}
+
+func applyVerdictPolicy(v *Verdict, policy assetprofile.VerdictPolicy) {
+	switch {
+	case v.NetDirection >= policy.BullThreshold:
+		v.Regime = policy.BullRegime
+		v.Stance = policy.BullStance
+	case v.NetDirection <= policy.BearThreshold:
+		v.Regime = policy.BearRegime
+		v.Stance = policy.BearStance
+	default:
+		v.Regime = policy.NeutralRegime
+		v.Stance = policy.NeutralStance
+	}
+	if v.Regime == "" {
+		v.Regime = "中性"
+	}
+	if v.Stance == "" {
+		v.Stance = "方向不明确，需等待信号确认"
+	}
+	lowCoverage := policy.LowCoverageThreshold
+	if lowCoverage <= 0 {
+		lowCoverage = 0.5
+	}
+	if v.Coverage < lowCoverage {
+		v.Confidence = "低"
+		v.Stance += " (低覆盖)"
+	}
 }
 
 func scoreEquityTechnical(tech map[string]model.Indicator) (vote int, bull, bear []string) {

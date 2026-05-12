@@ -70,6 +70,39 @@ func TestReadingDomainsFor(t *testing.T) {
 	}
 }
 
+func TestVerdictPolicyFor(t *testing.T) {
+	eq, ok := VerdictPolicyFor("qqq")
+	if !ok {
+		t.Fatal("qqq verdict policy missing")
+	}
+	if eq.Key != "equity_index" || eq.BullThreshold != 3 || !contains(eq.DomainOrder, "positioning") {
+		t.Fatalf("unexpected qqq verdict policy: %+v", eq)
+	}
+	stock, ok := VerdictPolicyFor("stock_aapl")
+	if !ok {
+		t.Fatal("stock verdict policy missing")
+	}
+	if stock.Key != "us_stock" || stock.BullStance == "" {
+		t.Fatalf("unexpected stock verdict policy: %+v", stock)
+	}
+	stock.DomainOrder[0] = "mutated"
+	if got, _ := VerdictPolicyFor("stock_aapl"); got.DomainOrder[0] == "mutated" {
+		t.Fatal("VerdictPolicyFor returned aliased domain order")
+	}
+	for _, asset := range []string{"btc", "qqq", "spy", "gold", "stock_aapl"} {
+		policy, ok := VerdictPolicyFor(asset)
+		if !ok {
+			t.Fatalf("%s verdict policy missing", asset)
+		}
+		if len(policy.DomainOrder) == 0 || policy.BullRegime == "" || policy.NeutralRegime == "" || policy.BearRegime == "" {
+			t.Fatalf("%s verdict policy has incomplete regime metadata: %+v", asset, policy)
+		}
+		if policy.BullStance == "" || policy.NeutralStance == "" || policy.BearStance == "" {
+			t.Fatalf("%s verdict policy has incomplete stance metadata: %+v", asset, policy)
+		}
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, v := range values {
 		if v == want {

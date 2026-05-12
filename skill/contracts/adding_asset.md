@@ -7,7 +7,7 @@ Use this checklist before adding a new core asset or asset class.
 - Asset key and asset class.
 - Price source with enough history for the requested horizons.
 - Source-health policy.
-- Reading lens.
+- Reading lens, including verdict policy and low-coverage behavior.
 - Forecast profile.
 - Skill profile.
 - Backtest plan.
@@ -16,7 +16,8 @@ Use this checklist before adding a new core asset or asset class.
 
 1. Add or reuse a `DataSource` / PriceStore key.
 2. Define the `AssetProfile`.
-3. Define the `ReadingLens`.
+3. Define the `ReadingLens`, including domain metadata, verdict policy, and
+   missing/stale downgrade language.
 4. Define the `ForecastProfile`.
 5. Add a `skill/profiles/<asset-or-class>.md` file.
 6. Register the asset in the asset registry.

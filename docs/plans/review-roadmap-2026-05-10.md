@@ -48,12 +48,16 @@ Current state:
 - Gold and arbitrary US stocks now build shared technical/macro indicators via
   neutral `BuildMarketPanel`; QQQ/SPY retain the explicit `BuildEquityPanel`
   wrapper.
+- Verdict policy metadata now lives in `pkg/assetprofile`: domain order,
+  thresholds, regime labels, stance language, and low-coverage threshold for
+  BTC/equity-index/Gold/US-stock profiles. Engine scoring helpers still own
+  individual indicator interpretation.
 
 Next steps:
 
 - Split raw feature extraction from profile-specific normalization.
-- Move the remaining QQQ/SPY/US-stock verdict policy into profile-owned
-  contracts.
+- Move individual indicator scoring rules out of `engine` and into
+  profile-owned reading contracts.
 - Keep `BuildMarketPanel` free of asset-class semantics; add asset-specific
   wrappers instead of routing new assets through `BuildEquityPanel`.
 

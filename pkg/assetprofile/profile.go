@@ -27,6 +27,7 @@ type Profile struct {
 	DisplayName      string
 	Version          string
 	ReadingDomains   []DomainSpec
+	VerdictPolicy    VerdictPolicy
 	Horizons         []int
 	Reliability      map[int]ReliabilityCell
 	ConformalScale   map[int]float64
@@ -43,6 +44,20 @@ type DomainSpec struct {
 	Purpose string
 }
 
+type VerdictPolicy struct {
+	Key                  string
+	DomainOrder          []string
+	BullThreshold        int
+	BearThreshold        int
+	BullRegime           string
+	NeutralRegime        string
+	BearRegime           string
+	BullStance           string
+	NeutralStance        string
+	BearStance           string
+	LowCoverageThreshold float64
+}
+
 type HorizonWeightBand struct {
 	MaxDays    int
 	Multiplier map[string]float64
@@ -57,6 +72,7 @@ var profiles = map[string]Profile{
 		DisplayName:      "Bitcoin",
 		Version:          version20260511,
 		ReadingDomains:   btcReadingDomains(),
+		VerdictPolicy:    btcVerdictPolicy(),
 		Horizons:         []int{30, 90, 180},
 		FeatureBundle:    "btc_core",
 		ExpectedFeatures: btcExpectedFeatures(),
@@ -74,6 +90,7 @@ var profiles = map[string]Profile{
 		DisplayName:      "Nasdaq-100 ETF",
 		Version:          version20260511,
 		ReadingDomains:   equityReadingDomains(),
+		VerdictPolicy:    equityVerdictPolicy(),
 		Horizons:         []int{30, 63, 90, 180, 252},
 		FeatureBundle:    "equity_index",
 		ExpectedFeatures: equityExpectedFeatures(),
@@ -92,6 +109,7 @@ var profiles = map[string]Profile{
 		DisplayName:      "S&P 500 ETF",
 		Version:          version20260511,
 		ReadingDomains:   equityReadingDomains(),
+		VerdictPolicy:    equityVerdictPolicy(),
 		Horizons:         []int{30, 63, 90, 180, 252},
 		FeatureBundle:    "equity_index",
 		ExpectedFeatures: equityExpectedFeatures(),
@@ -110,6 +128,7 @@ var profiles = map[string]Profile{
 		DisplayName:      "London Gold (XAU/USD)",
 		Version:          version20260511,
 		ReadingDomains:   goldReadingDomains(),
+		VerdictPolicy:    goldVerdictPolicy(),
 		Horizons:         []int{30, 60, 90, 120},
 		FeatureBundle:    "gold",
 		ExpectedFeatures: goldExpectedFeatures(),
@@ -130,12 +149,77 @@ var profiles = map[string]Profile{
 		DisplayName:      "US Stock",
 		Version:          version20260511,
 		ReadingDomains:   usStockReadingDomains(),
+		VerdictPolicy:    usStockVerdictPolicy(),
 		Horizons:         []int{30, 90, 180},
 		FeatureBundle:    "us_stock",
 		ExpectedFeatures: usStockExpectedFeatures(),
 		SkillProfileURI:  "guanfu://skill/profiles/us_stock",
 		HorizonWeights:   defaultHorizonWeights(),
 	},
+}
+
+func btcVerdictPolicy() VerdictPolicy {
+	return VerdictPolicy{
+		Key:                  "btc",
+		DomainOrder:          []string{"cycle", "valuation", "network", "positioning", "macro", "flow", "technical", "cross_asset"},
+		BullThreshold:        4,
+		BearThreshold:        -4,
+		BullRegime:           "风险偏多",
+		NeutralRegime:        "过渡 / 震荡",
+		BearRegime:           "风险偏空",
+		BullStance:           "偏积累倾向",
+		NeutralStance:        "等待",
+		BearStance:           "高防守倾向",
+		LowCoverageThreshold: 0.5,
+	}
+}
+
+func equityVerdictPolicy() VerdictPolicy {
+	return VerdictPolicy{
+		Key:                  "equity_index",
+		DomainOrder:          []string{"technical", "macro", "positioning"},
+		BullThreshold:        3,
+		BearThreshold:        -3,
+		BullRegime:           "趋势偏强",
+		NeutralRegime:        "震荡/不确定",
+		BearRegime:           "趋势偏弱",
+		BullStance:           "技术面偏多，宏观配合",
+		NeutralStance:        "方向不明确，需等待信号确认",
+		BearStance:           "技术面偏空，需关注宏观转折",
+		LowCoverageThreshold: 0.5,
+	}
+}
+
+func goldVerdictPolicy() VerdictPolicy {
+	return VerdictPolicy{
+		Key:                  "gold",
+		DomainOrder:          []string{"technical", "macro", "valuation"},
+		BullThreshold:        3,
+		BearThreshold:        -3,
+		BullRegime:           "偏强积累区",
+		NeutralRegime:        "中性",
+		BearRegime:           "偏弱谨慎区",
+		BullStance:           "实际利率/美元/技术面合力偏多",
+		NeutralStance:        "黄金驱动不一致，等待实际利率/美元/风险偏好确认",
+		BearStance:           "美元或实际利率压力偏强，黄金信号偏弱",
+		LowCoverageThreshold: 0.5,
+	}
+}
+
+func usStockVerdictPolicy() VerdictPolicy {
+	return VerdictPolicy{
+		Key:                  "us_stock",
+		DomainOrder:          []string{"technical", "macro", "positioning"},
+		BullThreshold:        3,
+		BearThreshold:        -3,
+		BullRegime:           "单股环境偏强",
+		NeutralRegime:        "单股环境分歧",
+		BearRegime:           "单股环境偏弱",
+		BullStance:           "技术/宏观/情绪偏多，但仍需核对财报和事件风险",
+		NeutralStance:        "信号不一致；单股结论需等待财报、行业和事件确认",
+		BearStance:           "技术或宏观压力偏强；单股需优先排查基本面和事件风险",
+		LowCoverageThreshold: 0.5,
+	}
 }
 
 func btcReadingDomains() []DomainSpec {
@@ -290,6 +374,14 @@ func ReadingDomainsFor(asset string) []DomainSpec {
 	return cloneDomainSpecs(profiles["btc"].ReadingDomains)
 }
 
+func VerdictPolicyFor(asset string) (VerdictPolicy, bool) {
+	p, ok := For(asset)
+	if !ok || p.VerdictPolicy.Key == "" {
+		return VerdictPolicy{}, false
+	}
+	return cloneVerdictPolicy(p.VerdictPolicy), true
+}
+
 func ReliabilityFor(asset string, days int) (ReliabilityCell, bool) {
 	if strings.TrimSpace(asset) == "" {
 		return ReliabilityCell{}, false
@@ -349,6 +441,7 @@ func normalizeKey(asset string) string {
 
 func cloneProfile(p Profile) Profile {
 	p.ReadingDomains = cloneDomainSpecs(p.ReadingDomains)
+	p.VerdictPolicy = cloneVerdictPolicy(p.VerdictPolicy)
 	p.Horizons = append([]int(nil), p.Horizons...)
 	p.Reliability = cloneReliability(p.Reliability)
 	p.ConformalScale = cloneFloatMap(p.ConformalScale)
@@ -362,6 +455,11 @@ func cloneDomainSpecs(in []DomainSpec) []DomainSpec {
 		return nil
 	}
 	return append([]DomainSpec(nil), in...)
+}
+
+func cloneVerdictPolicy(in VerdictPolicy) VerdictPolicy {
+	in.DomainOrder = append([]string(nil), in.DomainOrder...)
+	return in
 }
 
 func cloneReliability(in map[int]ReliabilityCell) map[int]ReliabilityCell {

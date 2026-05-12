@@ -4,17 +4,18 @@ Every supported asset or asset class must define five contracts.
 
 Code registry: `pkg/assetprofile/profile.go`.
 
-The Go registry is currently authoritative for forecast-side policy:
-canonical key, asset class, display name, profile version, reading domain
-metadata, default horizons, feature bundle key, expected feature names for
-missing-feature diagnostics, static reliability rows, conformal calibration
-scale, horizon-specific weight boosts, and `skill_profile_uri`.
+The Go registry is currently authoritative for profile identity, forecast-side
+policy, and outer reading verdict policy: canonical key, asset class, display
+name, profile version, reading domain metadata, verdict domain order, verdict
+thresholds, regime labels, stance language, low-coverage threshold, default
+horizons, feature bundle key, expected feature names for missing-feature
+diagnostics, static reliability rows, conformal calibration scale,
+horizon-specific weight boosts, and `skill_profile_uri`.
 
-The Markdown profile files remain authoritative for AI reading protocol and
-caveat language until ReadingLens / verdict policy is moved into code-backed
-profiles. Gold is the first partial exception: its verdict semantics are
-already gold-specific in code, while the Markdown profile remains the language
-contract.
+The Markdown profile files remain authoritative for AI reading protocol,
+indicator-level caveat language, and asset-specific interpretation examples.
+Indicator scoring rules and raw feature normalization scales are still being
+migrated out of engine/extractor helpers into profile-backed contracts.
 
 ## 1. Data Contract
 
@@ -36,6 +37,8 @@ contract.
 - threshold rules
 - missing/stale downgrade language
 - verdict aggregation policy
+- verdict domain order, net-direction thresholds, regime labels, stance
+  language, and low-coverage behavior
 
 ## 3. Forecast Contract
 

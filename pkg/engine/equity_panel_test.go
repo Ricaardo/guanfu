@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ricaardo/guanfu/pkg/assetprofile"
 	"github.com/Ricaardo/guanfu/pkg/model"
 )
 
@@ -125,6 +126,23 @@ func TestBuildMarketPanelForStockUsesStockProfile(t *testing.T) {
 	}
 }
 
+func TestBuildEquityDashboardAnnotatesProfile(t *testing.T) {
+	history := generatePriceHistory(250, 400, 0.5)
+	panel := BuildEquityDashboard(&EquityDashboardInput{
+		Asset:        "qqq",
+		Date:         "2026-05-12",
+		Price:        history[0],
+		PriceHistory: history,
+		VIX:          18,
+	})
+	if panel == nil {
+		t.Fatal("expected dashboard panel")
+	}
+	if panel.ProfileKey != "qqq" || panel.SkillProfileURI == "" || !domainMetaHas(panel.DomainMeta, "macro") {
+		t.Fatalf("dashboard profile metadata missing: profile=%q uri=%q domains=%+v", panel.ProfileKey, panel.SkillProfileURI, panel.DomainMeta)
+	}
+}
+
 func TestBuildEquityVerdict_Bullish(t *testing.T) {
 	// Create a strongly bullish panel
 	history := generatePriceHistory(250, 400, 1.0) // strong uptrend
@@ -143,6 +161,77 @@ func TestBuildEquityVerdict_Bullish(t *testing.T) {
 	}
 	if verdict.Coverage <= 0 {
 		t.Fatalf("expected positive coverage, got %f", verdict.Coverage)
+	}
+}
+
+func TestBuildEquityVerdictUsesProfilePolicy(t *testing.T) {
+	panel := &model.IndicatorPanel{
+		Asset: "qqq",
+		Date:  "2026-05-12",
+		Technical: map[string]model.Indicator{
+			"sma_200_dev":  {Value: 15},
+			"momentum_90d": {Value: 12},
+		},
+		Macro: map[string]model.Indicator{
+			"vix_level": {Value: 12},
+		},
+		Positioning: map[string]model.Indicator{
+			"put_call_ratio": {Value: 1.3},
+		},
+	}
+	verdict := BuildEquityVerdict(panel)
+	policy, _ := assetprofile.VerdictPolicyFor("qqq")
+	if verdict.Regime != policy.BullRegime || verdict.Stance != policy.BullStance {
+		t.Fatalf("verdict did not use profile policy: got regime=%q stance=%q policy=%+v", verdict.Regime, verdict.Stance, policy)
+	}
+	if len(verdict.Domains) != len(policy.DomainOrder) {
+		t.Fatalf("domain count = %d, want %d", len(verdict.Domains), len(policy.DomainOrder))
+	}
+	for i, domain := range policy.DomainOrder {
+		if verdict.Domains[i].Domain != domain {
+			t.Fatalf("domain[%d] = %q, want %q", i, verdict.Domains[i].Domain, domain)
+		}
+	}
+}
+
+func TestBuildEquityVerdictWithoutAssetDefaultsToEquityPolicy(t *testing.T) {
+	panel := &model.IndicatorPanel{
+		Date: "2026-05-12",
+		Technical: map[string]model.Indicator{
+			"sma_200_dev":  {Value: 15},
+			"momentum_90d": {Value: 12},
+		},
+		Macro: map[string]model.Indicator{
+			"vix_level": {Value: 12},
+		},
+		Positioning: map[string]model.Indicator{
+			"put_call_ratio": {Value: 1.3},
+		},
+	}
+	verdict := BuildEquityVerdict(panel)
+	policy, _ := assetprofile.VerdictPolicyFor("qqq")
+	if verdict.Regime != policy.BullRegime || len(verdict.Domains) != len(policy.DomainOrder) {
+		t.Fatalf("empty-asset equity verdict should use qqq policy, got %+v", verdict)
+	}
+}
+
+func TestBuildProfiledMarketVerdictForStockUsesStockPolicy(t *testing.T) {
+	panel := &model.IndicatorPanel{
+		Asset: "stock_aapl",
+		Date:  "2026-05-12",
+		Technical: map[string]model.Indicator{
+			"sma_200_dev":  {Value: 15},
+			"momentum_90d": {Value: 12},
+		},
+		Macro: map[string]model.Indicator{
+			"vix_level": {Value: 12},
+		},
+		Positioning: map[string]model.Indicator{},
+	}
+	verdict := BuildProfiledMarketVerdict(panel)
+	policy, _ := assetprofile.VerdictPolicyFor("stock_aapl")
+	if verdict.Regime != policy.BullRegime || verdict.Stance != policy.BullStance {
+		t.Fatalf("stock verdict did not use stock policy: got regime=%q stance=%q policy=%+v", verdict.Regime, verdict.Stance, policy)
 	}
 }
 
@@ -188,6 +277,7 @@ func TestBuildGoldVerdictUsesGoldRiskOffSemantics(t *testing.T) {
 	AnnotatePanelProfile(panel, "gold")
 
 	verdict := BuildGoldVerdict(panel)
+	policy, _ := assetprofile.VerdictPolicyFor("gold")
 	macro := findDomain(verdict, "macro")
 	if macro.Vote <= 0 || len(macro.Bullish) == 0 {
 		t.Fatalf("expected VIX risk-off to be gold-bullish, got %+v", macro)
@@ -197,6 +287,9 @@ func TestBuildGoldVerdictUsesGoldRiskOffSemantics(t *testing.T) {
 	}
 	if verdict.NetDirection <= 0 {
 		t.Fatalf("expected positive gold verdict, got %+v", verdict)
+	}
+	if verdict.Regime != policy.BullRegime || verdict.Stance != policy.BullStance {
+		t.Fatalf("gold verdict did not use profile policy: got regime=%q stance=%q policy=%+v", verdict.Regime, verdict.Stance, policy)
 	}
 }
 
